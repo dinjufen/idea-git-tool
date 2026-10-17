@@ -204,16 +204,6 @@ impl Repository {
     }
 }
 
-impl Repository {
-    fn current_branch(&self) -> Option<String> {
-        let out = self
-            .git
-            .run(&self.root, ["symbolic-ref", "--quiet", "--short", "HEAD"])
-            .ok()?;
-        Some(String::from_utf8_lossy(&out.stdout).trim().to_owned())
-    }
-}
-
 fn log_args(filter: &LogFilter, max_count: u32, has_head: bool) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "log".into(),

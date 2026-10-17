@@ -23,6 +23,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     private let bottomPanel = NSView()
     private lazy var editor = EditorAreaView(model: model)
     private lazy var diffOpener = DiffOpener(model: model, editor: editor)
+    private lazy var operations = GitOperations(model: model)
 
     private lazy var projectToolWindow = ProjectToolWindow(model: model)
     private lazy var commitToolWindow = CommitToolWindow(model: model)
@@ -133,9 +134,18 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         toolbar.refreshButton.action = #selector(refreshStatus(_:))
         toolbar.commitButton.target = self
         toolbar.commitButton.action = #selector(showCommitToolWindow(_:))
-        // Update / Push 在后续步骤接入核心后启用。
-        toolbar.updateButton.isEnabled = false
-        toolbar.pushButton.isEnabled = false
+        toolbar.updateButton.target = self
+        toolbar.updateButton.action = #selector(updateProject(_:))
+        toolbar.pushButton.target = self
+        toolbar.pushButton.action = #selector(pushChanges(_:))
+
+        operations.window = window
+        operations.onProgress = { [weak self] title in
+            guard let self else { return }
+            self.statusBar.setBusy(title != nil || self.model.isRefreshing)
+            if let title { self.statusBar.setMessage(title) }
+        }
+        commitToolWindow.onPushAfterCommit = { [weak self] in self?.operations.push() }
 
         let openFile: (URL) -> Void = { [weak self] url in self?.editor.open(url) }
         projectToolWindow.onOpenFile = openFile
@@ -199,6 +209,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     #if DEBUG
     /// 仅 Debug 构建：启动参数 `-debug.openLocalDiff <相对路径>` 在状态加载后自动打开该文件的本地 Diff，便于界面验证。
     private var debugDiffPath = UserDefaults.standard.string(forKey: "debug.openLocalDiff")
+    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch>` 在状态加载后自动执行对应操作。
+    private var debugAction = UserDefaults.standard.string(forKey: "debug.action")
     #endif
 
     private func modelChanged() {
@@ -207,6 +219,16 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
            let change = model.status.changes.first(where: { $0.path == path }) {
             debugDiffPath = nil
             diffOpener.showLocalChange(change)
+        }
+        if let action = debugAction, !model.isRefreshing, !model.branches.isEmpty {
+            debugAction = nil
+            switch action {
+            case "branches": showBranchesPopup(nil)
+            case "push": operations.push()
+            case "update": operations.updateProject()
+            case "newBranch": operations.newBranch()
+            default: break
+            }
         }
         #endif
         toolbar.vcsWidget.title = model.branchWidgetTitle
@@ -238,7 +260,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         }
         let popover = NSPopover()
         popover.behavior = .transient
-        popover.contentViewController = BranchesPopover(model: model)
+        let controller = BranchesPopover(model: model, operations: operations) { [weak self] in
+            self?.showCommitToolWindow(nil)
+        }
+        controller.popover = popover
+        popover.contentViewController = controller
         popover.show(relativeTo: toolbar.vcsWidget.bounds, of: toolbar.vcsWidget, preferredEdge: .maxY)
         branchesPopover = popover
     }
@@ -281,15 +307,24 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     @objc func findNext(_ sender: Any?) { editor.activeEditor?.findNext() }
     @objc func findPrevious(_ sender: Any?) { editor.activeEditor?.findPrevious() }
 
-    // 以下操作在后续步骤接入 Rust 核心。
-    @objc func pushChanges(_ sender: Any?) {}
-    @objc func updateProject(_ sender: Any?) {}
-    @objc func fetchChanges(_ sender: Any?) {}
+    @objc func pushChanges(_ sender: Any?) { operations.push() }
+    @objc func updateProject(_ sender: Any?) { operations.updateProject() }
+    @objc func fetchChanges(_ sender: Any?) { operations.fetch() }
+    @objc func newBranch(_ sender: Any?) { operations.newBranch() }
+    @objc func checkoutRevision(_ sender: Any?) { operations.checkoutRevisionDialog() }
+    @objc func continueRebase(_ sender: Any?) { operations.continueRebase() }
+    @objc func abortRebase(_ sender: Any?) { operations.abortRebase() }
+    @objc func abortMerge(_ sender: Any?) { operations.abortMerge() }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
-        case #selector(pushChanges(_:)), #selector(updateProject(_:)), #selector(fetchChanges(_:)):
-            false
+        case #selector(pushChanges(_:)), #selector(updateProject(_:)), #selector(fetchChanges(_:)),
+             #selector(newBranch(_:)), #selector(checkoutRevision(_:)):
+            !operations.isRunning
+        case #selector(continueRebase(_:)), #selector(abortRebase(_:)):
+            !operations.isRunning && model.status.state == .rebasing
+        case #selector(abortMerge(_:)):
+            !operations.isRunning && model.status.state == .merging
         case #selector(showFindBar(_:)), #selector(findNext(_:)), #selector(findPrevious(_:)):
             editor.activeEditor != nil
         case #selector(nextDifference(_:)), #selector(previousDifference(_:)):

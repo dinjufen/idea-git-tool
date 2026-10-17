@@ -5,6 +5,7 @@
 
 uniffi::setup_scaffolding!();
 
+mod branch_ops;
 mod commit;
 mod diff;
 mod error;
@@ -12,8 +13,10 @@ pub mod git;
 mod graph;
 mod highlight;
 mod history;
+mod remote;
 mod repo;
 
+pub use branch_ops::{CheckoutMode, CheckoutOutcome, MergeOutcome};
 pub use commit::{CommitOptions, CommitResult};
 pub use diff::{
     DiffBlock, LineChange, LineChangeKind, TextRange, WhitespaceMode, diff_texts, line_changes,
@@ -21,12 +24,16 @@ pub use diff::{
 pub use error::CoreError;
 pub use git::branches::{BranchKind, BranchRef};
 pub use git::log::{ChangedFile, RefKind, RefLabel};
+pub use git::runner::set_askpass_program;
 pub use git::status::{
     BranchStatus, ChangeKind, ConflictKind, FileChange, RepoStatus, RepositoryState,
 };
 pub use graph::{EdgePart, GraphEdge, GraphRow};
 pub use highlight::{HighlightSpan, TokenKind, highlight, language_for_path};
 pub use history::{CommitDetails, LogCommit, LogFilter, LogOrder, LogPage};
+pub use remote::{
+    OutgoingCommit, PushOptions, PushResult, PushTarget, Remote, UpdateMethod, UpdateResult,
+};
 pub use repo::{GitInfo, Repository, git_info};
 
 /// 核心库版本，用于 About 对话框与诊断信息。

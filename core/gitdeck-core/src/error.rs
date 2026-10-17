@@ -31,6 +31,51 @@ pub enum CoreError {
 
     #[error("no files selected to commit")]
     NothingToCommit,
+
+    #[error("invalid branch name: {name}")]
+    InvalidBranchName { name: String },
+
+    /// 签出、合并等操作会覆盖未提交的改动；UI 据此提供 Smart / Force 选项。
+    #[error("local changes would be overwritten: {files:?}")]
+    LocalChangesWouldBeOverwritten { files: Vec<String> },
+
+    #[error("branch {name} is not fully merged")]
+    BranchNotFullyMerged { name: String },
+
+    #[error("branch {branch} has no upstream branch")]
+    NoUpstream { branch: String },
+
+    #[error("HEAD is detached")]
+    DetachedHead,
+
+    #[error("push rejected: {reason}")]
+    PushRejected { reason: String },
+
+    #[error("authentication failed: {detail}")]
+    AuthenticationFailed { detail: String },
+}
+
+impl CoreError {
+    /// 把常见的网络认证失败从通用的命令失败中识别出来。
+    pub(crate) fn classify_remote(self) -> Self {
+        match self {
+            CoreError::CommandFailed { stderr, .. }
+                if [
+                    "Authentication failed",
+                    "could not read Username",
+                    "could not read Password",
+                    "terminal prompts disabled",
+                    "Permission denied (publickey",
+                    "HTTP Basic: Access denied",
+                ]
+                .iter()
+                .any(|needle| stderr.contains(needle)) =>
+            {
+                CoreError::AuthenticationFailed { detail: stderr }
+            }
+            other => other,
+        }
+    }
 }
 
 impl From<std::io::Error> for CoreError {

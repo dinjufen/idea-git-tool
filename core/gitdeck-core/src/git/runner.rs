@@ -8,6 +8,7 @@ use std::fmt;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::RwLock;
 
 use crate::error::{CoreError, Result};
 
@@ -186,10 +187,39 @@ const STABLE_OUTPUT_CONFIG: &[&str] = &[
     "--literal-pathspecs",
 ];
 
+/// 认证提示程序（askpass）。设置后 git 与 ssh 需要用户名、密码或口令时会调用它，
+/// 由客户端弹出原生输入框（对应 IDEA 内置的 askpass）。
+static ASKPASS: RwLock<Option<PathBuf>> = RwLock::new(None);
+
+/// 子进程中标记“作为 askpass 被调用”的环境变量，客户端据此进入输入框模式而非启动主界面。
+pub const ASKPASS_MARKER_ENV: &str = "GITDECK_ASKPASS";
+
+/// 设置 askpass 程序路径；传 `None` 取消。客户端启动时用自身可执行文件调用一次。
+#[uniffi::export]
+pub fn set_askpass_program(path: Option<String>) {
+    *ASKPASS.write().unwrap_or_else(|e| e.into_inner()) = path.map(PathBuf::from);
+}
+
+/// 根据当前 askpass 设置需要注入的环境变量。
+fn askpass_env() -> Vec<(&'static str, std::ffi::OsString)> {
+    let guard = ASKPASS.read().unwrap_or_else(|e| e.into_inner());
+    let Some(program) = guard.as_ref() else {
+        return Vec::new();
+    };
+    vec![
+        ("GIT_ASKPASS", program.clone().into_os_string()),
+        ("SSH_ASKPASS", program.clone().into_os_string()),
+        // OpenSSH 8.4+：没有终端时也使用 SSH_ASKPASS（口令、主机指纹确认）。
+        ("SSH_ASKPASS_REQUIRE", "force".into()),
+        (ASKPASS_MARKER_ENV, "1".into()),
+    ]
+}
+
 fn base_command(path: &Path) -> Command {
     let mut cmd = Command::new(path);
+    cmd.envs(askpass_env());
     cmd
-        // 不允许 git 在后台弹出终端交互，认证统一由客户端的 askpass 处理（后续实现）。
+        // 不允许 git 在终端中交互；需要凭据时只通过 askpass 询问。
         .env("GIT_TERMINAL_PROMPT", "0")
         // 错误信息保持英文，便于按内容识别错误类型。
         .env("LANGUAGE", "C")
@@ -245,6 +275,24 @@ mod tests {
     fn rejects_unrelated_output() {
         assert_eq!(GitVersion::parse("hg version 6.0"), None);
         assert_eq!(GitVersion::parse("git version"), None);
+    }
+
+    #[test]
+    fn askpass_env_follows_setting() {
+        set_askpass_program(Some(
+            "/Applications/GitDeck.app/Contents/MacOS/GitDeck".into(),
+        ));
+        let env = askpass_env();
+        assert!(
+            env.iter().any(|(k, v)| *k == "GIT_ASKPASS"
+                && v == "/Applications/GitDeck.app/Contents/MacOS/GitDeck")
+        );
+        assert!(
+            env.iter()
+                .any(|(k, v)| *k == ASKPASS_MARKER_ENV && v == "1")
+        );
+        set_askpass_program(None);
+        assert!(askpass_env().is_empty());
     }
 
     #[test]

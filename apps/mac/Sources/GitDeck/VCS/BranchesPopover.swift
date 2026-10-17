@@ -4,18 +4,25 @@ import GitDeckCore
 /// VCS 分支组件弹出的 Branches 弹窗：搜索框、常用操作、本地分支与远程分支。
 final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     private enum Row {
-        case action(title: String, symbol: String, shortcut: String?)
+        case action(title: String, symbol: String, shortcut: String?, run: @MainActor () -> Void)
         case section(String)
         case branch(BranchRef)
     }
 
+    /// 弹窗所在的 popover；执行操作前先关闭，使后续对话框附着在项目窗口上。
+    weak var popover: NSPopover?
+
     private let model: ProjectModel
+    private let operations: GitOperations
+    private let onCommit: @MainActor () -> Void
     private let search = NSSearchField()
     private let table = NSTableView()
     private var rows: [Row] = []
 
-    init(model: ProjectModel) {
+    init(model: ProjectModel, operations: GitOperations, onCommit: @escaping @MainActor () -> Void) {
         self.model = model
+        self.operations = operations
+        self.onCommit = onCommit
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -76,12 +83,26 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
         let matches: (BranchRef) -> Bool = { query.isEmpty || $0.name.lowercased().contains(query) }
         rows = []
         if query.isEmpty {
+            let ops = operations
+            // 合并 / 变基进行中时，与 IDEA 一样在最上方提供继续与中止操作。
+            switch model.status.state {
+            case .rebasing:
+                rows += [
+                    .action(title: tr("git.action.continueRebase"), symbol: "play", shortcut: nil, run: { ops.continueRebase() }),
+                    .action(title: tr("git.action.abortRebase"), symbol: "xmark.circle", shortcut: nil, run: { ops.abortRebase() }),
+                ]
+            case .merging:
+                rows.append(.action(title: tr("git.action.abortMerge"), symbol: "xmark.circle", shortcut: nil, run: { ops.abortMerge() }))
+            default:
+                break
+            }
+            let commit = onCommit
             rows += [
-                .action(title: tr("git.action.update"), symbol: "arrow.down.left", shortcut: "⌘T"),
-                .action(title: tr("git.action.commit"), symbol: "checkmark", shortcut: "⌘K"),
-                .action(title: tr("git.action.push"), symbol: "arrow.up.right", shortcut: "⇧⌘K"),
-                .action(title: tr("branches.action.new"), symbol: "plus", shortcut: "⌥⌘N"),
-                .action(title: tr("branches.action.checkoutRevision"), symbol: "tag", shortcut: nil),
+                .action(title: tr("git.action.update"), symbol: "arrow.down.left", shortcut: "⌘T", run: { ops.updateProject() }),
+                .action(title: tr("git.action.commit"), symbol: "checkmark", shortcut: "⌘K", run: commit),
+                .action(title: tr("git.action.push"), symbol: "arrow.up.right", shortcut: "⇧⌘K", run: { ops.push() }),
+                .action(title: tr("branches.action.new"), symbol: "plus", shortcut: "⌥⌘N", run: { ops.newBranch() }),
+                .action(title: tr("branches.action.checkoutRevision"), symbol: "tag", shortcut: nil, run: { ops.checkoutRevisionDialog() }),
             ]
         }
         let local = model.branches.filter { $0.kind == .local && matches($0) }
@@ -100,44 +121,69 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
 
     @objc private func rowClicked() {
         let row = table.clickedRow
-        guard rows.indices.contains(row), case let .branch(branch) = rows[row],
-              let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) else { return }
-        branchMenu(for: branch).popUp(positioning: nil, at: NSPoint(x: cell.bounds.maxX - 20, y: cell.bounds.midY), in: cell)
+        guard rows.indices.contains(row) else { return }
+        switch rows[row] {
+        case let .action(_, _, _, run):
+            popover?.close()
+            run()
+        case let .branch(branch):
+            guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) else { return }
+            branchMenu(for: branch).popUp(positioning: nil, at: NSPoint(x: cell.bounds.maxX - 20, y: cell.bounds.midY), in: cell)
+        case .section:
+            break
+        }
     }
 
-    /// 分支操作菜单；各操作在后续阶段接入核心实现。
+    /// 分支操作菜单，项目与 IDEA 的分支子菜单一致；暂未实现的项显示为禁用。
     private func branchMenu(for branch: BranchRef) -> NSMenu {
         let menu = NSMenu()
+        menu.autoenablesItems = false
         let name = branch.name
         let current = model.currentBranchTitle
-        var titles: [String?] = [
-            tr("branches.menu.checkout"),
-            tr("branches.menu.newFrom", name),
-            tr("branches.menu.checkoutAndRebase", current),
-            nil,
-            tr("branches.menu.compare", current),
-            tr("branches.menu.showDiff"),
-            nil,
-            tr("branches.menu.rebaseOnto", current, name),
-            tr("branches.menu.mergeInto", name, current),
-            nil,
-        ]
-        if branch.kind == .local {
-            titles += [tr("branches.menu.update"), tr("branches.menu.push"), nil, tr("branches.menu.rename"), tr("branches.menu.delete")]
-        } else {
-            titles += [tr("branches.menu.pull", name, current), tr("branches.menu.delete")]
-        }
-        for title in titles {
-            guard let title else {
-                menu.addItem(.separator())
-                continue
-            }
+        let isCurrent = branch.isCurrent
+        let ops = operations
+
+        func add(_ title: String, enabled: Bool = true, _ action: (@MainActor () -> Void)?) {
             let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            item.toolTip = tr("common.notImplemented")
+            if let action, enabled {
+                let handler = MenuAction { [weak self] in
+                    self?.popover?.close()
+                    action()
+                }
+                item.target = handler
+                item.action = #selector(MenuAction.invoke)
+                item.representedObject = handler
+            } else {
+                item.isEnabled = false
+                if action == nil { item.toolTip = tr("common.notImplemented") }
+            }
             menu.addItem(item)
         }
-        menu.autoenablesItems = false
+
+        if branch.kind == .local {
+            add(tr("branches.menu.checkout"), enabled: !isCurrent) { ops.checkout(.local(name)) }
+        } else {
+            add(tr("branches.menu.checkout")) { ops.checkout(.remote(name)) }
+        }
+        add(tr("branches.menu.newFrom", name)) { ops.newBranch(from: name) }
+        add(tr("branches.menu.checkoutAndRebase", current), nil)
+        menu.addItem(.separator())
+        add(tr("branches.menu.compare", current), nil)
+        add(tr("branches.menu.showDiff"), nil)
+        menu.addItem(.separator())
+        add(tr("branches.menu.rebaseOnto", current, name), enabled: !isCurrent) { ops.rebase(onto: name) }
+        add(tr("branches.menu.mergeInto", name, current), enabled: !isCurrent) { ops.merge(name) }
+        menu.addItem(.separator())
+        if branch.kind == .local {
+            add(tr("branches.menu.update"), nil)
+            add(tr("branches.menu.push"), enabled: isCurrent) { ops.push() }
+            menu.addItem(.separator())
+            add(tr("branches.menu.rename")) { ops.rename(name) }
+            add(tr("branches.menu.delete"), enabled: !isCurrent) { ops.delete(name) }
+        } else {
+            add(tr("branches.menu.pull", name, current)) { ops.merge(name) }
+            add(tr("branches.menu.delete"), nil)
+        }
         return menu
     }
 
@@ -160,8 +206,8 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
         case let .section(title):
             let label = NSTextField.label(title, font: .systemFont(ofSize: 11, weight: .semibold), color: Theme.secondaryText)
             return wrap(label, leading: 12)
-        case let .action(title, symbol, shortcut):
-            return BranchRowView(symbol: symbol, title: title, detail: shortcut, enabled: false)
+        case let .action(title, symbol, shortcut, _):
+            return BranchRowView(symbol: symbol, title: title, detail: shortcut, enabled: true)
         case let .branch(branch):
             var detail: [String] = []
             if branch.ahead > 0 { detail.append("↑\(branch.ahead)") }
@@ -212,4 +258,18 @@ private final class BranchRowView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+}
+
+/// 以闭包作为菜单项动作；由菜单项的 representedObject 持有。
+@MainActor
+final class MenuAction: NSObject {
+    private let block: @MainActor () -> Void
+
+    init(_ block: @escaping @MainActor () -> Void) {
+        self.block = block
+    }
+
+    @objc func invoke() {
+        block()
+    }
 }

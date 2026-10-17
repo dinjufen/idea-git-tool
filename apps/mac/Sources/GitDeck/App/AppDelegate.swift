@@ -8,6 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppearanceSetting.current.apply()
+        // git / ssh 需要凭据时调用本程序弹出输入框（见 AskPass）。
+        setAskpassProgram(path: Bundle.main.executablePath)
         NSApp.mainMenu = MainMenu.build()
         checkGitAvailable()
 

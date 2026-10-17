@@ -5,6 +5,8 @@ import GitDeckCore
 final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     var onOpenFile: ((URL) -> Void)?
     var onShowDiff: ((FileChange) -> Void)?
+    /// “提交并推送” 成功提交后打开 Push 对话框。
+    var onPushAfterCommit: (() -> Void)?
 
     /// 变更树的分组节点，顺序与 IDEA 一致。
     final class Group {
@@ -49,6 +51,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     private var signOff = false
     private var runHooks = true
     private var isCommitting = false
+    private var pushAfterCommit = false
     /// 勾选 Amend 时自动填入的上一次提交信息；取消勾选时若未被修改则清空。
     private var amendPrefill: String?
 
@@ -128,8 +131,8 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         commitButton.toolTip = tr("commit.button.commit.tooltip")
         // 推送在后续步骤实现，届时“提交并推送”会在提交成功后打开 Push 对话框。
         commitPushButton.bezelStyle = .push
-        commitPushButton.isEnabled = false
-        commitPushButton.toolTip = tr("common.notImplemented")
+        commitPushButton.target = self
+        commitPushButton.action = #selector(commitAndPush)
         amendCheckbox.target = self
         amendCheckbox.action = #selector(amendToggled)
         optionsButton.target = self
@@ -237,6 +240,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         let hasMessage = !messageView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasFiles = !included.isEmpty || amendCheckbox.state == .on
         commitButton.isEnabled = hasMessage && hasFiles && !isCommitting
+        commitPushButton.isEnabled = commitButton.isEnabled
     }
 
     @objc private func amendToggled() {
@@ -273,8 +277,16 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     @objc private func toggleSignOff() { signOff.toggle() }
     @objc private func toggleHooks() { runHooks.toggle() }
 
+    @objc private func commitAndPush() {
+        guard commitButton.isEnabled else { return }
+        pushAfterCommit = true
+        commit()
+    }
+
     @objc private func commit() {
         guard commitButton.isEnabled else { return }
+        let pushAfter = pushAfterCommit
+        pushAfterCommit = false
         // 只提交仍存在于当前变更中的勾选文件。
         let paths = model.status.changes.map(\.path).filter { included.contains($0) }
         let options = CommitOptions(
@@ -307,6 +319,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
                     ? tr("commit.done.one", commit.subject)
                     : tr("commit.done.many", "\(commit.fileCount)", commit.subject)
                 self.model.post(text)
+                if pushAfter { self.onPushAfterCommit?() }
             case let .failure(error):
                 // 钩子输出等错误信息较长，用对话框完整展示。
                 let alert = NSAlert()

@@ -34,6 +34,7 @@
 - **mac UI 框架**：以 AppKit 为主（`NSOutlineView` / `NSTableView` 承载变更树、Log 图等大数据量视图），简单对话框和设置页用 SwiftUI。
 - **Win UI 框架**：WinUI 3 + Windows App SDK，打包为 MSIX，同时提供 x64 与 arm64 两个包。
 - **构建**：Rust 核心编译为静态库（mac：`aarch64-apple-darwin`；Win：`x86_64-pc-windows-msvc` 与 `aarch64-pc-windows-msvc`）。
+- **远程认证**：与 IDEA 内置 askpass 相同的思路——客户端把自身可执行文件设为 `GIT_ASKPASS` / `SSH_ASKPASS`（并设 `SSH_ASKPASS_REQUIRE=force`），被 git 调用时只弹出原生输入框并把输入写回 git，不保存凭据；系统已配置的 credential helper（如 macOS 钥匙串）仍优先生效。
 - **本机环境**：使用 `/Applications/Xcode-beta.app`，构建时通过 `DEVELOPER_DIR` 指定，不改动系统级 `xcode-select`。
 
 ## 分期

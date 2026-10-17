@@ -43,6 +43,20 @@ extension CoreError {
             tr("error.emptyCommitMessage")
         case .NothingToCommit:
             tr("error.nothingToCommit")
+        case let .InvalidBranchName(name):
+            tr("ops.error.invalidName", name)
+        case let .LocalChangesWouldBeOverwritten(files):
+            tr("ops.error.overwritten", files.joined(separator: "\n"))
+        case let .BranchNotFullyMerged(name):
+            tr("ops.delete.notMerged.title", name)
+        case let .NoUpstream(branch):
+            tr("ops.error.noUpstream", branch)
+        case .DetachedHead:
+            tr("ops.error.detachedHead")
+        case let .PushRejected(reason):
+            tr("ops.error.pushRejected", reason)
+        case let .AuthenticationFailed(detail):
+            tr("ops.error.auth", detail)
         }
     }
 }

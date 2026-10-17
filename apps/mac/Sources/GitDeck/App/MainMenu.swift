@@ -108,6 +108,12 @@ enum MainMenu {
         menu.addItem(item(tr("git.action.fetch"), #selector(ProjectWindowController.fetchChanges(_:)), ""))
         menu.addItem(.separator())
         menu.addItem(item(tr("git.action.branches"), #selector(ProjectWindowController.showBranchesPopup(_:)), "b", [.command, .control]))
+        menu.addItem(item(tr("branches.action.new"), #selector(ProjectWindowController.newBranch(_:)), "n", [.command, .option]))
+        menu.addItem(item(tr("branches.action.checkoutRevision"), #selector(ProjectWindowController.checkoutRevision(_:)), ""))
+        menu.addItem(.separator())
+        menu.addItem(item(tr("git.action.continueRebase"), #selector(ProjectWindowController.continueRebase(_:)), ""))
+        menu.addItem(item(tr("git.action.abortRebase"), #selector(ProjectWindowController.abortRebase(_:)), ""))
+        menu.addItem(item(tr("git.action.abortMerge"), #selector(ProjectWindowController.abortMerge(_:)), ""))
         menu.addItem(.separator())
         menu.addItem(item(tr("git.action.refresh"), #selector(ProjectWindowController.refreshStatus(_:)), "r", [.command, .option]))
         return menu
