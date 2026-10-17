@@ -1,0 +1,20 @@
+[package]
+name = "gitdeck-core"
+description = "GitDeck 共享核心：git CLI 调用与解析、diff/合并、AI 评审"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# lib: Rust 测试与内部使用；staticlib: 链接进 mac/Win 应用；cdylib: 供 uniffi-bindgen 读取元数据
+crate-type = ["lib", "staticlib", "cdylib"]
+name = "gitdeck_core"
+
+[dependencies]
+uniffi.workspace = true
+thiserror.workspace = true
+which.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,10 @@
+[package]
+name = "uniffi-bindgen"
+description = "为 gitdeck-core 生成 Swift / C# 绑定的命令行工具"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+uniffi = { workspace = true, features = ["cli"] }

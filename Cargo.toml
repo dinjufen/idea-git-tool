@@ -1,0 +1,20 @@
+[workspace]
+resolver = "3"
+members = ["core/gitdeck-core", "core/uniffi-bindgen"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "LicenseRef-Proprietary"
+publish = false
+
+[workspace.dependencies]
+uniffi = "0.32"
+thiserror = "2"
+which = "8"
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"

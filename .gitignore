@@ -1,0 +1,16 @@
+# Rust
+/target/
+
+# Swift / Xcode
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# 生成物（由 scripts/build-core-mac.sh 生成）
+/apps/mac/Generated/
+/build/
+
+# macOS
+.DS_Store

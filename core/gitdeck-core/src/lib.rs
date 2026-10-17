@@ -1,0 +1,21 @@
+//! GitDeck 共享核心。
+//!
+//! 经 UniFFI 为 macOS（Swift）与 Windows（C#）生成绑定，
+//! 两端 UI 只负责展示与交互，git 调用、解析与业务逻辑都在这里。
+
+uniffi::setup_scaffolding!();
+
+mod error;
+pub mod git;
+mod repo;
+
+pub use error::CoreError;
+pub use git::branches::{BranchKind, BranchRef};
+pub use git::status::{BranchStatus, ChangeKind, ConflictKind, FileChange, RepoStatus};
+pub use repo::{GitInfo, Repository, git_info};
+
+/// 核心库版本，用于 About 对话框与诊断信息。
+#[uniffi::export]
+pub fn core_version() -> String {
+    env!("CARGO_PKG_VERSION").to_owned()
+}

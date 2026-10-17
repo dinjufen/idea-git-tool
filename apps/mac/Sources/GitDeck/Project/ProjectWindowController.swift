@@ -1,0 +1,320 @@
+import AppKit
+import GitDeckCore
+
+/// 项目主窗口，布局对齐 IDEA New UI：
+///
+/// ```
+/// ┌ 主工具栏（项目组件 · VCS 分支组件 · 操作按钮）────────────┐
+/// │ 图标条 │ 左侧工具窗口 │ 编辑器区域                          │
+/// │        ├──────────────┴──────────────────────────────────── │
+/// │        │ 底部工具窗口（Git: Log / Console）                  │
+/// └ 状态栏 ─────────────────────────────────────────────────────┘
+/// ```
+final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSplitViewDelegate, NSMenuItemValidation {
+    let model: ProjectModel
+    var onClose: (() -> Void)?
+
+    private let toolbar = MainToolbarView()
+    private let stripe = ToolWindowStripe(top: [.project, .commit], bottom: [.git])
+    private let statusBar = StatusBarView()
+    private let verticalSplit = NSSplitView()
+    private let horizontalSplit = NSSplitView()
+    private let leftPanel = NSView()
+    private let bottomPanel = NSView()
+    private let editor = EditorAreaView()
+
+    private lazy var projectToolWindow = ProjectToolWindow(model: model)
+    private lazy var commitToolWindow = CommitToolWindow(model: model)
+    private lazy var gitToolWindow = GitToolWindow()
+
+    // 工具窗口布局在各项目间共用并持久化，与 IDEA 重启后恢复布局的行为一致。
+    private var leftToolWindow: ToolWindowID? = ToolWindowLayout.left {
+        didSet { ToolWindowLayout.left = leftToolWindow }
+    }
+
+    private var bottomVisible = ToolWindowLayout.bottomVisible {
+        didSet { ToolWindowLayout.bottomVisible = bottomVisible }
+    }
+    private var leftWidth: CGFloat = 300
+    private var bottomHeight: CGFloat = 260
+    private var observer: UUID?
+    private var branchesPopover: NSPopover?
+
+    init(repository: Repository) {
+        model = ProjectModel(repository: repository)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.minSize = NSSize(width: 720, height: 480)
+        window.backgroundColor = Theme.headerBackground
+        window.title = model.projectName
+        window.representedURL = model.rootURL
+        window.tabbingMode = .disallowed
+        super.init(window: window)
+        window.delegate = self
+        window.setFrameAutosaveName("project:" + model.rootURL.path)
+        if !window.setFrameUsingName(window.frameAutosaveName) { window.center() }
+
+        buildLayout()
+        wireActions()
+        observer = model.observe { [weak self] in self?.modelChanged() }
+        applyToolWindowState()
+        model.refresh()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    // MARK: - 布局
+
+    private func buildLayout() {
+        guard let content = window?.contentView else { return }
+        toolbar.setProjectName(model.projectName)
+
+        horizontalSplit.isVertical = true
+        horizontalSplit.dividerStyle = .thin
+        horizontalSplit.delegate = self
+        horizontalSplit.addArrangedSubview(leftPanel)
+        horizontalSplit.addArrangedSubview(editor)
+        horizontalSplit.setHoldingPriority(.defaultHigh, forSubviewAt: 0)
+        horizontalSplit.setHoldingPriority(.defaultLow, forSubviewAt: 1)
+
+        verticalSplit.isVertical = false
+        verticalSplit.dividerStyle = .thin
+        verticalSplit.delegate = self
+        verticalSplit.addArrangedSubview(horizontalSplit)
+        verticalSplit.addArrangedSubview(bottomPanel)
+        verticalSplit.setHoldingPriority(.defaultLow, forSubviewAt: 0)
+        verticalSplit.setHoldingPriority(.defaultHigh, forSubviewAt: 1)
+        verticalSplit.translatesAutoresizingMaskIntoConstraints = false
+
+        bottomPanel.addSubview(gitToolWindow)
+        gitToolWindow.pinEdges(to: bottomPanel)
+
+        let stripeDivider = SeparatorLine(.vertical)
+        for view in [toolbar, stripe, stripeDivider, verticalSplit, statusBar] as [NSView] { content.addSubview(view) }
+        NSLayoutConstraint.activate([
+            toolbar.topAnchor.constraint(equalTo: content.topAnchor),
+            toolbar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+
+            stripe.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            stripe.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            stripe.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+            stripeDivider.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            stripeDivider.leadingAnchor.constraint(equalTo: stripe.trailingAnchor),
+            stripeDivider.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+
+            verticalSplit.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            verticalSplit.leadingAnchor.constraint(equalTo: stripeDivider.trailingAnchor),
+            verticalSplit.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            verticalSplit.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+
+            statusBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            statusBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            statusBar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+        ])
+    }
+
+    private func wireActions() {
+        stripe.onToggle = { [weak self] id in self?.toggle(id) }
+        toolbar.vcsWidget.target = self
+        toolbar.vcsWidget.action = #selector(showBranchesPopup(_:))
+        toolbar.projectWidget.target = self
+        toolbar.projectWidget.action = #selector(showProjectMenu(_:))
+        toolbar.refreshButton.target = self
+        toolbar.refreshButton.action = #selector(refreshStatus(_:))
+        toolbar.commitButton.target = self
+        toolbar.commitButton.action = #selector(showCommitToolWindow(_:))
+        // Update / Push 在后续步骤接入核心后启用。
+        toolbar.updateButton.isEnabled = false
+        toolbar.pushButton.isEnabled = false
+
+        let openFile: (URL) -> Void = { [weak self] url in self?.editor.open(url) }
+        projectToolWindow.onOpenFile = openFile
+        commitToolWindow.onOpenFile = openFile
+        editor.onCaretChange = { [weak self] info in self?.statusBar.setEditorInfo(info) }
+    }
+
+    // MARK: - 工具窗口
+
+    /// 点击图标条：同一位置只显示一个工具窗口，再次点击已激活的按钮则隐藏。
+    private func toggle(_ id: ToolWindowID) {
+        switch id.anchor {
+        case .left:
+            leftToolWindow = leftToolWindow == id ? nil : id
+        case .bottom:
+            bottomVisible.toggle()
+        }
+        applyToolWindowState()
+    }
+
+    private func show(_ id: ToolWindowID) {
+        switch id.anchor {
+        case .left: leftToolWindow = id
+        case .bottom: bottomVisible = true
+        }
+        applyToolWindowState()
+    }
+
+    private func applyToolWindowState() {
+        if !leftPanel.isHidden, leftPanel.frame.width > 0 { leftWidth = leftPanel.frame.width }
+        if !bottomPanel.isHidden, bottomPanel.frame.height > 0 { bottomHeight = bottomPanel.frame.height }
+
+        leftPanel.subviews.forEach { $0.removeFromSuperview() }
+        if let id = leftToolWindow {
+            let view: NSView = id == .commit ? commitToolWindow : projectToolWindow
+            leftPanel.addSubview(view)
+            view.pinEdges(to: leftPanel)
+        }
+        leftPanel.isHidden = leftToolWindow == nil
+        bottomPanel.isHidden = !bottomVisible
+        // 首次调用时窗口尚未布局，分割视图尺寸为 0，需先布局才能设置分隔条位置。
+        window?.contentView?.layoutSubtreeIfNeeded()
+        horizontalSplit.adjustSubviews()
+        verticalSplit.adjustSubviews()
+        if !leftPanel.isHidden { horizontalSplit.setPosition(leftWidth, ofDividerAt: 0) }
+        if !bottomPanel.isHidden { verticalSplit.setPosition(verticalSplit.bounds.height - bottomHeight, ofDividerAt: 0) }
+
+        var active = Set<ToolWindowID>()
+        if let id = leftToolWindow { active.insert(id) }
+        if bottomVisible { active.insert(.git) }
+        stripe.setActive(active)
+    }
+
+    // MARK: - 模型变化
+
+    private func modelChanged() {
+        toolbar.vcsWidget.title = model.currentBranchTitle
+        statusBar.setBusy(model.isRefreshing)
+        if let error = model.lastError {
+            statusBar.setMessage(error, isError: true)
+        } else if !model.isRefreshing {
+            let count = model.status.changes.filter { !$0.isIgnored }.count
+            var parts = [tr("status.changes", "\(count)")]
+            if let upstream = model.status.branch.upstream {
+                parts.append(tr("status.tracking", upstream, "\(model.status.branch.ahead)", "\(model.status.branch.behind)"))
+            }
+            statusBar.setMessage(parts.joined(separator: "  ·  "))
+        }
+    }
+
+    // MARK: - 动作（菜单与工具栏）
+
+    @objc func showProjectToolWindow(_ sender: Any?) { show(.project) }
+
+    @objc func showCommitToolWindow(_ sender: Any?) {
+        show(.commit)
+        commitToolWindow.focusMessage()
+    }
+
+    @objc func showGitToolWindow(_ sender: Any?) { show(.git) }
+
+    @objc func refreshStatus(_ sender: Any?) { model.refresh() }
+
+    @objc func showBranchesPopup(_ sender: Any?) {
+        if let popover = branchesPopover, popover.isShown {
+            popover.close()
+            return
+        }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = BranchesPopover(model: model)
+        popover.show(relativeTo: toolbar.vcsWidget.bounds, of: toolbar.vcsWidget, preferredEdge: .maxY)
+        branchesPopover = popover
+    }
+
+    @objc private func showProjectMenu(_ sender: Any?) {
+        let menu = NSMenu()
+        for path in RecentProjects.shared.paths.prefix(10) where path != model.rootURL.path {
+            let item = NSMenuItem(title: (path as NSString).lastPathComponent, action: #selector(openRecent(_:)), keyEquivalent: "")
+            item.representedObject = path
+            item.toolTip = path
+            item.target = self
+            menu.addItem(item)
+        }
+        if !menu.items.isEmpty { menu.addItem(.separator()) }
+        menu.addItem(withTitle: tr("menu.file.new"), action: #selector(AppDelegate.newProject(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: tr("menu.file.open"), action: #selector(AppDelegate.openDocument(_:)), keyEquivalent: "")
+        let widget = toolbar.projectWidget
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: widget.bounds.height + 4), in: widget)
+    }
+
+    @objc private func openRecent(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        (NSApp.delegate as? AppDelegate)?.openProject(at: URL(fileURLWithPath: path))
+    }
+
+    @objc func saveDocument(_ sender: Any?) {
+        do {
+            try editor.saveActive()
+            model.refresh()
+        } catch {
+            statusBar.setMessage(error.localizedDescription, isError: true)
+        }
+    }
+
+    @objc func closeEditorTab(_ sender: Any?) { editor.closeActive() }
+
+    // 以下操作在后续步骤接入 Rust 核心。
+    @objc func pushChanges(_ sender: Any?) {}
+    @objc func updateProject(_ sender: Any?) {}
+    @objc func fetchChanges(_ sender: Any?) {}
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(pushChanges(_:)), #selector(updateProject(_:)), #selector(fetchChanges(_:)):
+            false
+        default:
+            true
+        }
+    }
+
+    // MARK: - NSWindowDelegate
+
+    func windowWillClose(_ notification: Notification) {
+        if let observer { model.removeObserver(observer) }
+        onClose?()
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        // 与 IDEA 一致：窗口重新获得焦点时刷新 VCS 状态（文件监听在后续步骤加入）。
+        model.refresh()
+    }
+
+    // MARK: - NSSplitViewDelegate
+
+    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        splitView === horizontalSplit ? 180 : 200
+    }
+
+    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        let total = splitView.isVertical ? splitView.bounds.width : splitView.bounds.height
+        return splitView === horizontalSplit ? total - 300 : total - 120
+    }
+}
+
+/// 工具窗口布局的持久化（UserDefaults）。
+private enum ToolWindowLayout {
+    private static let leftKey = "toolWindow.left"
+    private static let bottomKey = "toolWindow.bottomVisible"
+
+    static var left: ToolWindowID? {
+        get {
+            // 未设置过时默认打开 Project；显式关闭时保存为空串。
+            guard let raw = UserDefaults.standard.string(forKey: leftKey) else { return .project }
+            return ToolWindowID(rawValue: raw)
+        }
+        set { UserDefaults.standard.set(newValue?.rawValue ?? "", forKey: leftKey) }
+    }
+
+    static var bottomVisible: Bool {
+        get { UserDefaults.standard.bool(forKey: bottomKey) }
+        set { UserDefaults.standard.set(newValue, forKey: bottomKey) }
+    }
+}
