@@ -116,6 +116,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showWelcome()
     }
 
+    // MARK: - 编辑器字体
+
+    @objc func showEditorFontPanel(_ sender: Any?) {
+        let manager = NSFontManager.shared
+        manager.target = self
+        manager.action = #selector(changeEditorFont(_:))
+        manager.setSelectedFont(EditorSettings.font, isMultiple: false)
+        manager.orderFrontFontPanel(nil)
+    }
+
+    @objc func changeEditorFont(_ sender: NSFontManager?) {
+        guard let sender else { return }
+        EditorSettings.apply(sender.convert(EditorSettings.font))
+    }
+
+    @objc func increaseEditorFont(_ sender: Any?) { EditorSettings.fontSize += 1 }
+    @objc func decreaseEditorFont(_ sender: Any?) { EditorSettings.fontSize -= 1 }
+    @objc func resetEditorFont(_ sender: Any?) { EditorSettings.reset() }
+
+    @objc func selectLineSpacing(_ sender: NSMenuItem) {
+        guard let value = sender.representedObject as? CGFloat else { return }
+        EditorSettings.lineSpacing = value
+    }
+
     @objc func selectAppearance(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let setting = AppearanceSetting(rawValue: raw) else { return }
         AppearanceSetting.current = setting
@@ -126,6 +150,9 @@ extension AppDelegate: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(selectAppearance(_:)) {
             menuItem.state = menuItem.representedObject as? String == AppearanceSetting.current.rawValue ? .on : .off
+        }
+        if menuItem.action == #selector(selectLineSpacing(_:)) {
+            menuItem.state = menuItem.representedObject as? CGFloat == EditorSettings.lineSpacing ? .on : .off
         }
         return true
     }

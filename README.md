@@ -8,6 +8,7 @@
 core/gitdeck-core/     Rust 共享核心：git CLI 调用与解析（UniFFI 导出给 Swift / C#）
 core/uniffi-bindgen/   绑定生成工具
 apps/mac/              macOS 客户端（Swift + AppKit，SwiftPM 包）
+apps/mac/Vendor/       第三方源码的 vendored 副本（各自保留 LICENSE，改动说明见其 Package.swift）
 scripts/               构建脚本
 product.env            产品名与 Bundle ID（发布前统一替换）
 deny.toml              依赖许可证白名单（cargo-deny）

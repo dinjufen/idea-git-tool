@@ -1089,6 +1089,125 @@
         }
       }
     },
+    "find.close": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close (Esc)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭 (Esc)"
+          }
+        }
+      }
+    },
+    "find.count": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@/%2$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@/%2$@"
+          }
+        }
+      }
+    },
+    "find.matchCase": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Match Case"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "区分大小写"
+          }
+        }
+      }
+    },
+    "find.next": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next Occurrence (↩)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一个匹配项 (↩)"
+          }
+        }
+      }
+    },
+    "find.noMatches": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "0 results"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "0 个结果"
+          }
+        }
+      }
+    },
+    "find.placeholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查找"
+          }
+        }
+      }
+    },
+    "find.previous": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous Occurrence (⇧↩)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一个匹配项 (⇧↩)"
+          }
+        }
+      }
+    },
     "git.action.branches": {
       "extractionState": "manual",
       "localizations": {
@@ -1939,6 +2058,40 @@
         }
       }
     },
+    "menu.edit.findNext": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find Next"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查找下一个"
+          }
+        }
+      }
+    },
+    "menu.edit.findPrevious": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find Previous"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查找上一个"
+          }
+        }
+      }
+    },
     "menu.edit.paste": {
       "extractionState": "manual",
       "localizations": {
@@ -2177,6 +2330,74 @@
         }
       }
     },
+    "menu.view.editorFont": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Editor Font…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "编辑器字体…"
+          }
+        }
+      }
+    },
+    "menu.view.fontDecrease": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Decrease Font Size"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "减小字号"
+          }
+        }
+      }
+    },
+    "menu.view.fontIncrease": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Increase Font Size"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "增大字号"
+          }
+        }
+      }
+    },
+    "menu.view.fontReset": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset Font"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重置字体"
+          }
+        }
+      }
+    },
     "menu.view.fullScreen": {
       "extractionState": "manual",
       "localizations": {
@@ -2190,6 +2411,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "进入全屏"
+          }
+        }
+      }
+    },
+    "menu.view.lineSpacing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Line Spacing"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "行距"
           }
         }
       }

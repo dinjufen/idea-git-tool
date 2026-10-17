@@ -21,7 +21,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     private let horizontalSplit = NSSplitView()
     private let leftPanel = NSView()
     private let bottomPanel = NSView()
-    private let editor = EditorAreaView()
+    private lazy var editor = EditorAreaView(model: model)
 
     private lazy var projectToolWindow = ProjectToolWindow(model: model)
     private lazy var commitToolWindow = CommitToolWindow(model: model)
@@ -65,6 +65,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         observer = model.observe { [weak self] in self?.modelChanged() }
         applyToolWindowState()
         model.refresh()
+        editor.restoreSession()
     }
 
     @available(*, unavailable)
@@ -257,6 +258,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
 
     @objc func closeEditorTab(_ sender: Any?) { editor.closeActive() }
 
+    @objc func showFindBar(_ sender: Any?) { editor.activeEditor?.showFindBar() }
+    @objc func findNext(_ sender: Any?) { editor.activeEditor?.findNext() }
+    @objc func findPrevious(_ sender: Any?) { editor.activeEditor?.findPrevious() }
+
     // 以下操作在后续步骤接入 Rust 核心。
     @objc func pushChanges(_ sender: Any?) {}
     @objc func updateProject(_ sender: Any?) {}
@@ -266,6 +271,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         switch menuItem.action {
         case #selector(pushChanges(_:)), #selector(updateProject(_:)), #selector(fetchChanges(_:)):
             false
+        case #selector(showFindBar(_:)), #selector(findNext(_:)), #selector(findPrevious(_:)):
+            editor.activeEditor != nil
         default:
             true
         }

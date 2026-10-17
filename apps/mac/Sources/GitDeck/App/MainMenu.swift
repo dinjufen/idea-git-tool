@@ -58,9 +58,9 @@ enum MainMenu {
         menu.addItem(withTitle: tr("menu.edit.paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         menu.addItem(withTitle: tr("menu.edit.selectAll"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         menu.addItem(.separator())
-        let find = NSMenuItem(title: tr("menu.edit.find"), action: #selector(NSTextView.performFindPanelAction(_:)), keyEquivalent: "f")
-        find.tag = Int(NSFindPanelAction.showFindPanel.rawValue)
-        menu.addItem(find)
+        menu.addItem(item(tr("menu.edit.find"), #selector(ProjectWindowController.showFindBar(_:)), "f"))
+        menu.addItem(item(tr("menu.edit.findNext"), #selector(ProjectWindowController.findNext(_:)), "g"))
+        menu.addItem(item(tr("menu.edit.findPrevious"), #selector(ProjectWindowController.findPrevious(_:)), "g", [.command, .shift]))
         return menu
     }
 
@@ -78,6 +78,18 @@ enum MainMenu {
             theme.addItem(item)
         }
         menu.addItem(withTitle: tr("menu.view.theme"), action: nil, keyEquivalent: "").submenu = theme
+        menu.addItem(.separator())
+        menu.addItem(item(tr("menu.view.editorFont"), #selector(AppDelegate.showEditorFontPanel(_:)), "t", [.command, .shift]))
+        menu.addItem(item(tr("menu.view.fontIncrease"), #selector(AppDelegate.increaseEditorFont(_:)), "="))
+        menu.addItem(item(tr("menu.view.fontDecrease"), #selector(AppDelegate.decreaseEditorFont(_:)), "-"))
+        menu.addItem(item(tr("menu.view.fontReset"), #selector(AppDelegate.resetEditorFont(_:)), "0"))
+        let spacing = NSMenu(title: tr("menu.view.lineSpacing"))
+        for value in EditorSettings.lineSpacingOptions {
+            let entry = NSMenuItem(title: String(format: "%.1f", value), action: #selector(AppDelegate.selectLineSpacing(_:)), keyEquivalent: "")
+            entry.representedObject = value
+            spacing.addItem(entry)
+        }
+        menu.addItem(withTitle: tr("menu.view.lineSpacing"), action: nil, keyEquivalent: "").submenu = spacing
         menu.addItem(.separator())
         menu.addItem(item(tr("menu.view.fullScreen"), #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]))
         return menu

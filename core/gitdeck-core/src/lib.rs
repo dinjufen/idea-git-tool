@@ -6,13 +6,16 @@
 uniffi::setup_scaffolding!();
 
 mod commit;
+mod diff;
 mod error;
 pub mod git;
 mod graph;
+mod highlight;
 mod history;
 mod repo;
 
 pub use commit::{CommitOptions, CommitResult};
+pub use diff::{LineChange, LineChangeKind, line_changes};
 pub use error::CoreError;
 pub use git::branches::{BranchKind, BranchRef};
 pub use git::log::{ChangedFile, RefKind, RefLabel};
@@ -20,6 +23,7 @@ pub use git::status::{
     BranchStatus, ChangeKind, ConflictKind, FileChange, RepoStatus, RepositoryState,
 };
 pub use graph::{EdgePart, GraphEdge, GraphRow};
+pub use highlight::{HighlightSpan, TokenKind, highlight, language_for_path};
 pub use history::{CommitDetails, LogCommit, LogFilter, LogOrder, LogPage};
 pub use repo::{GitInfo, Repository, git_info};
 

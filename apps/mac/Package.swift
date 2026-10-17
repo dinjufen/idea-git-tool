@@ -9,6 +9,10 @@ let package = Package(
     products: [
         .executable(name: "GitDeck", targets: ["GitDeck"]),
     ],
+    dependencies: [
+        // 编辑器底层文本视图（MIT），vendored 副本，说明见 Vendor/CodeEditTextView/Package.swift。
+        .package(path: "Vendor/CodeEditTextView"),
+    ],
     targets: [
         .binaryTarget(
             name: "GitDeckCoreFFI",
@@ -23,7 +27,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "GitDeck",
-            dependencies: ["GitDeckCore"],
+            dependencies: [
+                "GitDeckCore",
+                .product(name: "CodeEditTextView", package: "CodeEditTextView"),
+            ],
             path: "Sources/GitDeck",
             resources: [.process("Resources")]
         ),

@@ -19,7 +19,7 @@
 |---|------|------|------|
 | 1 | 技术栈 | **原生**：macOS 用 Swift，Windows 用 C# + WinUI 3 | 两端 UI 各自原生实现 |
 | 2 | 核心逻辑 | **Rust 共享核心**，经 UniFFI 生成 Swift / C# 绑定 | git 调用与解析、提交图布局、diff/三方合并、AI 客户端与 Agent、配置与凭据统一在核心 |
-| 3 | 编辑器 | **原生组件 + tree-sitter** | mac：CodeEditSourceEditor；Win：WinUIEdit（Scintilla）；高亮 token 由 Rust 核心中的 tree-sitter 统一计算 |
+| 3 | 编辑器 | **原生组件 + tree-sitter** | mac：CodeEditTextView（见第 11 项）；Win：WinUIEdit（Scintilla）；高亮 token 由 Rust 核心中的 tree-sitter 统一计算 |
 | 4 | Git 后端 | **系统 git CLI**（与 IDEA 一致），最低 git 2.30 | Windows 优先使用用户安装的 Git for Windows，缺失时回退到安装包内置的 MinGit |
 | 5 | 平台顺序 | **mac 先行，Windows 后跟** | Rust 核心从一开始就在 CI 上跑 Windows 测试 |
 | 6 | 分期 | 见下文「分期」 | |
@@ -27,6 +27,7 @@
 | 8 | 语言 | **简体中文 + 英文** | 跟随系统、可手动切换；中文术语对齐 IDEA 官方中文语言包；mac 用 `.xcstrings`，Win 用 `.resw`，核心返回错误码 + 文案键 |
 | 9 | 许可 | **闭源 / 商用** | 只使用 MIT / Apache-2.0 / BSD 等宽松许可依赖，CI 加许可证扫描；禁止 GPL/AGPL（例如 STTextView） |
 | 10 | 命名 | 代号 GitDeck | 名称集中配置；名称中不使用 "IDEA" / "JetBrains" 商标 |
+| 11 | mac 编辑器组件 | **CodeEditTextView + 自建**（2026-10-17 细化第 3 项） | 只使用其底层文本视图（排版、输入法、选区、大文件）；行号 gutter、变更标记、高亮（Rust tree-sitter）、Diff/合并装饰全部自建；编辑器、Diff 视图、三栏合并复用同一组件；以 vendored 副本形式放在 `apps/mac/Vendor/CodeEditTextView`（源码未改，仅去掉上游的 SwiftLint 构建插件） |
 
 ### 由以上决策推导出的技术默认
 
