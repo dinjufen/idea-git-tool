@@ -5,6 +5,7 @@ import GitDeckCore
 final class CommitDetailsView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     var onOpenFile: ((String) -> Void)?
     var onShowDiff: ((CommitDetails, ChangedFile) -> Void)?
+    var onShowHistory: ((String) -> Void)?
 
     private let filesTable = NSTableView()
     private let messageView = NSTextView()
@@ -125,6 +126,7 @@ final class CommitDetailsView: NSView, NSTableViewDataSource, NSTableViewDelegat
         let menu = NSMenu()
         menu.addItem(withTitle: tr("commit.action.showDiff"), action: #selector(showDiffForTarget), keyEquivalent: "").target = self
         menu.addItem(withTitle: tr("commit.action.jumpToSource"), action: #selector(openFile), keyEquivalent: "").target = self
+        menu.addItem(withTitle: tr("git.action.showHistory"), action: #selector(showHistory), keyEquivalent: "").target = self
         return menu
     }
 
@@ -141,6 +143,11 @@ final class CommitDetailsView: NSView, NSTableViewDataSource, NSTableViewDelegat
     @objc private func showDiffForTarget() {
         guard let current, files.indices.contains(targetRow) else { return }
         onShowDiff?(current, files[targetRow])
+    }
+
+    @objc private func showHistory() {
+        guard files.indices.contains(targetRow) else { return }
+        onShowHistory?(files[targetRow].path)
     }
 
     @objc private func openFile() {

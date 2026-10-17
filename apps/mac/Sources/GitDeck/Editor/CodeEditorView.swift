@@ -16,6 +16,8 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
     /// Diff 视图需要读取与设置滚动位置以实现两侧同步。
     let scrollView = NSScrollView()
     private let gutter: GutterView
+    private let annotationView: AnnotationGutterView
+    private var annotationWidth: NSLayoutConstraint!
     private let findBar = FindBar()
     private var findBarHeight: NSLayoutConstraint!
 
@@ -30,6 +32,30 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
     }
 
     var text: String { textView.string }
+
+    /// Annotate（git blame）结果；`nil` 时隐藏注释列。
+    var annotations: BlameResult? {
+        get { annotationView.blame }
+        set {
+            annotationView.blame = newValue
+            annotationWidth.constant = newValue == nil ? 0 : AnnotationGutterView.width
+            annotationView.isHidden = newValue == nil
+        }
+    }
+
+    /// 点击注释列中的提交。
+    var onAnnotationClick: ((String) -> Void)? {
+        get { annotationView.onClickCommit }
+        set { annotationView.onClickCommit = newValue }
+    }
+
+    /// 行号栏与注释列的右键菜单（例如 “Annotate with Git Blame”）。
+    var gutterMenu: (() -> NSMenu?)? {
+        didSet {
+            gutter.contextMenu = gutterMenu
+            annotationView.contextMenu = gutterMenu
+        }
+    }
 
     /// 每次文本变化递增，用于丢弃过期的后台高亮结果。
     private(set) var revision = 0
@@ -52,6 +78,7 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
             letterSpacing: 1.0
         )
         gutter = GutterView(textView: textView, scrollView: scrollView)
+        annotationView = AnnotationGutterView(textView: textView, scrollView: scrollView)
         super.init(frame: .zero)
         textView.delegate = self
         buildLayout()
@@ -83,7 +110,9 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
         findBar.onPrevious = { [weak self] in self?.moveFind(by: -1) }
         findBar.onClose = { [weak self] in self?.hideFindBar() }
 
-        for view in [findBar, gutter, scrollView] as [NSView] { addSubview(view) }
+        annotationView.isHidden = true
+        for view in [findBar, annotationView, gutter, scrollView] as [NSView] { addSubview(view) }
+        annotationWidth = annotationView.widthAnchor.constraint(equalToConstant: 0)
         // 查找栏隐藏时高度为 0；显示时由查找栏自身的高度约束（优先级略低）决定。
         findBarHeight = findBar.heightAnchor.constraint(equalToConstant: 0)
         findBarHeight.isActive = true
@@ -91,8 +120,12 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
             findBar.topAnchor.constraint(equalTo: topAnchor),
             findBar.leadingAnchor.constraint(equalTo: leadingAnchor),
             findBar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            annotationView.topAnchor.constraint(equalTo: findBar.bottomAnchor),
+            annotationView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            annotationView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            annotationWidth,
             gutter.topAnchor.constraint(equalTo: findBar.bottomAnchor),
-            gutter.leadingAnchor.constraint(equalTo: leadingAnchor),
+            gutter.leadingAnchor.constraint(equalTo: annotationView.trailingAnchor),
             gutter.bottomAnchor.constraint(equalTo: bottomAnchor),
             scrollView.topAnchor.constraint(equalTo: findBar.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: gutter.trailingAnchor),
@@ -105,7 +138,10 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
     private func observe() {
         let center = NotificationCenter.default
         let redrawGutter: @Sendable (Notification) -> Void = { [weak self] _ in
-            MainActor.assumeIsolated { self?.gutter.needsDisplay = true }
+            MainActor.assumeIsolated {
+                self?.gutter.needsDisplay = true
+                self?.annotationView.needsDisplay = true
+            }
         }
         observers = [
             center.addObserver(forName: NSView.boundsDidChangeNotification, object: scrollView.contentView, queue: .main, using: redrawGutter),
@@ -157,6 +193,7 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
         textView.font = font
         textView.lineHeight = EditorSettings.lineSpacing
         gutter.font = font
+        annotationView.font = font
         if let storage = textView.textStorage {
             storage.beginEditing()
             storage.addAttribute(.font, value: font, range: NSRange(location: 0, length: storage.length))

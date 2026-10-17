@@ -6,6 +6,9 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
     var onOpenFile: ((URL) -> Void)?
     /// 打开历史提交中某个文件的 Diff：提交哈希、第一个父提交、文件。
     var onShowCommitDiff: ((String, String?, ChangedFile) -> Void)?
+    var onShowHistory: ((String) -> Void)? {
+        didSet { details.onShowHistory = onShowHistory }
+    }
 
     private enum Column: String {
         case subject, author, date
@@ -36,6 +39,8 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
     private var maxCount = LogView.pageSize
     private var isLoading = false
     private var hasLoaded = false
+    /// 等待加载完成后要选中的提交（例如从 Annotate 跳转过来）。
+    private var pendingReveal: String?
     private var loadGeneration = 0
     private var detailsGeneration = 0
     private var lastSignature: String?
@@ -282,7 +287,8 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
                 if !filtered { self.collectAuthors() }
                 self.table.reloadData()
                 // 保持原有选中；首次加载时选中 HEAD 所在提交（与 IDEA 一致）。
-                let target = selectedHash ?? (self.hasLoaded ? nil : self.model.status.branch.oid)
+                let target = self.pendingReveal ?? selectedHash ?? (self.hasLoaded ? nil : self.model.status.branch.oid)
+                self.pendingReveal = nil
                 self.hasLoaded = true
                 if let target, let row = self.commits.firstIndex(where: { $0.hash == target }) {
                     self.table.selectRowIndexes([row], byExtendingSelection: false)
@@ -337,6 +343,22 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
             guard generation == self.detailsGeneration, let branches else { return }
             self.details.show(commit, branches: branches)
         }
+    }
+
+    /// 选中并滚动到某个提交；当前筛选条件下不可见时清空筛选后重新加载。
+    func reveal(_ hash: String) {
+        if let row = commits.firstIndex(where: { $0.hash == hash }) {
+            table.selectRowIndexes([row], byExtendingSelection: false)
+            table.scrollRowToVisible(row)
+            return
+        }
+        search.stringValue = ""
+        branchPopup.selectItem(at: 0)
+        userPopup.selectItem(at: 0)
+        datePopup.selectItem(at: 0)
+        pendingReveal = hash
+        maxCount = Self.pageSize
+        reload()
     }
 
     @objc private func copyHash() {

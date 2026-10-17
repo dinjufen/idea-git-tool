@@ -11,6 +11,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     var onResolveConflict: ((FileChange) -> Void)?
     /// 打开 Conflicts 对话框。
     var onShowConflicts: (() -> Void)?
+    var onShowHistory: ((String) -> Void)?
 
     /// 变更树的分组节点，顺序与 IDEA 一致。
     final class Group {
@@ -359,6 +360,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         let menu = NSMenu()
         menu.addItem(withTitle: tr("commit.action.showDiff"), action: #selector(showDiffForSelection), keyEquivalent: "").target = self
         menu.addItem(withTitle: tr("commit.action.jumpToSource"), action: #selector(jumpToSource), keyEquivalent: "").target = self
+        menu.addItem(withTitle: tr("git.action.showHistory"), action: #selector(showHistory), keyEquivalent: "").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: tr("git.action.resolveConflicts"), action: #selector(resolveConflicts), keyEquivalent: "").target = self
         return menu
@@ -395,6 +397,11 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     @objc func showDiffForSelection() {
         guard let item = targetItem else { return }
         onShowDiff?(item.change)
+    }
+
+    @objc private func showHistory() {
+        guard let item = targetItem, !item.change.isUntracked else { return NSSound.beep() }
+        onShowHistory?(item.change.path)
     }
 
     @objc private func jumpToSource() {

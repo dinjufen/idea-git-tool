@@ -57,6 +57,7 @@ final class FileNode {
 /// Project 工具窗口：仓库文件树，按 git 状态着色，双击在编辑器中打开。
 final class ProjectToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     var onOpenFile: ((URL) -> Void)?
+    var onShowHistory: ((String) -> Void)?
 
     private let model: ProjectModel
     private let root: FileNode
@@ -84,6 +85,7 @@ final class ProjectToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDel
         outline.delegate = self
         outline.target = self
         outline.doubleAction = #selector(openSelected)
+        outline.menu = treeMenu()
         outline.setAccessibilityLabel(tr("toolwindow.project"))
 
         let scroll = NSScrollView()
@@ -124,6 +126,19 @@ final class ProjectToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDel
     private func statusChanged() {
         guard !model.isRefreshing else { return }
         reloadFiles()
+    }
+
+    private func treeMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(withTitle: tr("git.action.showHistory"), action: #selector(showHistory), keyEquivalent: "").target = self
+        return menu
+    }
+
+    /// 文件历史跟踪重命名，只对单个文件有效。
+    @objc private func showHistory() {
+        let row = outline.clickedRow >= 0 ? outline.clickedRow : outline.selectedRow
+        guard let node = outline.item(atRow: row) as? FileNode, !node.isDirectory else { return NSSound.beep() }
+        onShowHistory?(node.relativePath)
     }
 
     @objc private func collapseAll() {

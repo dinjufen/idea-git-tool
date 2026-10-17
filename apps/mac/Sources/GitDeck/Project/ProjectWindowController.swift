@@ -151,6 +151,15 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         operations.onConflicts = { [weak self] in self?.conflictResolver.requestConflicts() }
         commitToolWindow.onResolveConflict = { [weak self] change in self?.conflictResolver.openMerge(change) }
         commitToolWindow.onShowConflicts = { [weak self] in self?.conflictResolver.showConflicts() }
+        let showHistory: (String) -> Void = { [weak self] path in self?.showFileHistory(path) }
+        editor.onShowHistory = showHistory
+        commitToolWindow.onShowHistory = showHistory
+        projectToolWindow.onShowHistory = showHistory
+        gitToolWindow.onShowHistory = showHistory
+        editor.onShowCommit = { [weak self] hash in
+            self?.show(.git)
+            self?.gitToolWindow.reveal(commit: hash)
+        }
 
         let openFile: (URL) -> Void = { [weak self] url in self?.editor.open(url) }
         projectToolWindow.onOpenFile = openFile
@@ -214,7 +223,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     #if DEBUG
     /// 仅 Debug 构建：启动参数 `-debug.openLocalDiff <相对路径>` 在状态加载后自动打开该文件的本地 Diff，便于界面验证。
     private var debugDiffPath = UserDefaults.standard.string(forKey: "debug.openLocalDiff")
-    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge>` 在状态加载后自动执行对应操作。
+    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge|annotate|history>（history 需配合 `-debug.historyPath <路径>`）` 在状态加载后自动执行对应操作。
     private var debugAction = UserDefaults.standard.string(forKey: "debug.action")
     #endif
 
@@ -233,6 +242,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             case "update": operations.updateProject()
             case "newBranch": operations.newBranch()
             case "conflicts": conflictResolver.showConflicts()
+            case "annotate": editor.toggleAnnotations()
+            case "history":
+                if let path = UserDefaults.standard.string(forKey: "debug.historyPath") { showFileHistory(path) }
             case "merge":
                 if let change = model.status.changes.first(where: { $0.conflict != nil }) {
                     conflictResolver.openMerge(change)
@@ -326,14 +338,31 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     @objc func abortRebase(_ sender: Any?) { operations.abortRebase() }
     @objc func abortMerge(_ sender: Any?) { operations.abortMerge() }
     @objc func resolveConflicts(_ sender: Any?) { conflictResolver.showConflicts() }
+    @objc func toggleAnnotations(_ sender: Any?) { editor.toggleAnnotations() }
+
+    @objc func showHistoryForCurrentFile(_ sender: Any?) {
+        guard let path = editor.activeRelativePath else { return }
+        showFileHistory(path)
+    }
+
+    /// 在底部 Git 工具窗口中打开文件历史标签页。
+    func showFileHistory(_ path: String) {
+        show(.git)
+        gitToolWindow.showHistory(path: path)
+    }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        switch menuItem.action {
+        if menuItem.action == #selector(toggleAnnotations(_:)) {
+            menuItem.state = editor.isActiveAnnotated ? .on : .off
+        }
+        return switch menuItem.action {
         case #selector(pushChanges(_:)), #selector(updateProject(_:)), #selector(fetchChanges(_:)),
              #selector(newBranch(_:)), #selector(checkoutRevision(_:)):
             !operations.isRunning
         case #selector(continueRebase(_:)), #selector(abortRebase(_:)):
             !operations.isRunning && model.status.state == .rebasing
+        case #selector(toggleAnnotations(_:)), #selector(showHistoryForCurrentFile(_:)):
+            editor.activeRelativePath != nil
         case #selector(resolveConflicts(_:)):
             conflictResolver.hasConflicts
         case #selector(abortMerge(_:)):

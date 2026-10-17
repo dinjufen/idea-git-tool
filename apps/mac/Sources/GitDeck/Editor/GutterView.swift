@@ -16,6 +16,8 @@ final class GutterView: NSView {
         }
     }
 
+    var contextMenu: (() -> NSMenu?)?
+
     private weak var textView: TextView?
     private weak var scrollView: NSScrollView?
     private static let markerWidth: CGFloat = 4
@@ -42,6 +44,10 @@ final class GutterView: NSView {
         let digits = max(String(lines).count, 3)
         let digitWidth = ("8" as NSString).size(withAttributes: [.font: numberFont]).width
         return NSSize(width: CGFloat(digits) * digitWidth + 14 + Self.markerGap + Self.markerWidth, height: NSView.noIntrinsicMetric)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        contextMenu?()
     }
 
     /// 行数位数变化时调整宽度。

@@ -5,6 +5,7 @@
 
 uniffi::setup_scaffolding!();
 
+mod blame;
 mod branch_ops;
 mod commit;
 mod conflicts;
@@ -17,6 +18,7 @@ mod history;
 mod remote;
 mod repo;
 
+pub use blame::{BlameCommit, BlameResult, FileRevision};
 pub use branch_ops::{CheckoutMode, CheckoutOutcome, MergeOutcome};
 pub use commit::{CommitOptions, CommitResult};
 pub use conflicts::{

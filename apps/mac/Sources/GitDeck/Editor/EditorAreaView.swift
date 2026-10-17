@@ -61,6 +61,10 @@ final class EditorAreaView: NSView {
     }
 
     var onCaretChange: ((String) -> Void)?
+    /// 在 Git 日志中定位某个提交（点击 Annotate 注释时）。
+    var onShowCommit: ((String) -> Void)?
+    /// 显示某个文件（相对路径）的历史。
+    var onShowHistory: ((String) -> Void)?
 
     private let model: ProjectModel
     private let tabBar = NSStackView()
@@ -119,6 +123,62 @@ final class EditorAreaView: NSView {
 
     var activeDiff: DiffView? { (active as? DiffTab)?.view }
 
+    /// 当前文件文档相对仓库根目录的路径。
+    var activeRelativePath: String? { (active as? Document)?.relativePath }
+
+    var isActiveAnnotated: Bool { activeEditor?.annotations != nil }
+
+    // MARK: - Annotate
+
+    /// 打开或关闭当前文件的 Annotate 列。
+    func toggleAnnotations() {
+        guard let doc = active as? Document else { return }
+        if doc.editor.annotations != nil {
+            doc.editor.annotations = nil
+        } else {
+            loadBlame(doc)
+        }
+    }
+
+    private func loadBlame(_ doc: Document) {
+        guard let path = doc.relativePath else { return }
+        let repository = model.repository
+        Task {
+            let result = await Task.detached { Result { try repository.blame(path: path, revision: nil) } }.value
+            switch result {
+            case let .success(blame): doc.editor.annotations = blame
+            case .failure: model.post(tr("annotate.failed", doc.url.lastPathComponent), isError: true)
+            }
+        }
+    }
+
+    private func gutterMenu(for doc: Document) -> NSMenu {
+        let menu = NSMenu()
+        let annotate = NSMenuItem(
+            title: doc.editor.annotations == nil ? tr("git.action.annotate") : tr("git.action.closeAnnotations"),
+            action: #selector(MenuAction.invoke), keyEquivalent: ""
+        )
+        let annotateAction = MenuAction { [weak self, weak doc] in
+            guard let self, let doc else { return }
+            if doc.editor.annotations != nil { doc.editor.annotations = nil } else { self.loadBlame(doc) }
+        }
+        annotate.target = annotateAction
+        annotate.representedObject = annotateAction
+        annotate.isEnabled = doc.relativePath != nil
+        menu.addItem(annotate)
+
+        let history = NSMenuItem(title: tr("git.action.showHistory"), action: #selector(MenuAction.invoke), keyEquivalent: "")
+        let historyAction = MenuAction { [weak self, weak doc] in
+            guard let path = doc?.relativePath else { return }
+            self?.onShowHistory?(path)
+        }
+        history.target = historyAction
+        history.representedObject = historyAction
+        history.isEnabled = doc.relativePath != nil
+        menu.addItem(history)
+        return menu
+    }
+
     /// 打开 Diff 页；`key` 相同的 Diff 已打开时直接切换过去。
     func openDiff(key: String, title: String, tooltip: String, make: () -> DiffView) {
         if let existing = tabs.first(where: { ($0 as? DiffTab)?.key == key }) {
@@ -170,6 +230,11 @@ final class EditorAreaView: NSView {
             }
             self.updateLineStatus(document, delay: .milliseconds(250))
         }
+        document.editor.gutterMenu = { [weak self, weak document] in
+            guard let self, let document else { return nil }
+            return self.gutterMenu(for: document)
+        }
+        document.editor.onAnnotationClick = { [weak self] hash in self?.onShowCommit?(hash) }
         document.editor.onCaretChange = { [weak self] line, column in
             self?.onCaretChange?("\(line):\(column)    LF    UTF-8")
         }
@@ -183,6 +248,8 @@ final class EditorAreaView: NSView {
         try doc.editor.text.write(to: doc.url, atomically: true, encoding: .utf8)
         doc.isModified = false
         rebuildTabs()
+        // 保存后重新 blame，使注释与文件内容对应。
+        if doc.editor.annotations != nil { loadBlame(doc) }
     }
 
     func closeActive() {
@@ -234,6 +301,8 @@ final class EditorAreaView: NSView {
         guard !model.isRefreshing, model.status.branch.oid != lastHead else { return }
         lastHead = model.status.branch.oid
         documents.forEach(loadBase)
+        // 提交、签出后注释可能已过期。
+        documents.filter { $0.editor.annotations != nil }.forEach(loadBlame)
     }
 
     // MARK: - 标签页

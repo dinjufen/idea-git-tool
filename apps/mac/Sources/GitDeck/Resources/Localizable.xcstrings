@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "annotate.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cannot annotate %1$@: the file is not under version control"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法注释 %1$@：该文件未纳入版本管理"
+          }
+        }
+      }
+    },
     "askpass.no": {
       "extractionState": "manual",
       "localizations": {
@@ -1803,6 +1820,23 @@
         }
       }
     },
+    "git.action.annotate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annotate with Git Blame"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用 Git Blame 注释"
+          }
+        }
+      }
+    },
     "git.action.branches": {
       "extractionState": "manual",
       "localizations": {
@@ -1816,6 +1850,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "分支…"
+          }
+        }
+      }
+    },
+    "git.action.closeAnnotations": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close Annotations"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭注释"
           }
         }
       }
@@ -1922,6 +1973,40 @@
         }
       }
     },
+    "git.action.showHistory": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show History"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示历史记录"
+          }
+        }
+      }
+    },
+    "git.action.showHistoryCurrent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show History for Current File"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示当前文件的历史记录"
+          }
+        }
+      }
+    },
     "git.action.update": {
       "extractionState": "manual",
       "localizations": {
@@ -1956,6 +2041,23 @@
         }
       }
     },
+    "git.tab.closeHistory": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close History"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭历史记录"
+          }
+        }
+      }
+    },
     "git.tab.console": {
       "extractionState": "manual",
       "localizations": {
@@ -1973,6 +2075,23 @@
         }
       }
     },
+    "git.tab.history": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "History: %1$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "历史记录: %1$@"
+          }
+        }
+      }
+    },
     "git.tab.log": {
       "extractionState": "manual",
       "localizations": {
@@ -1986,6 +2105,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "日志"
+          }
+        }
+      }
+    },
+    "history.accessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "History of %1$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 的历史记录"
+          }
+        }
+      }
+    },
+    "history.count": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ revisions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 个修订"
+          }
+        }
+      }
+    },
+    "history.count.one": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 revision"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 个修订"
           }
         }
       }
