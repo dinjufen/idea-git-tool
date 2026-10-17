@@ -8,6 +8,9 @@ import GitDeckCore
 final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
     var onTextChange: (() -> Void)?
     var onCaretChange: ((_ line: Int, _ column: Int) -> Void)?
+    /// 文本即将被替换 / 已被替换（参数为替换前的范围与新文本）。合并工具据此跟踪结果栏中的手动编辑。
+    var onWillReplace: ((NSRange, String) -> Void)?
+    var onDidReplace: ((NSRange, String) -> Void)?
 
     let textView: TextView
     /// Diff 视图需要读取与设置滚动位置以实现两侧同步。
@@ -208,7 +211,12 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
 
     // MARK: - TextViewDelegate
 
+    func textView(_ textView: TextView, willReplaceContentsIn range: NSRange, with string: String) {
+        onWillReplace?(range, string)
+    }
+
     func textView(_ textView: TextView, didReplaceContentsIn range: NSRange, with string: String) {
+        onDidReplace?(range, string)
         revision += 1
         // 输入时稍作停顿再重新高亮，避免每个按键都触发完整解析。
         scheduleHighlight(delay: .milliseconds(120))

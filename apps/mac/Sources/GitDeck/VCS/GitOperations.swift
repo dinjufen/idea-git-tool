@@ -10,6 +10,8 @@ final class GitOperations {
     weak var window: NSWindow?
     /// 操作开始 / 结束时通知（状态栏显示进度）；参数为进行中的操作标题，结束时为 `nil`。
     var onProgress: ((String?) -> Void)?
+    /// 出现冲突时打开 Conflicts 对话框（与 IDEA 一样自动弹出）。
+    var onConflicts: (() -> Void)?
 
     private(set) var runningTitle: String?
 
@@ -252,6 +254,12 @@ final class GitOperations {
 
     /// 出现冲突：提示用户在 Commit 工具窗口中解决（三栏合并在后续步骤加入）。
     private func showConflicts(_ operation: String, stashKept: Bool = false) {
+        if let onConflicts {
+            model.post(stashKept ? tr("ops.conflicts.title", operation) + " " + tr("ops.conflicts.stashKept")
+                                 : tr("ops.conflicts.title", operation), isError: true)
+            onConflicts()
+            return
+        }
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = tr("ops.conflicts.title", operation)

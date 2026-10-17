@@ -7,6 +7,7 @@ uniffi::setup_scaffolding!();
 
 mod branch_ops;
 mod commit;
+mod conflicts;
 mod diff;
 mod error;
 pub mod git;
@@ -18,6 +19,9 @@ mod repo;
 
 pub use branch_ops::{CheckoutMode, CheckoutOutcome, MergeOutcome};
 pub use commit::{CommitOptions, CommitResult};
+pub use conflicts::{
+    ConflictLabels, ConflictSide, ConflictVersions, MergeChunk, MergeChunkKind, merge_chunks,
+};
 pub use diff::{
     DiffBlock, LineChange, LineChangeKind, TextRange, WhitespaceMode, diff_texts, line_changes,
 };

@@ -102,7 +102,7 @@ pub fn diff_texts(base: String, text: String, whitespace: WhitespaceMode) -> Vec
         .collect()
 }
 
-fn line_blocks(old: &Lines, new: &Lines, whitespace: WhitespaceMode) -> Vec<LineChange> {
+pub(crate) fn line_blocks(old: &Lines, new: &Lines, whitespace: WhitespaceMode) -> Vec<LineChange> {
     let old_keys: Vec<String> = old.lines.iter().map(|l| normalize(l, whitespace)).collect();
     let new_keys: Vec<String> = new.lines.iter().map(|l| normalize(l, whitespace)).collect();
     let ops = similar::capture_diff_slices_deadline(
@@ -171,13 +171,13 @@ fn normalize(line: &str, whitespace: WhitespaceMode) -> String {
 }
 
 /// 按行切分的文本，记录每行起点的 UTF-16 偏移。行内容不含换行符（`\n` 与 `\r\n`）。
-struct Lines<'a> {
-    lines: Vec<&'a str>,
+pub(crate) struct Lines<'a> {
+    pub(crate) lines: Vec<&'a str>,
     starts: Vec<u32>,
 }
 
 impl<'a> Lines<'a> {
-    fn new(text: &'a str) -> Self {
+    pub(crate) fn new(text: &'a str) -> Self {
         let mut lines = Vec::new();
         let mut starts = Vec::new();
         let mut offset = 0u32;

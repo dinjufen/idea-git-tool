@@ -190,19 +190,13 @@ final class DiffView: NSView {
 
     /// 首次跳转时从当前可见区域之后的第一个差异开始。
     private func firstBlockBelowViewport() -> Int {
-        let top = topVisibleLine(of: rightEditor)
+        let top = rightEditor.topVisibleLine
         return blocks.firstIndex { Double($0.change.start) >= top } ?? 0
     }
 
     private func go(to index: Int) {
         currentBlock = index
-        let change = blocks[index].change
-        guard let line = rightEditor.textView.layoutManager.lineStorage.getLine(atIndex: Int(change.start))
-            ?? rightEditor.textView.layoutManager.lineStorage.last else { return }
-        // 把差异放在视口上方约三分之一处，与 IDEA 一致。
-        let target = max(0, line.yPos - rightEditor.scrollView.contentView.bounds.height / 3)
-        scroll(rightEditor, toY: target)
-        rightEditor.textView.selectionManager.setSelectedRange(NSRange(location: line.range.location, length: 0))
+        rightEditor.reveal(line: Int(blocks[index].change.start))
         syncScroll(from: rightEditor)
     }
 
@@ -229,55 +223,18 @@ final class DiffView: NSView {
     private func syncScroll(from source: CodeEditorView) {
         guard !isSyncingScroll else { return }
         let target = source === leftEditor ? rightEditor : leftEditor
-        let fromBase = source === leftEditor
-        let line = topVisibleLine(of: source)
-        let mapped = mapLine(line, fromBase: fromBase)
-        let storage = target.textView.layoutManager.lineStorage
-        let whole = Int(mapped.rounded(.down))
-        let y: CGFloat
-        if let position = storage.getLine(atIndex: whole) {
-            y = position.yPos + CGFloat(mapped - Double(whole)) * position.height
-        } else if let last = storage.last {
-            y = last.yPos + last.height
-        } else {
-            y = 0
+        let segments = blocks.map { block in
+            let c = block.change
+            let segment = LineSegment(
+                fromStart: Double(c.baseStart), fromCount: Double(c.baseCount),
+                toStart: Double(c.start), toCount: Double(c.count)
+            )
+            return source === leftEditor ? segment : segment.reversed
         }
         isSyncingScroll = true
-        scroll(target, toY: y)
+        target.scroll(toLine: LineMapping.map(source.topVisibleLine, segments))
         isSyncingScroll = false
         connector.needsDisplay = true
-    }
-
-    /// 视口顶部所在的行（带小数部分）。
-    private func topVisibleLine(of editor: CodeEditorView) -> Double {
-        let y = editor.scrollView.contentView.bounds.minY
-        guard let line = editor.textView.layoutManager.lineStorage.getLine(atPosition: max(0, y)) else { return 0 }
-        let fraction = line.height > 0 ? Double((y - line.yPos) / line.height) : 0
-        return Double(line.index) + min(max(fraction, 0), 1)
-    }
-
-    private func mapLine(_ line: Double, fromBase: Bool) -> Double {
-        var delta = 0.0
-        for block in blocks {
-            let c = block.change
-            let (fromStart, fromCount, toStart, toCount) = fromBase
-                ? (Double(c.baseStart), Double(c.baseCount), Double(c.start), Double(c.count))
-                : (Double(c.start), Double(c.count), Double(c.baseStart), Double(c.baseCount))
-            if line < fromStart { break }
-            if line < fromStart + fromCount {
-                // 块内按比例映射。
-                return toStart + (line - fromStart) / fromCount * toCount
-            }
-            delta = (toStart + toCount) - (fromStart + fromCount)
-        }
-        return line + delta
-    }
-
-    private func scroll(_ editor: CodeEditorView, toY y: CGFloat) {
-        let clip = editor.scrollView.contentView
-        let maxY = max(0, (editor.scrollView.documentView?.frame.height ?? 0) - clip.bounds.height)
-        clip.scroll(to: NSPoint(x: clip.bounds.minX, y: min(max(0, y), maxY)))
-        editor.scrollView.reflectScrolledClipView(clip)
     }
 }
 

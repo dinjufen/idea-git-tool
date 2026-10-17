@@ -7,6 +7,10 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     var onShowDiff: ((FileChange) -> Void)?
     /// “提交并推送” 成功提交后打开 Push 对话框。
     var onPushAfterCommit: (() -> Void)?
+    /// 打开冲突文件的三栏合并。
+    var onResolveConflict: ((FileChange) -> Void)?
+    /// 打开 Conflicts 对话框。
+    var onShowConflicts: (() -> Void)?
 
     /// 变更树的分组节点，顺序与 IDEA 一致。
     final class Group {
@@ -202,6 +206,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
 
     private func statusChanged() {
         guard !model.isRefreshing else { return }
+        prefillMergeMessage()
         let conflicts = Group(.conflicts)
         let changes = Group(.changes)
         let unversioned = Group(.unversioned)
@@ -235,6 +240,18 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     @objc private func collapseAll() { outline.collapseItem(nil, collapseChildren: true) }
 
     // MARK: - 提交
+
+    /// 合并进行中且提交信息为空时，填入 git 准备好的合并提交信息（与 IDEA 一致）。
+    private func prefillMergeMessage() {
+        guard model.status.state == .merging, messageView.string.isEmpty, !isCommitting else { return }
+        let repository = model.repository
+        Task {
+            let message = await Task.detached { repository.mergeMessage() }.value
+            guard let message, self.messageView.string.isEmpty else { return }
+            self.messageView.string = message
+            self.messageView.didChangeText()
+        }
+    }
 
     private func updateCommitButtons() {
         let hasMessage = !messageView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -342,6 +359,8 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         let menu = NSMenu()
         menu.addItem(withTitle: tr("commit.action.showDiff"), action: #selector(showDiffForSelection), keyEquivalent: "").target = self
         menu.addItem(withTitle: tr("commit.action.jumpToSource"), action: #selector(jumpToSource), keyEquivalent: "").target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: tr("git.action.resolveConflicts"), action: #selector(resolveConflicts), keyEquivalent: "").target = self
         return menu
     }
 
@@ -352,8 +371,25 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     }
 
     @objc private func showDiffForClicked() {
-        guard let item = outline.item(atRow: outline.clickedRow) as? FileItem else { return }
-        onShowDiff?(item.change)
+        switch outline.item(atRow: outline.clickedRow) {
+        case let item as FileItem where item.change.conflict != nil:
+            // 冲突文件双击打开合并工具（IDEA 同样如此）。
+            onResolveConflict?(item.change)
+        case let item as FileItem:
+            onShowDiff?(item.change)
+        case let group as Group where group.kind == .conflicts:
+            onShowConflicts?()
+        default:
+            break
+        }
+    }
+
+    @objc private func resolveConflicts() {
+        if let item = targetItem, item.change.conflict != nil {
+            onResolveConflict?(item.change)
+        } else {
+            onShowConflicts?()
+        }
     }
 
     @objc func showDiffForSelection() {

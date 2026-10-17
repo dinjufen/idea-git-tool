@@ -24,6 +24,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     private lazy var editor = EditorAreaView(model: model)
     private lazy var diffOpener = DiffOpener(model: model, editor: editor)
     private lazy var operations = GitOperations(model: model)
+    private lazy var conflictResolver = ConflictResolver(model: model)
 
     private lazy var projectToolWindow = ProjectToolWindow(model: model)
     private lazy var commitToolWindow = CommitToolWindow(model: model)
@@ -146,6 +147,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             if let title { self.statusBar.setMessage(title) }
         }
         commitToolWindow.onPushAfterCommit = { [weak self] in self?.operations.push() }
+        conflictResolver.window = window
+        operations.onConflicts = { [weak self] in self?.conflictResolver.requestConflicts() }
+        commitToolWindow.onResolveConflict = { [weak self] change in self?.conflictResolver.openMerge(change) }
+        commitToolWindow.onShowConflicts = { [weak self] in self?.conflictResolver.showConflicts() }
 
         let openFile: (URL) -> Void = { [weak self] url in self?.editor.open(url) }
         projectToolWindow.onOpenFile = openFile
@@ -209,7 +214,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     #if DEBUG
     /// 仅 Debug 构建：启动参数 `-debug.openLocalDiff <相对路径>` 在状态加载后自动打开该文件的本地 Diff，便于界面验证。
     private var debugDiffPath = UserDefaults.standard.string(forKey: "debug.openLocalDiff")
-    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch>` 在状态加载后自动执行对应操作。
+    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge>` 在状态加载后自动执行对应操作。
     private var debugAction = UserDefaults.standard.string(forKey: "debug.action")
     #endif
 
@@ -227,6 +232,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             case "push": operations.push()
             case "update": operations.updateProject()
             case "newBranch": operations.newBranch()
+            case "conflicts": conflictResolver.showConflicts()
+            case "merge":
+                if let change = model.status.changes.first(where: { $0.conflict != nil }) {
+                    conflictResolver.openMerge(change)
+                }
             default: break
             }
         }
@@ -315,6 +325,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     @objc func continueRebase(_ sender: Any?) { operations.continueRebase() }
     @objc func abortRebase(_ sender: Any?) { operations.abortRebase() }
     @objc func abortMerge(_ sender: Any?) { operations.abortMerge() }
+    @objc func resolveConflicts(_ sender: Any?) { conflictResolver.showConflicts() }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
@@ -323,6 +334,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             !operations.isRunning
         case #selector(continueRebase(_:)), #selector(abortRebase(_:)):
             !operations.isRunning && model.status.state == .rebasing
+        case #selector(resolveConflicts(_:)):
+            conflictResolver.hasConflicts
         case #selector(abortMerge(_:)):
             !operations.isRunning && model.status.state == .merging
         case #selector(showFindBar(_:)), #selector(findNext(_:)), #selector(findPrevious(_:)):

@@ -111,6 +111,7 @@ enum MainMenu {
         menu.addItem(item(tr("branches.action.new"), #selector(ProjectWindowController.newBranch(_:)), "n", [.command, .option]))
         menu.addItem(item(tr("branches.action.checkoutRevision"), #selector(ProjectWindowController.checkoutRevision(_:)), ""))
         menu.addItem(.separator())
+        menu.addItem(item(tr("git.action.resolveConflicts"), #selector(ProjectWindowController.resolveConflicts(_:)), ""))
         menu.addItem(item(tr("git.action.continueRebase"), #selector(ProjectWindowController.continueRebase(_:)), ""))
         menu.addItem(item(tr("git.action.abortRebase"), #selector(ProjectWindowController.abortRebase(_:)), ""))
         menu.addItem(item(tr("git.action.abortMerge"), #selector(ProjectWindowController.abortMerge(_:)), ""))
