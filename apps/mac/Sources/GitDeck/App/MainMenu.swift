@@ -91,6 +91,11 @@ enum MainMenu {
         }
         menu.addItem(withTitle: tr("menu.view.lineSpacing"), action: nil, keyEquivalent: "").submenu = spacing
         menu.addItem(.separator())
+        // IDEA 在 Diff 中用 F7 / ⇧F7 在差异之间跳转。
+        let f7 = String(UnicodeScalar(UInt16(NSF7FunctionKey)).map(Character.init) ?? " ")
+        menu.addItem(item(tr("diff.next"), #selector(ProjectWindowController.nextDifference(_:)), f7, []))
+        menu.addItem(item(tr("diff.previous"), #selector(ProjectWindowController.previousDifference(_:)), f7, [.shift]))
+        menu.addItem(.separator())
         menu.addItem(item(tr("menu.view.fullScreen"), #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]))
         return menu
     }

@@ -4,11 +4,13 @@ import GitDeckCore
 /// Log 右侧的提交详情：上方为改动文件列表，下方为提交信息、作者、哈希与所在分支。
 final class CommitDetailsView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     var onOpenFile: ((String) -> Void)?
+    var onShowDiff: ((CommitDetails, ChangedFile) -> Void)?
 
     private let filesTable = NSTableView()
     private let messageView = NSTextView()
     private let emptyLabel = NSTextField.label(tr("log.details.empty"), color: Theme.secondaryText)
     private var files: [ChangedFile] = []
+    private var current: CommitDetails?
     private var content = NSView()
 
     override init(frame: NSRect) {
@@ -25,7 +27,8 @@ final class CommitDetailsView: NSView, NSTableViewDataSource, NSTableViewDelegat
         filesTable.dataSource = self
         filesTable.delegate = self
         filesTable.target = self
-        filesTable.doubleAction = #selector(openFile)
+        filesTable.doubleAction = #selector(showDiffForClicked)
+        filesTable.menu = fileMenu()
         filesTable.setAccessibilityLabel(tr("log.details.files"))
         let filesScroll = NSScrollView()
         filesScroll.documentView = filesTable
@@ -76,6 +79,7 @@ final class CommitDetailsView: NSView, NSTableViewDataSource, NSTableViewDelegat
 
     /// 显示提交详情；`nil` 显示空状态。`branches` 为包含该提交的分支，加载完成前为 `nil`。
     func show(_ details: CommitDetails?, branches: [String]? = nil) {
+        current = details
         content.isHidden = details == nil
         emptyLabel.isHidden = details != nil
         files = details?.files.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending } ?? []
@@ -117,8 +121,30 @@ final class CommitDetailsView: NSView, NSTableViewDataSource, NSTableViewDelegat
         return result
     }
 
-    @objc private func openFile() {
+    private func fileMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(withTitle: tr("commit.action.showDiff"), action: #selector(showDiffForTarget), keyEquivalent: "").target = self
+        menu.addItem(withTitle: tr("commit.action.jumpToSource"), action: #selector(openFile), keyEquivalent: "").target = self
+        return menu
+    }
+
+    private var targetRow: Int {
+        filesTable.clickedRow >= 0 ? filesTable.clickedRow : filesTable.selectedRow
+    }
+
+    @objc private func showDiffForClicked() {
         let row = filesTable.clickedRow
+        guard let current, files.indices.contains(row) else { return }
+        onShowDiff?(current, files[row])
+    }
+
+    @objc private func showDiffForTarget() {
+        guard let current, files.indices.contains(targetRow) else { return }
+        onShowDiff?(current, files[targetRow])
+    }
+
+    @objc private func openFile() {
+        let row = targetRow
         guard files.indices.contains(row), files[row].kind != .deleted else { return }
         onOpenFile?(files[row].path)
     }

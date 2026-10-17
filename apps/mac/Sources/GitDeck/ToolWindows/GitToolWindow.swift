@@ -1,9 +1,14 @@
 import AppKit
+import GitDeckCore
 
 /// 底部 Git 工具窗口，包含 Log 与 Console 两个标签页。
 final class GitToolWindow: NSView {
     var onOpenFile: ((URL) -> Void)? {
         didSet { logView.onOpenFile = onOpenFile }
+    }
+
+    var onShowCommitDiff: ((String, String?, ChangedFile) -> Void)? {
+        didSet { logView.onShowCommitDiff = onShowCommitDiff }
     }
 
     private let tabs = NSSegmentedControl(

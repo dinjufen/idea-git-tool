@@ -15,7 +15,9 @@ mod history;
 mod repo;
 
 pub use commit::{CommitOptions, CommitResult};
-pub use diff::{LineChange, LineChangeKind, line_changes};
+pub use diff::{
+    DiffBlock, LineChange, LineChangeKind, TextRange, WhitespaceMode, diff_texts, line_changes,
+};
 pub use error::CoreError;
 pub use git::branches::{BranchKind, BranchRef};
 pub use git::log::{ChangedFile, RefKind, RefLabel};

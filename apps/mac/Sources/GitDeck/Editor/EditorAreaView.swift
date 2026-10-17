@@ -1,10 +1,22 @@
 import AppKit
 import GitDeckCore
 
-/// 编辑器区域：标签栏 + 代码编辑器（语法高亮、查找、相对 HEAD 的变更标记）。
+/// 编辑器标签页的内容：文件文档或 Diff 页。
+@MainActor
+protocol EditorTabContent: AnyObject {
+    var tabTitle: String { get }
+    var tabTooltip: String { get }
+    /// 标签上的图标（SF Symbol）；文件文档不显示图标。
+    var tabSymbol: String? { get }
+    var contentView: NSView { get }
+    var focusView: NSView? { get }
+    var isModified: Bool { get }
+}
+
+/// 编辑器区域：标签栏 + 代码编辑器（语法高亮、查找、相对 HEAD 的变更标记）或 Diff 页。
 final class EditorAreaView: NSView {
     @MainActor
-    final class Document {
+    final class Document: EditorTabContent {
         let url: URL
         /// 相对仓库根目录的路径；仓库外的文件为 `nil`（不显示变更标记）。
         let relativePath: String?
@@ -19,6 +31,33 @@ final class EditorAreaView: NSView {
             self.relativePath = relativePath
             editor = CodeEditorView(text: text, language: languageForPath(path: url.lastPathComponent))
         }
+
+        var tabTitle: String { url.lastPathComponent }
+        var tabTooltip: String { url.path }
+        var tabSymbol: String? { nil }
+        var contentView: NSView { editor }
+        var focusView: NSView? { editor.textView }
+    }
+
+    /// Diff 页：同一来源（例如同一提交中的同一文件）只打开一个标签。
+    @MainActor
+    final class DiffTab: EditorTabContent {
+        let key: String
+        let tabTitle: String
+        let tabTooltip: String
+        let view: DiffView
+
+        init(key: String, title: String, tooltip: String, view: DiffView) {
+            self.key = key
+            tabTitle = title
+            tabTooltip = tooltip
+            self.view = view
+        }
+
+        var tabSymbol: String? { "arrow.left.arrow.right" }
+        var contentView: NSView { view }
+        var focusView: NSView? { nil }
+        var isModified: Bool { false }
     }
 
     var onCaretChange: ((String) -> Void)?
@@ -27,8 +66,9 @@ final class EditorAreaView: NSView {
     private let tabBar = NSStackView()
     private let content = ColoredView(Theme.editorBackground)
     private let emptyState = NSStackView()
-    private var documents: [Document] = []
-    private var active: Document?
+    private var tabs: [any EditorTabContent] = []
+    private var active: (any EditorTabContent)?
+    private var documents: [Document] { tabs.compactMap { $0 as? Document } }
     private var observer: UUID?
     private var lastHead: String?
 
@@ -75,7 +115,20 @@ final class EditorAreaView: NSView {
 
     var hasModifiedDocuments: Bool { documents.contains(where: \.isModified) }
 
-    var activeEditor: CodeEditorView? { active?.editor }
+    var activeEditor: CodeEditorView? { (active as? Document)?.editor }
+
+    var activeDiff: DiffView? { (active as? DiffTab)?.view }
+
+    /// 打开 Diff 页；`key` 相同的 Diff 已打开时直接切换过去。
+    func openDiff(key: String, title: String, tooltip: String, make: () -> DiffView) {
+        if let existing = tabs.first(where: { ($0 as? DiffTab)?.key == key }) {
+            activate(existing)
+            return
+        }
+        let tab = DiffTab(key: key, title: title, tooltip: tooltip, view: make())
+        tabs.append(tab)
+        activate(tab)
+    }
 
     // MARK: - 打开的标签页持久化（与 IDEA 重新打开项目时恢复编辑器标签一致）
 
@@ -92,7 +145,7 @@ final class EditorAreaView: NSView {
     private func saveSession() {
         var paths = documents.map(\.url.path)
         // 当前标签放在最后，恢复时最后打开即成为当前标签。
-        if let active, let index = paths.firstIndex(of: active.url.path) {
+        if let active = active as? Document, let index = paths.firstIndex(of: active.url.path) {
             paths.append(paths.remove(at: index))
         }
         UserDefaults.standard.set(paths, forKey: sessionKey)
@@ -120,21 +173,21 @@ final class EditorAreaView: NSView {
         document.editor.onCaretChange = { [weak self] line, column in
             self?.onCaretChange?("\(line):\(column)    LF    UTF-8")
         }
-        documents.append(document)
+        tabs.append(document)
         activate(document)
         loadBase(document)
     }
 
     func saveActive() throws {
-        guard let doc = active else { return }
+        guard let doc = active as? Document else { return }
         try doc.editor.text.write(to: doc.url, atomically: true, encoding: .utf8)
         doc.isModified = false
         rebuildTabs()
     }
 
     func closeActive() {
-        guard let doc = active else { return }
-        close(doc)
+        guard let active else { return }
+        close(active)
     }
 
     // MARK: - 变更标记（line status）
@@ -185,8 +238,8 @@ final class EditorAreaView: NSView {
 
     // MARK: - 标签页
 
-    private func close(_ doc: Document) {
-        if doc.isModified {
+    private func close(_ tab: any EditorTabContent) {
+        if let doc = tab as? Document, doc.isModified {
             let alert = NSAlert()
             alert.messageText = tr("editor.unsaved.title", doc.url.lastPathComponent)
             alert.addButton(withTitle: tr("editor.unsaved.save"))
@@ -201,31 +254,31 @@ final class EditorAreaView: NSView {
                 return
             }
         }
-        doc.lineStatusTask?.cancel()
-        let index = documents.firstIndex { $0 === doc } ?? 0
-        documents.removeAll { $0 === doc }
+        (tab as? Document)?.lineStatusTask?.cancel()
+        let index = tabs.firstIndex { $0 === tab } ?? 0
+        tabs.removeAll { $0 === tab }
         defer { saveSession() }
-        if active === doc {
+        if active === tab {
             active = nil
-            doc.editor.removeFromSuperview()
-            if documents.isEmpty {
+            tab.contentView.removeFromSuperview()
+            if tabs.isEmpty {
                 showEmptyState()
                 rebuildTabs()
             } else {
-                activate(documents[min(index, documents.count - 1)])
+                activate(tabs[min(index, tabs.count - 1)])
             }
         } else {
             rebuildTabs()
         }
     }
 
-    private func activate(_ doc: Document) {
-        active?.editor.removeFromSuperview()
+    private func activate(_ tab: any EditorTabContent) {
+        active?.contentView.removeFromSuperview()
         emptyState.removeFromSuperview()
-        active = doc
-        content.addSubview(doc.editor)
-        doc.editor.pinEdges(to: content)
-        window?.makeFirstResponder(doc.editor.textView)
+        active = tab
+        content.addSubview(tab.contentView)
+        tab.contentView.pinEdges(to: content)
+        if let focus = tab.focusView { window?.makeFirstResponder(focus) }
         rebuildTabs()
         saveSession()
     }
@@ -261,11 +314,11 @@ final class EditorAreaView: NSView {
 
     private func rebuildTabs() {
         tabBar.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for doc in documents {
-            let tab = EditorTab(title: doc.url.lastPathComponent, modified: doc.isModified, selected: doc === active)
-            tab.toolTip = doc.url.path
-            tab.onSelect = { [weak self] in self?.activate(doc) }
-            tab.onClose = { [weak self] in self?.close(doc) }
+        for item in tabs {
+            let tab = EditorTab(title: item.tabTitle, symbol: item.tabSymbol, modified: item.isModified, selected: item === active)
+            tab.toolTip = item.tabTooltip
+            tab.onSelect = { [weak self] in self?.activate(item) }
+            tab.onClose = { [weak self] in self?.close(item) }
             tabBar.addArrangedSubview(tab)
         }
     }
@@ -276,14 +329,20 @@ final class EditorTab: ColoredView {
     var onSelect: (() -> Void)?
     var onClose: (() -> Void)?
 
-    init(title: String, modified: Bool, selected: Bool) {
+    init(title: String, symbol: String? = nil, modified: Bool, selected: Bool) {
         super.init(selected ? Theme.editorBackground : nil)
         translatesAutoresizingMaskIntoConstraints = false
         let label = NSTextField.label(modified ? "• " + title : title, color: selected ? Theme.text : Theme.secondaryText)
         let close = IconButton(symbol: "xmark", tooltip: tr("menu.file.closeTab"), size: 16, pointSize: 8)
         close.target = self
         close.action = #selector(closeClicked)
-        let stack = NSStackView(views: [label, close])
+        var views: [NSView] = [label, close]
+        if let symbol, let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) {
+            let icon = NSImageView(image: image.withSymbolConfiguration(.init(pointSize: 10, weight: .regular)) ?? image)
+            icon.contentTintColor = Theme.accent
+            views.insert(icon, at: 0)
+        }
+        let stack = NSStackView(views: views)
         stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)

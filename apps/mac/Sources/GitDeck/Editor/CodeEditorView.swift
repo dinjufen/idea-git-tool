@@ -10,7 +10,8 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
     var onCaretChange: ((_ line: Int, _ column: Int) -> Void)?
 
     let textView: TextView
-    private let scrollView = NSScrollView()
+    /// Diff 视图需要读取与设置滚动位置以实现两侧同步。
+    let scrollView = NSScrollView()
     private let gutter: GutterView
     private let findBar = FindBar()
     private var findBarHeight: NSLayoutConstraint!

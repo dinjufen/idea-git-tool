@@ -4,6 +4,8 @@ import GitDeckCore
 /// Git 工具窗口的 Log 标签页：筛选栏 + 提交图表格 + 提交详情，布局对齐 IDEA。
 final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSMenuItemValidation {
     var onOpenFile: ((URL) -> Void)?
+    /// 打开历史提交中某个文件的 Diff：提交哈希、第一个父提交、文件。
+    var onShowCommitDiff: ((String, String?, ChangedFile) -> Void)?
 
     private enum Column: String {
         case subject, author, date
@@ -48,6 +50,9 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
         details.onOpenFile = { [weak self] path in
             guard let self else { return }
             self.onOpenFile?(self.model.rootURL.appendingPathComponent(path))
+        }
+        details.onShowDiff = { [weak self] commit, file in
+            self?.onShowCommitDiff?(commit.hash, commit.parents.first, file)
         }
         observer = model.observe { [weak self] in self?.modelChanged() }
         modelChanged()

@@ -4,6 +4,7 @@ import GitDeckCore
 /// Commit 工具窗口（IDEA 非模态提交界面）：变更树 + 提交信息 + 提交按钮。
 final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     var onOpenFile: ((URL) -> Void)?
+    var onShowDiff: ((FileChange) -> Void)?
 
     /// 变更树的分组节点，顺序与 IDEA 一致。
     final class Group {
@@ -86,7 +87,9 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         outline.dataSource = self
         outline.delegate = self
         outline.target = self
-        outline.doubleAction = #selector(openSelected)
+        // 与 IDEA 一致：双击打开 Diff，右键菜单可跳到源码。
+        outline.doubleAction = #selector(showDiffForClicked)
+        outline.menu = changeMenu()
         outline.setAccessibilityLabel(tr("commit.changes.accessibility"))
 
         let treeScroll = NSScrollView()
@@ -182,7 +185,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         let stack = NSStackView(views: [
             button("arrow.clockwise", tr("git.action.refresh"), #selector(refresh)),
             button("arrow.uturn.backward", tr("commit.action.rollback"), nil),
-            button("plus.forwardslash.minus", tr("commit.action.showDiff"), nil),
+            button("plus.forwardslash.minus", tr("commit.action.showDiff"), #selector(showDiffForSelection)),
             button("tray.and.arrow.down", tr("commit.action.shelve"), nil),
             button("arrow.up.left.and.arrow.down.right", tr("tree.expandAll"), #selector(expandAll)),
             button("arrow.down.right.and.arrow.up.left", tr("tree.collapseAll"), #selector(collapseAll)),
@@ -322,8 +325,31 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         }
     }
 
-    @objc private func openSelected() {
-        guard let item = outline.item(atRow: outline.clickedRow) as? FileItem, !item.change.isDeleted else { return }
+    private func changeMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(withTitle: tr("commit.action.showDiff"), action: #selector(showDiffForSelection), keyEquivalent: "").target = self
+        menu.addItem(withTitle: tr("commit.action.jumpToSource"), action: #selector(jumpToSource), keyEquivalent: "").target = self
+        return menu
+    }
+
+    /// 右键时作用于点击的行，否则作用于选中行。
+    private var targetItem: FileItem? {
+        let row = outline.clickedRow >= 0 ? outline.clickedRow : outline.selectedRow
+        return outline.item(atRow: row) as? FileItem
+    }
+
+    @objc private func showDiffForClicked() {
+        guard let item = outline.item(atRow: outline.clickedRow) as? FileItem else { return }
+        onShowDiff?(item.change)
+    }
+
+    @objc func showDiffForSelection() {
+        guard let item = targetItem else { return }
+        onShowDiff?(item.change)
+    }
+
+    @objc private func jumpToSource() {
+        guard let item = targetItem, !item.change.isDeleted else { return }
         onOpenFile?(model.rootURL.appendingPathComponent(item.change.path))
     }
 

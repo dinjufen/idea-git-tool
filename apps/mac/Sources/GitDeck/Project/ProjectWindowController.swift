@@ -22,6 +22,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     private let leftPanel = NSView()
     private let bottomPanel = NSView()
     private lazy var editor = EditorAreaView(model: model)
+    private lazy var diffOpener = DiffOpener(model: model, editor: editor)
 
     private lazy var projectToolWindow = ProjectToolWindow(model: model)
     private lazy var commitToolWindow = CommitToolWindow(model: model)
@@ -140,6 +141,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         projectToolWindow.onOpenFile = openFile
         commitToolWindow.onOpenFile = openFile
         gitToolWindow.onOpenFile = openFile
+        commitToolWindow.onShowDiff = { [weak self] change in self?.diffOpener.showLocalChange(change) }
+        gitToolWindow.onShowCommitDiff = { [weak self] hash, parent, file in
+            self?.diffOpener.showCommitFile(hash: hash, parent: parent, file: file)
+        }
         editor.onCaretChange = { [weak self] info in self?.statusBar.setEditorInfo(info) }
     }
 
@@ -191,7 +196,19 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
 
     // MARK: - 模型变化
 
+    #if DEBUG
+    /// 仅 Debug 构建：启动参数 `-debug.openLocalDiff <相对路径>` 在状态加载后自动打开该文件的本地 Diff，便于界面验证。
+    private var debugDiffPath = UserDefaults.standard.string(forKey: "debug.openLocalDiff")
+    #endif
+
     private func modelChanged() {
+        #if DEBUG
+        if let path = debugDiffPath, !model.isRefreshing,
+           let change = model.status.changes.first(where: { $0.path == path }) {
+            debugDiffPath = nil
+            diffOpener.showLocalChange(change)
+        }
+        #endif
         toolbar.vcsWidget.title = model.branchWidgetTitle
         statusBar.setBusy(model.isRefreshing)
         if let error = model.lastError {
@@ -259,6 +276,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     @objc func closeEditorTab(_ sender: Any?) { editor.closeActive() }
 
     @objc func showFindBar(_ sender: Any?) { editor.activeEditor?.showFindBar() }
+    @objc func nextDifference(_ sender: Any?) { editor.activeDiff?.nextDifference() }
+    @objc func previousDifference(_ sender: Any?) { editor.activeDiff?.previousDifference() }
     @objc func findNext(_ sender: Any?) { editor.activeEditor?.findNext() }
     @objc func findPrevious(_ sender: Any?) { editor.activeEditor?.findPrevious() }
 
@@ -273,6 +292,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             false
         case #selector(showFindBar(_:)), #selector(findNext(_:)), #selector(findPrevious(_:)):
             editor.activeEditor != nil
+        case #selector(nextDifference(_:)), #selector(previousDifference(_:)):
+            editor.activeDiff != nil
         default:
             true
         }
