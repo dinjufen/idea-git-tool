@@ -25,6 +25,12 @@ pub enum CoreError {
 
     #[error("I/O error: {detail}")]
     Io { detail: String },
+
+    #[error("commit message is empty")]
+    EmptyCommitMessage,
+
+    #[error("no files selected to commit")]
+    NothingToCommit,
 }
 
 impl From<std::io::Error> for CoreError {

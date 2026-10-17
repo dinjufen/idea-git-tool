@@ -5,6 +5,7 @@
 
 use std::ffi::OsStr;
 use std::fmt;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -110,13 +111,49 @@ impl GitExecutable {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
+        self.exec(cwd, args, None)
+    }
+
+    /// 同 [`run`](Self::run)，并把 `input` 写入 git 的标准输入（例如 `commit -F -`）。
+    pub fn run_with_input<I, S>(&self, cwd: &Path, args: I, input: &[u8]) -> Result<GitOutput>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.exec(cwd, args, Some(input))
+    }
+
+    fn exec<I, S>(&self, cwd: &Path, args: I, input: Option<&[u8]>) -> Result<GitOutput>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
         let args: Vec<_> = args.into_iter().map(|a| a.as_ref().to_owned()).collect();
-        let output = base_command(&self.path)
+        let mut child = base_command(&self.path)
             .args(STABLE_OUTPUT_CONFIG)
             .args(&args)
             .current_dir(cwd)
-            .stdin(Stdio::null())
-            .output()?;
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        // 在独立线程写入标准输入，避免输入较大时与 stdout 读取互相阻塞。
+        let writer = match (input, child.stdin.take()) {
+            (Some(data), Some(mut stdin)) => {
+                let data = data.to_vec();
+                Some(std::thread::spawn(move || stdin.write_all(&data)))
+            }
+            _ => None,
+        };
+        let output = child.wait_with_output()?;
+        if let Some(writer) = writer {
+            // git 可能在读完输入前就失败退出，此时写入报 BrokenPipe，以退出码为准。
+            let _ = writer.join();
+        }
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         if !output.status.success() {
             return Err(CoreError::CommandFailed {
@@ -145,6 +182,8 @@ const STABLE_OUTPUT_CONFIG: &[&str] = &[
     "-c",
     "log.showSignature=false",
     "--no-pager",
+    // 传入的路径都按字面量处理，文件名中的 `*`、`[` 等不会被当作通配符。
+    "--literal-pathspecs",
 ];
 
 fn base_command(path: &Path) -> Command {

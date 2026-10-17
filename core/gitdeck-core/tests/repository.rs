@@ -1,45 +1,13 @@
 //! 针对真实 git 仓库的集成测试。
 
+mod common;
+
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use common::{canonical, git, new_repo, open};
 use gitdeck_core::git::runner::GitExecutable;
-use gitdeck_core::{BranchKind, ChangeKind, ConflictKind, CoreError, Repository};
-
-fn git(dir: &Path, args: &[&str]) {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .output()
-        .expect("run git");
-    assert!(
-        out.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-/// 创建一个带一次提交的仓库，默认分支为 main。
-fn new_repo(dir: &Path) {
-    git(dir, &["init", "-b", "main"]);
-    git(dir, &["config", "user.name", "Test"]);
-    git(dir, &["config", "user.email", "test@example.com"]);
-    git(dir, &["config", "commit.gpgsign", "false"]);
-    fs::write(dir.join("readme.md"), "hello\n").unwrap();
-    git(dir, &["add", "."]);
-    git(dir, &["commit", "-m", "Initial commit"]);
-}
-
-fn open(dir: &Path) -> Repository {
-    Repository::open_with(GitExecutable::locate(None).unwrap(), dir).unwrap()
-}
-
-fn canonical(p: &Path) -> PathBuf {
-    fs::canonicalize(p).unwrap()
-}
+use gitdeck_core::{BranchKind, ChangeKind, ConflictKind, CoreError, Repository, RepositoryState};
 
 #[test]
 fn open_from_subdirectory_resolves_root() {
@@ -111,6 +79,7 @@ fn status_reports_merge_conflicts() {
     let st = open(dir).status().unwrap();
     let c = st.changes.iter().find(|c| c.path == "readme.md").unwrap();
     assert_eq!(c.conflict, Some(ConflictKind::BothModified));
+    assert_eq!(st.state, RepositoryState::Merging);
 }
 
 #[test]
@@ -134,9 +103,7 @@ fn branches_with_upstream_tracking() {
         tmp.path(),
         &["clone", origin.to_str().unwrap(), work.to_str().unwrap()],
     );
-    git(&work, &["config", "user.name", "Test"]);
-    git(&work, &["config", "user.email", "test@example.com"]);
-    git(&work, &["config", "commit.gpgsign", "false"]);
+    common::configure(&work);
 
     // 本地领先 1，远程领先 1。
     fs::write(work.join("local.txt"), "l\n").unwrap();

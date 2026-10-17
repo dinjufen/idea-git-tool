@@ -7,10 +7,16 @@ final class ProjectModel {
     let repository: Repository
     let rootURL: URL
 
-    private(set) var status = RepoStatus(branch: BranchStatus(head: nil, oid: nil, upstream: nil, ahead: 0, behind: 0), changes: [])
+    private(set) var status = RepoStatus(
+        branch: BranchStatus(head: nil, oid: nil, upstream: nil, ahead: 0, behind: 0),
+        changes: [],
+        state: .normal
+    )
     private(set) var branches: [BranchRef] = []
     private(set) var isRefreshing = false
     private(set) var lastError: String?
+    /// 最近一条通知（例如提交结果），显示在状态栏，对应 IDEA 的事件通知。
+    private(set) var notification: (text: String, isError: Bool)?
 
     /// 相对路径 → 变更，供 Project 树着色。
     private(set) var changesByPath: [String: FileChange] = [:]
@@ -30,6 +36,32 @@ final class ProjectModel {
         if let head = status.branch.head { return head }
         if let oid = status.branch.oid { return String(oid.prefix(8)) }
         return tr("vcs.noBranch")
+    }
+
+    /// VCS 分支组件标题：分支名 + 进行中的操作 + 与上游的差异（IDEA 样式，例如 `main ↑1 ↓2`）。
+    var branchWidgetTitle: String {
+        var parts = [currentBranchTitle]
+        switch status.state {
+        case .normal: break
+        case .merging: parts.append(tr("vcs.state.merging"))
+        case .rebasing: parts.append(tr("vcs.state.rebasing"))
+        case .cherryPicking: parts.append(tr("vcs.state.cherryPicking"))
+        case .reverting: parts.append(tr("vcs.state.reverting"))
+        }
+        if status.branch.ahead > 0 { parts.append("↑\(status.branch.ahead)") }
+        if status.branch.behind > 0 { parts.append("↓\(status.branch.behind)") }
+        return parts.joined(separator: " ")
+    }
+
+    /// 引用或 HEAD 发生变化时改变，用于判断 Log 是否需要重新加载。
+    var refsSignature: String {
+        ([status.branch.oid ?? "", status.branch.head ?? ""] + branches.map { $0.fullRef + "=" + $0.target })
+            .joined(separator: "\n")
+    }
+
+    func post(_ text: String, isError: Bool = false) {
+        notification = (text, isError)
+        notify()
     }
 
     @discardableResult

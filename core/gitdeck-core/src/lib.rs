@@ -5,13 +5,22 @@
 
 uniffi::setup_scaffolding!();
 
+mod commit;
 mod error;
 pub mod git;
+mod graph;
+mod history;
 mod repo;
 
+pub use commit::{CommitOptions, CommitResult};
 pub use error::CoreError;
 pub use git::branches::{BranchKind, BranchRef};
-pub use git::status::{BranchStatus, ChangeKind, ConflictKind, FileChange, RepoStatus};
+pub use git::log::{ChangedFile, RefKind, RefLabel};
+pub use git::status::{
+    BranchStatus, ChangeKind, ConflictKind, FileChange, RepoStatus, RepositoryState,
+};
+pub use graph::{EdgePart, GraphEdge, GraphRow};
+pub use history::{CommitDetails, LogCommit, LogFilter, LogOrder, LogPage};
 pub use repo::{GitInfo, Repository, git_info};
 
 /// 核心库版本，用于 About 对话框与诊断信息。

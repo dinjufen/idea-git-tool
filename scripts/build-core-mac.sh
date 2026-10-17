@@ -17,6 +17,11 @@ STAGE="$ROOT/build/mac-core"
 # shellcheck disable=SC1091
 [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
 
+# 本机使用 Xcode-beta，不改动系统级 xcode-select（见 docs/DECISIONS.md）。
+if [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Applications/Xcode-beta.app ]; then
+  export DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer
+fi
+
 # 与应用最低系统版本保持一致（见 docs/DECISIONS.md）。
 export MACOSX_DEPLOYMENT_TARGET=15.0
 

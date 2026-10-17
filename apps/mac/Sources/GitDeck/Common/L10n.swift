@@ -39,6 +39,10 @@ extension CoreError {
             tr("error.parse", detail)
         case let .Io(detail):
             tr("error.io", detail)
+        case .EmptyCommitMessage:
+            tr("error.emptyCommitMessage")
+        case .NothingToCommit:
+            tr("error.nothingToCommit")
         }
     }
 }

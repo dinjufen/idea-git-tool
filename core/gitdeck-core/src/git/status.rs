@@ -55,10 +55,23 @@ pub struct BranchStatus {
     pub behind: u32,
 }
 
+/// 仓库当前是否处于某个多步操作中，对应 IDEA 分支组件上的 “Merging” / “Rebasing” 等提示。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, uniffi::Enum)]
+pub enum RepositoryState {
+    #[default]
+    Normal,
+    Merging,
+    Rebasing,
+    CherryPicking,
+    Reverting,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
 pub struct RepoStatus {
     pub branch: BranchStatus,
     pub changes: Vec<FileChange>,
+    /// 由 [`crate::Repository`] 根据 git 目录中的标记文件填充，解析器不设置。
+    pub state: RepositoryState,
 }
 
 pub const STATUS_ARGS: &[&str] = &[

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::error::{CoreError, Result};
 use crate::git::branches::{self, BranchRef};
 use crate::git::runner::GitExecutable;
-use crate::git::status::{self, RepoStatus};
+use crate::git::status::{self, RepoStatus, RepositoryState};
 
 /// 本机 git 的信息，用于设置页展示与启动时的环境检查。
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -25,8 +25,10 @@ pub fn git_info() -> std::result::Result<GitInfo, CoreError> {
 /// 一个已打开的工作区仓库。方法均为阻塞调用，UI 侧应在后台线程调用。
 #[derive(Debug, uniffi::Object)]
 pub struct Repository {
-    git: GitExecutable,
-    root: PathBuf,
+    pub(crate) git: GitExecutable,
+    pub(crate) root: PathBuf,
+    /// 当前工作树的 git 目录（链接工作树时为 `.git/worktrees/<name>`）。
+    pub(crate) git_dir: PathBuf,
 }
 
 #[uniffi::export]
@@ -55,7 +57,9 @@ impl Repository {
 
     pub fn status(&self) -> std::result::Result<RepoStatus, CoreError> {
         let out = self.git.run(&self.root, status::STATUS_ARGS)?;
-        status::parse_status_v2(&out.stdout)
+        let mut status = status::parse_status_v2(&out.stdout)?;
+        status.state = self.state();
+        Ok(status)
     }
 
     pub fn branches(&self) -> std::result::Result<Vec<BranchRef>, CoreError> {
@@ -66,27 +70,57 @@ impl Repository {
 
 impl Repository {
     pub fn open_with(git: GitExecutable, path: &Path) -> Result<Self> {
+        let not_a_repo = || CoreError::NotARepository {
+            path: path.to_string_lossy().into_owned(),
+        };
         if !path.is_dir() {
-            return Err(CoreError::NotARepository {
-                path: path.to_string_lossy().into_owned(),
-            });
+            return Err(not_a_repo());
         }
         let out = git
-            .run(path, ["rev-parse", "--show-toplevel"])
+            .run(path, ["rev-parse", "--show-toplevel", "--absolute-git-dir"])
             .map_err(|err| match err {
-                CoreError::CommandFailed { .. } => CoreError::NotARepository {
-                    path: path.to_string_lossy().into_owned(),
-                },
+                CoreError::CommandFailed { .. } => not_a_repo(),
                 other => other,
             })?;
-        let root = String::from_utf8_lossy(&out.stdout).trim_end().to_owned();
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut lines = text.lines();
+        let (Some(root), Some(git_dir)) = (lines.next(), lines.next()) else {
+            return Err(not_a_repo());
+        };
         Ok(Repository {
             git,
             root: PathBuf::from(root),
+            git_dir: PathBuf::from(git_dir),
         })
     }
 
     pub fn root_path(&self) -> &Path {
         &self.root
+    }
+
+    /// 根据 git 目录中的标记文件判断正在进行的操作（与 git 自身的提示逻辑一致）。
+    pub fn state(&self) -> RepositoryState {
+        let exists = |name: &str| self.git_dir.join(name).exists();
+        if exists("rebase-merge") || exists("rebase-apply") {
+            RepositoryState::Rebasing
+        } else if exists("MERGE_HEAD") {
+            RepositoryState::Merging
+        } else if exists("CHERRY_PICK_HEAD") {
+            RepositoryState::CherryPicking
+        } else if exists("REVERT_HEAD") {
+            RepositoryState::Reverting
+        } else {
+            RepositoryState::Normal
+        }
+    }
+
+    /// HEAD 是否指向一个已存在的提交（空仓库返回 false）。
+    pub(crate) fn has_head(&self) -> bool {
+        self.git
+            .run(
+                &self.root,
+                ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+            )
+            .is_ok()
     }
 }

@@ -33,6 +33,8 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     private let amendCheckbox = NSButton(checkboxWithTitle: tr("commit.amend"), target: nil, action: nil)
     private let commitButton = NSButton(title: tr("commit.button.commit"), target: nil, action: nil)
     private let commitPushButton = NSButton(title: tr("commit.button.commitAndPush"), target: nil, action: nil)
+    private let optionsButton = IconButton(symbol: "gearshape", tooltip: tr("commit.options"), size: 24, pointSize: 12)
+    private let spinner = NSProgressIndicator()
 
     private var groups: [Group] = []
     private var items: [String: FileItem] = [:]
@@ -41,6 +43,13 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     /// 已见过的路径；新出现的已跟踪变更默认勾选，未跟踪文件默认不勾选（与 IDEA 一致）。
     private var known: Set<String> = []
     private var observer: UUID?
+
+    // 提交选项（IDEA 提交区齿轮菜单中的 Sign-off 与 Run Git hooks），在会话内保留。
+    private var signOff = false
+    private var runHooks = true
+    private var isCommitting = false
+    /// 勾选 Amend 时自动填入的上一次提交信息；取消勾选时若未被修改则清空。
+    private var amendPrefill: String?
 
     init(model: ProjectModel) {
         self.model = model
@@ -95,6 +104,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         messageView.isAutomaticQuoteSubstitutionEnabled = false
         messageView.isAutomaticDashSubstitutionEnabled = false
         messageView.setAccessibilityLabel(tr("commit.message.placeholder"))
+        messageView.onTextChange = { [weak self] in self?.updateCommitButtons() }
         let messageScroll = NSScrollView()
         messageScroll.documentView = messageView
         messageScroll.hasVerticalScroller = true
@@ -112,16 +122,25 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         commitButton.keyEquivalentModifierMask = .command
         commitButton.target = self
         commitButton.action = #selector(commit)
+        commitButton.toolTip = tr("commit.button.commit.tooltip")
+        // 推送在后续步骤实现，届时“提交并推送”会在提交成功后打开 Push 对话框。
         commitPushButton.bezelStyle = .push
-        commitPushButton.target = self
-        commitPushButton.action = #selector(commit)
-        // 提交功能在下一步接入 Rust 核心后启用。
-        commitButton.isEnabled = false
         commitPushButton.isEnabled = false
-        commitButton.toolTip = tr("common.notImplemented")
         commitPushButton.toolTip = tr("common.notImplemented")
+        amendCheckbox.target = self
+        amendCheckbox.action = #selector(amendToggled)
+        optionsButton.target = self
+        optionsButton.action = #selector(showOptions)
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isDisplayedWhenStopped = false
+        spinner.isHidden = true
+        // 面板较窄时优先截断“提交并推送”，保证主按钮完整显示。
+        commitButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        amendCheckbox.setContentCompressionResistancePriority(.required, for: .horizontal)
+        commitPushButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let buttons = NSStackView(views: [commitButton, commitPushButton, NSView(), amendCheckbox])
+        let buttons = NSStackView(views: [commitButton, commitPushButton, spinner, NSView(), amendCheckbox, optionsButton])
         buttons.spacing = 8
         buttons.translatesAutoresizingMaskIntoConstraints = false
 
@@ -202,13 +221,106 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         groups = [conflicts, changes, unversioned].filter { $0.kind == .changes || !$0.files.isEmpty }
         outline.reloadData()
         for group in groups where group.kind != .unversioned { outline.expandItem(group) }
+        updateCommitButtons()
     }
 
     @objc private func refresh() { model.refresh() }
     @objc private func expandAll() { outline.expandItem(nil, expandChildren: true) }
     @objc private func collapseAll() { outline.collapseItem(nil, collapseChildren: true) }
 
-    @objc private func commit() {}
+    // MARK: - 提交
+
+    private func updateCommitButtons() {
+        let hasMessage = !messageView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasFiles = !included.isEmpty || amendCheckbox.state == .on
+        commitButton.isEnabled = hasMessage && hasFiles && !isCommitting
+    }
+
+    @objc private func amendToggled() {
+        updateCommitButtons()
+        if amendCheckbox.state == .on {
+            guard messageView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            let repository = model.repository
+            Task {
+                let message = await Task.detached { try? repository.lastCommitMessage() }.value
+                guard let message, self.amendCheckbox.state == .on, self.messageView.string.isEmpty else { return }
+                self.messageView.string = message
+                self.amendPrefill = message
+                self.messageView.didChangeText()
+            }
+        } else if let prefill = amendPrefill, messageView.string == prefill {
+            messageView.string = ""
+            amendPrefill = nil
+            messageView.didChangeText()
+        }
+    }
+
+    @objc private func showOptions() {
+        let menu = NSMenu()
+        let signOffItem = NSMenuItem(title: tr("commit.option.signOff"), action: #selector(toggleSignOff), keyEquivalent: "")
+        signOffItem.state = signOff ? .on : .off
+        signOffItem.target = self
+        let hooksItem = NSMenuItem(title: tr("commit.option.runHooks"), action: #selector(toggleHooks), keyEquivalent: "")
+        hooksItem.state = runHooks ? .on : .off
+        hooksItem.target = self
+        menu.items = [signOffItem, hooksItem]
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: optionsButton.bounds.height + 4), in: optionsButton)
+    }
+
+    @objc private func toggleSignOff() { signOff.toggle() }
+    @objc private func toggleHooks() { runHooks.toggle() }
+
+    @objc private func commit() {
+        guard commitButton.isEnabled else { return }
+        // 只提交仍存在于当前变更中的勾选文件。
+        let paths = model.status.changes.map(\.path).filter { included.contains($0) }
+        let options = CommitOptions(
+            message: messageView.string,
+            paths: paths,
+            amend: amendCheckbox.state == .on,
+            signOff: signOff,
+            skipHooks: !runHooks,
+            author: nil
+        )
+        isCommitting = true
+        spinner.isHidden = false
+        spinner.startAnimation(nil)
+        updateCommitButtons()
+        let repository = model.repository
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { try repository.commit(options: options) }
+            }.value
+            self.isCommitting = false
+            self.spinner.stopAnimation(nil)
+            self.spinner.isHidden = true
+            switch result {
+            case let .success(commit):
+                self.messageView.string = ""
+                self.messageView.didChangeText()
+                self.amendCheckbox.state = .off
+                self.amendPrefill = nil
+                let text = commit.fileCount == 1
+                    ? tr("commit.done.one", commit.subject)
+                    : tr("commit.done.many", "\(commit.fileCount)", commit.subject)
+                self.model.post(text)
+            case let .failure(error):
+                // 钩子输出等错误信息较长，用对话框完整展示。
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = tr("commit.failed")
+                alert.informativeText = errorMessage(error)
+                if let window = self.window {
+                    alert.beginSheetModal(for: window, completionHandler: nil)
+                } else {
+                    alert.runModal()
+                }
+                self.model.post(tr("commit.failed"), isError: true)
+            }
+            self.model.refresh()
+            self.updateCommitButtons()
+        }
+    }
 
     @objc private func openSelected() {
         guard let item = outline.item(atRow: outline.clickedRow) as? FileItem, !item.change.isDeleted else { return }
@@ -230,6 +342,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
             break
         }
         outline.reloadData()
+        updateCommitButtons()
     }
 
     // MARK: - NSOutlineViewDataSource
@@ -346,8 +459,11 @@ final class PlaceholderTextView: NSTextView {
         placeholder.draw(at: origin, withAttributes: attrs)
     }
 
+    var onTextChange: (() -> Void)?
+
     override func didChangeText() {
         super.didChangeText()
         needsDisplay = true
+        onTextChange?()
     }
 }

@@ -1,16 +1,22 @@
 import AppKit
 
-/// 底部 Git 工具窗口，包含 Log 与 Console 两个标签页（内容在后续步骤实现）。
+/// 底部 Git 工具窗口，包含 Log 与 Console 两个标签页。
 final class GitToolWindow: NSView {
+    var onOpenFile: ((URL) -> Void)? {
+        didSet { logView.onOpenFile = onOpenFile }
+    }
+
     private let tabs = NSSegmentedControl(
         labels: [tr("git.tab.log"), tr("git.tab.console")],
         trackingMode: .selectOne,
         target: nil,
         action: nil
     )
-    private let placeholder = NSTextField.label("", color: Theme.secondaryText)
+    private let logView: LogView
+    private let consolePlaceholder = NSTextField.label(tr("git.console.placeholder"), color: Theme.secondaryText)
 
-    init() {
+    init(model: ProjectModel) {
+        logView = LogView(model: model)
         super.init(frame: .zero)
         let background = ColoredView(Theme.toolWindowBackground)
         addSubview(background)
@@ -22,11 +28,11 @@ final class GitToolWindow: NSView {
         tabs.target = self
         tabs.action = #selector(tabChanged)
         tabs.translatesAutoresizingMaskIntoConstraints = false
-        placeholder.alignment = .center
+        logView.translatesAutoresizingMaskIntoConstraints = false
+        consolePlaceholder.alignment = .center
 
-        for view in [header, tabs, placeholder] as [NSView] { addSubview(view) }
         let top = SeparatorLine(.horizontal)
-        addSubview(top)
+        for view in [top, header, tabs, logView, consolePlaceholder] as [NSView] { addSubview(view) }
         NSLayoutConstraint.activate([
             top.topAnchor.constraint(equalTo: topAnchor),
             top.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -36,8 +42,12 @@ final class GitToolWindow: NSView {
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
             tabs.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             tabs.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 60),
-            placeholder.centerXAnchor.constraint(equalTo: centerXAnchor),
-            placeholder.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 18),
+            logView.topAnchor.constraint(equalTo: header.bottomAnchor),
+            logView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            logView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            logView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            consolePlaceholder.centerXAnchor.constraint(equalTo: centerXAnchor),
+            consolePlaceholder.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 18),
         ])
         tabChanged()
     }
@@ -46,6 +56,8 @@ final class GitToolWindow: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     @objc private func tabChanged() {
-        placeholder.stringValue = tabs.selectedSegment == 0 ? tr("git.log.placeholder") : tr("git.console.placeholder")
+        let showLog = tabs.selectedSegment == 0
+        logView.isHidden = !showLog
+        consolePlaceholder.isHidden = showLog
     }
 }

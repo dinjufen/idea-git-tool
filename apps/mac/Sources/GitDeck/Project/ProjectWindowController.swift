@@ -25,7 +25,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
 
     private lazy var projectToolWindow = ProjectToolWindow(model: model)
     private lazy var commitToolWindow = CommitToolWindow(model: model)
-    private lazy var gitToolWindow = GitToolWindow()
+    private lazy var gitToolWindow = GitToolWindow(model: model)
 
     // 工具窗口布局在各项目间共用并持久化，与 IDEA 重启后恢复布局的行为一致。
     private var leftToolWindow: ToolWindowID? = ToolWindowLayout.left {
@@ -138,6 +138,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         let openFile: (URL) -> Void = { [weak self] url in self?.editor.open(url) }
         projectToolWindow.onOpenFile = openFile
         commitToolWindow.onOpenFile = openFile
+        gitToolWindow.onOpenFile = openFile
         editor.onCaretChange = { [weak self] info in self?.statusBar.setEditorInfo(info) }
     }
 
@@ -190,17 +191,12 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     // MARK: - 模型变化
 
     private func modelChanged() {
-        toolbar.vcsWidget.title = model.currentBranchTitle
+        toolbar.vcsWidget.title = model.branchWidgetTitle
         statusBar.setBusy(model.isRefreshing)
         if let error = model.lastError {
             statusBar.setMessage(error, isError: true)
-        } else if !model.isRefreshing {
-            let count = model.status.changes.filter { !$0.isIgnored }.count
-            var parts = [tr("status.changes", "\(count)")]
-            if let upstream = model.status.branch.upstream {
-                parts.append(tr("status.tracking", upstream, "\(model.status.branch.ahead)", "\(model.status.branch.behind)"))
-            }
-            statusBar.setMessage(parts.joined(separator: "  ·  "))
+        } else if let notification = model.notification {
+            statusBar.setMessage(notification.text, isError: notification.isError)
         }
     }
 
