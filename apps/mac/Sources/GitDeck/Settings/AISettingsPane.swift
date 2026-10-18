@@ -1,10 +1,8 @@
 import AppKit
 import GitDeckCore
 
-/// 设置窗口（⌘,）。目前包含 AI 评审页：模型服务、API Key（钥匙串）、评审语言与敏感文件规则。
-final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSComboBoxDelegate, NSTextViewDelegate {
-    static let shared = SettingsWindowController()
-
+/// 设置 > AI 评审：模型服务、API Key（钥匙串）、评审语言与敏感文件规则。
+final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDelegate {
     private let providerPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let keyField = NSSecureTextField()
     private let deleteKeyButton = NSButton(title: tr("ai.settings.deleteKey"), target: nil, action: nil)
@@ -26,35 +24,35 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSCo
         AISettings.Provider.allCases[max(0, providerPopup.indexOfSelectedItem)]
     }
 
-    private init() {
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 600),
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: true
-        )
-        window.title = tr("settings.title")
-        window.isReleasedWhenClosed = false
-        super.init(window: window)
-        window.delegate = self
-        buildLayout()
-        window.center()
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = tr("ai.settings.title")
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func show() {
+    override func loadView() {
+        view = NSView()
+        buildLayout()
+        SettingsForm.fitPreferredSize(self)
+    }
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
         load()
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+    }
+
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        commitFields()
+        savePatterns()
     }
 
     // MARK: - 布局
 
     private func buildLayout() {
-        guard let content = window?.contentView else { return }
-        let title = NSTextField.label(tr("ai.settings.title"), font: .systemFont(ofSize: 15, weight: .semibold))
+        let content = view
 
         providerPopup.addItems(withTitles: AISettings.Provider.allCases.map(\.title))
         providerPopup.target = self
@@ -167,17 +165,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSCo
         }
         modelBox.widthAnchor.constraint(equalToConstant: 300).isActive = true
 
-        let stack = NSStackView(views: [title, grid])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 16
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(stack)
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(grid)
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 20),
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -20),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -20),
+            grid.topAnchor.constraint(equalTo: content.topAnchor, constant: 20),
+            grid.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+            grid.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+            grid.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -20),
         ])
     }
 
@@ -304,9 +298,4 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSCo
     func controlTextDidEndEditing(_ obj: Notification) { commitFields() }
 
     func textDidChange(_ notification: Notification) { savePatterns() }
-
-    func windowWillClose(_ notification: Notification) {
-        commitFields()
-        savePatterns()
-    }
 }

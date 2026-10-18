@@ -135,3 +135,19 @@ fn branches_with_upstream_tracking() {
     assert_eq!(st.branch.upstream.as_deref(), Some("origin/main"));
     assert_eq!((st.branch.ahead, st.branch.behind), (1, 1));
 }
+
+#[test]
+fn git_executable_selection() {
+    let candidates = gitdeck_core::git_candidates();
+    assert!(!candidates.is_empty(), "at least the git on PATH is found");
+    let first = &candidates[0];
+    let info = gitdeck_core::git_info_at(first.path.clone()).unwrap();
+    assert_eq!(info.version, first.version);
+    assert!(gitdeck_core::git_info_at("/nonexistent/git".into()).is_err());
+
+    // 指定为同一个 git 后自动查找的结果随之变化；恢复后回到 PATH 查找（只用同一个可执行文件，不影响并行测试）。
+    gitdeck_core::set_git_executable(Some(first.path.clone()));
+    assert_eq!(gitdeck_core::git_info().unwrap().path, first.path);
+    gitdeck_core::set_git_executable(None);
+    assert!(gitdeck_core::git_info().is_ok());
+}

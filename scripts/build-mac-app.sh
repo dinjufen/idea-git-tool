@@ -23,6 +23,10 @@ swift build --package-path "$PKG" -c "$CONFIG" --arch arm64
 BIN="$(swift build --package-path "$PKG" -c "$CONFIG" --arch arm64 --show-bin-path)"
 
 APP="$ROOT/build/$CONFIG/$PRODUCT_NAME.app"
+# Debug 构建使用独立的 Bundle ID：设置、钥匙串项与最近项目和正式版互不影响。
+if [ "$CONFIG" = "debug" ]; then
+  BUNDLE_ID="$BUNDLE_ID.debug"
+fi
 echo "==> 组装 $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

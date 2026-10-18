@@ -95,7 +95,7 @@ final class AIReviewController {
             alert.addButton(withTitle: tr("common.cancel"))
             switch alert.runModal() {
             case .alertFirstButtonReturn:
-                SettingsWindowController.shared.show()
+                SettingsWindowController.shared.show(.ai)
                 return .cancelled
             case .alertSecondButtonReturn where allowSkip:
                 return .skip

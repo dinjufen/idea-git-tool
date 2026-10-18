@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppearanceSetting.current.apply()
         // git / ssh 需要凭据时调用本程序弹出输入框（见 AskPass）。
         setAskpassProgram(path: Bundle.main.executablePath)
+        GitSettings.apply()
         NSApp.mainMenu = MainMenu.build()
         checkGitAvailable()
 
@@ -84,11 +85,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    /// 找不到可用的 git 时提示，并可直接打开 设置 > Git 指定路径。
     private func checkGitAvailable() {
         do {
             _ = try gitInfo()
         } catch {
-            presentError(error)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = tr("error.title")
+            alert.informativeText = errorMessage(error)
+            alert.addButton(withTitle: tr("settings.git.open"))
+            alert.addButton(withTitle: tr("common.close"))
+            if alert.runModal() == .alertFirstButtonReturn {
+                SettingsWindowController.shared.show(.git)
+            }
         }
     }
 

@@ -132,6 +132,11 @@ final class ShelfView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     func expandFirst() {
         guard let first = items.first else { return }
         outline.expandItem(first)
+        // `-debug.unshelveFirst YES`：取回第一个条目（不保留），验证取回流程。
+        if UserDefaults.standard.bool(forKey: "debug.unshelveFirst") {
+            operations.unshelve(first.entry, paths: [], keep: false)
+            return
+        }
         // `-debug.shelfDiff YES`：同时打开第一个文件的 Diff。
         if UserDefaults.standard.bool(forKey: "debug.shelfDiff"), let file = first.files.first {
             onShowFileDiff?(first.entry, file.file.path)

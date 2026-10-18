@@ -327,7 +327,7 @@ final class AIReviewToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDe
     @objc private func rerun() { controller.rerun() }
     @objc private func stop() { controller.cancel() }
     @objc private func clear() { controller.clear() }
-    @objc private func openSettings() { SettingsWindowController.shared.show() }
+    @objc private func openSettings() { SettingsWindowController.shared.show(.ai) }
 
     @objc private func openSelected() {
         guard let node = selectedFinding else {

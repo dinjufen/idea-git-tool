@@ -397,25 +397,30 @@ final class GitOperations {
         }
     }
 
-    private static let updateMethodKey = "update.method"
-
     /// IDEA 的 “Update Project” 对话框：选择 Merge 或 Rebase，记住上次的选择。
+    /// 勾选 “不再显示” 后直接按设置中的方式更新（可在 设置 > Git 中恢复显示）。
     func updateProject() {
+        guard GitSettings.showUpdateDialog else {
+            performUpdate(GitSettings.updateMethod)
+            return
+        }
         let alert = NSAlert()
         alert.messageText = tr("ops.update.title")
         alert.informativeText = tr("ops.update.message")
-        let rememberedRebase = UserDefaults.standard.string(forKey: Self.updateMethodKey) == "rebase"
         let options = RadioOptionsView(options: [
             (tr("ops.update.merge.title"), tr("ops.update.merge")),
             (tr("ops.update.rebase.title"), tr("ops.update.rebase")),
-        ], selected: rememberedRebase ? 1 : 0)
+        ], selected: GitSettings.updateMethod == .rebase ? 1 : 0)
         alert.accessoryView = options
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = tr("ops.update.dontShow")
         alert.addButton(withTitle: tr("ops.update.confirm"))
         alert.addButton(withTitle: tr("common.cancel"))
         present(alert) { [self] response in
             guard response == .alertFirstButtonReturn else { return }
             let method: UpdateMethod = options.selectedIndex == 1 ? .rebase : .merge
-            UserDefaults.standard.set(method == .rebase ? "rebase" : "merge", forKey: Self.updateMethodKey)
+            GitSettings.updateMethod = method
+            if alert.suppressionButton?.state == .on { GitSettings.showUpdateDialog = false }
             performUpdate(method)
         }
     }

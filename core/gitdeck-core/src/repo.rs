@@ -22,6 +22,55 @@ pub fn git_info() -> std::result::Result<GitInfo, CoreError> {
     })
 }
 
+/// 检查指定的 git 可执行文件（设置页的 “Test”）：返回其版本，版本过低或不可执行时报错。
+#[uniffi::export]
+pub fn git_info_at(path: String) -> std::result::Result<GitInfo, CoreError> {
+    let git = GitExecutable::from_path(PathBuf::from(&path))?;
+    Ok(GitInfo {
+        path,
+        version: git.version().to_string(),
+    })
+}
+
+/// 本机常见位置上可用的 git（设置页的候选列表）：PATH 中的、Homebrew、Xcode 命令行工具等。
+#[uniffi::export]
+pub fn git_candidates() -> Vec<GitInfo> {
+    let mut paths: Vec<PathBuf> = which::which_all("git")
+        .map(|it| it.collect())
+        .unwrap_or_default();
+    #[cfg(target_os = "macos")]
+    paths.extend(
+        [
+            "/opt/homebrew/bin/git",
+            "/usr/local/bin/git",
+            "/usr/bin/git",
+            "/Library/Developer/CommandLineTools/usr/bin/git",
+        ]
+        .map(PathBuf::from),
+    );
+    #[cfg(windows)]
+    paths.extend(
+        [
+            r"C:\Program Files\Git\cmd\git.exe",
+            r"C:\Program Files (x86)\Git\cmd\git.exe",
+        ]
+        .map(PathBuf::from),
+    );
+    let mut seen = std::collections::HashSet::new();
+    paths
+        .into_iter()
+        .filter(|p| p.is_file())
+        .filter(|p| seen.insert(std::fs::canonicalize(p).unwrap_or_else(|_| p.clone())))
+        .filter_map(|p| {
+            let git = GitExecutable::from_path(p.clone()).ok()?;
+            Some(GitInfo {
+                path: p.to_string_lossy().into_owned(),
+                version: git.version().to_string(),
+            })
+        })
+        .collect()
+}
+
 /// 一个已打开的工作区仓库。方法均为阻塞调用，UI 侧应在后台线程调用。
 #[derive(Debug, uniffi::Object)]
 pub struct Repository {

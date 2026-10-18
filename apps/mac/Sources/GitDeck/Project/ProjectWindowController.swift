@@ -308,8 +308,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         Task {
             let delay = UserDefaults.standard.double(forKey: "debug.snapshotDelay")
             try? await Task.sleep(for: .seconds(delay > 0 ? delay : 2))
-            // 有表单（对话框）时截取表单，否则截取主窗口。
-            guard let content = (window?.attachedSheet ?? window)?.contentView else { return }
+            // 设置窗口打开时截取设置窗口；有表单（对话框）时截取表单，否则截取主窗口。
+            let settings = SettingsWindowController.shared.window.flatMap { $0.isVisible ? $0 : nil }
+            guard let content = (settings ?? window?.attachedSheet ?? window)?.contentView else { return }
             let bounds = content.bounds
             guard let rep = content.bitmapImageRepForCachingDisplay(in: bounds) else { return }
             content.cacheDisplay(in: bounds, to: rep)
@@ -354,7 +355,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
                     self.openFinding(0)
                     self.applySuggestion(0)
                 }
-            case "settings": (NSApp.delegate as? AppDelegate)?.showSettings(nil)
+            case "settings":
+                // `-debug.settingsPane <0-3>`：通用 / 编辑器 / Git / AI 评审。
+                let pane = SettingsWindowController.Pane(rawValue: UserDefaults.standard.integer(forKey: "debug.settingsPane")) ?? .general
+                SettingsWindowController.shared.show(pane)
             case "commit": show(.commit)
             case "shelf":
                 showShelf(nil)

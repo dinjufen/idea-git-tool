@@ -49,7 +49,7 @@ pub use diff::{
 pub use error::CoreError;
 pub use git::branches::{BranchKind, BranchRef};
 pub use git::log::{ChangedFile, RefKind, RefLabel};
-pub use git::runner::set_askpass_program;
+pub use git::runner::{set_askpass_program, set_git_executable};
 pub use git::status::{
     BranchStatus, ChangeKind, ConflictKind, FileChange, RepoStatus, RepositoryState,
 };
@@ -60,7 +60,10 @@ pub use patch::{PatchFile, PatchOutcome};
 pub use remote::{
     OutgoingCommit, PushOptions, PushResult, PushTarget, Remote, UpdateMethod, UpdateResult,
 };
-pub use repo::{GitInfo, Repository, clone_directory_name, clone_repository, git_info};
+pub use repo::{
+    GitInfo, Repository, clone_directory_name, clone_repository, git_candidates, git_info,
+    git_info_at,
+};
 pub use rewrite::{RebaseAction, RebaseCommit, RebaseStep, ResetMode};
 pub use shelf::{ShelfEntry, ShelfFileVersions};
 pub use stash::{StashEntry, StashOptions, StashRevisions, UnstashOutcome, stash_revisions};

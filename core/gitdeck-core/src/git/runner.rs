@@ -68,10 +68,12 @@ pub struct GitExecutable {
 }
 
 impl GitExecutable {
-    /// 按优先级查找 git：显式路径 → `GITDECK_GIT` → PATH → 平台内置兜底。
+    /// 按优先级查找 git：显式路径 → 设置中指定的路径 → `GITDECK_GIT` → PATH → 平台内置兜底。
     pub fn locate(explicit: Option<&Path>) -> Result<Self> {
+        let preferred = PREFERRED_GIT.read().ok().and_then(|p| p.clone());
         let candidate = explicit
             .map(Path::to_path_buf)
+            .or(preferred)
             .or_else(|| std::env::var_os(GIT_PATH_ENV).map(PathBuf::from))
             .or_else(|| which::which("git").ok())
             .or_else(bundled_git)
@@ -265,6 +267,18 @@ const STABLE_OUTPUT_CONFIG: &[&str] = &[
     "log.showSignature=false",
     "--no-pager",
 ];
+
+/// 设置中指定的 git 可执行文件；为 `None` 时自动查找。
+static PREFERRED_GIT: RwLock<Option<PathBuf>> = RwLock::new(None);
+
+/// 指定使用的 git（设置 > Git > Path to Git executable）；传 `None` 恢复自动查找。
+/// 只影响之后打开的仓库。
+#[uniffi::export]
+pub fn set_git_executable(path: Option<String>) {
+    if let Ok(mut preferred) = PREFERRED_GIT.write() {
+        *preferred = path.filter(|p| !p.trim().is_empty()).map(PathBuf::from);
+    }
+}
 
 /// 认证提示程序（askpass）。设置后 git 与 ssh 需要用户名、密码或口令时会调用它，
 /// 由客户端弹出原生输入框（对应 IDEA 内置的 askpass）。
