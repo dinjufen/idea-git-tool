@@ -128,6 +128,8 @@ enum MainMenu {
         menu.addItem(item(tr("commit.action.rollback"), #selector(ProjectWindowController.rollbackChanges(_:)), "z", [.command, .option]))
         menu.addItem(item(tr("stash.menu.stash"), #selector(ProjectWindowController.stashChanges(_:)), ""))
         menu.addItem(item(tr("stash.menu.unstash"), #selector(ProjectWindowController.unstashChanges(_:)), ""))
+        menu.addItem(item(tr("shelf.menu.shelve"), #selector(ProjectWindowController.shelveChanges(_:)), ""))
+        menu.addItem(item(tr("shelf.menu.show"), #selector(ProjectWindowController.showShelf(_:)), ""))
         menu.addItem(.separator())
         menu.addItem(item(tr("ai.menu.reviewLocal"), #selector(ProjectWindowController.reviewLocalChanges(_:)), ""))
         menu.addItem(.separator())

@@ -8,6 +8,7 @@ uniffi::setup_scaffolding!();
 mod ai;
 mod blame;
 mod branch_ops;
+mod changelists;
 mod changes;
 mod commit;
 mod conflicts;
@@ -22,6 +23,7 @@ mod patch;
 mod remote;
 mod repo;
 mod rewrite;
+mod shelf;
 mod stash;
 mod tags;
 mod workspace;
@@ -34,6 +36,7 @@ pub use ai::{
 };
 pub use blame::{BlameCommit, BlameResult, FileRevision};
 pub use branch_ops::{CheckoutMode, CheckoutOutcome, MergeOutcome};
+pub use changelists::{Changelist, Changelists, DEFAULT_CHANGELIST, default_changelist_name};
 pub use commit::{CommitOptions, CommitResult, PartialFile};
 pub use conflicts::{
     ConflictLabels, ConflictSide, ConflictVersions, MergeChunk, MergeChunkKind, merge_chunks,
@@ -59,6 +62,7 @@ pub use remote::{
 };
 pub use repo::{GitInfo, Repository, clone_directory_name, clone_repository, git_info};
 pub use rewrite::{RebaseAction, RebaseCommit, RebaseStep, ResetMode};
+pub use shelf::ShelfEntry;
 pub use stash::{StashEntry, StashOptions, StashRevisions, UnstashOutcome, stash_revisions};
 pub use tags::TagInfo;
 pub use workspace::{Submodule, SubmoduleState, Worktree};

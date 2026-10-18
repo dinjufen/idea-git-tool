@@ -194,6 +194,12 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         #endif
         stashes.onShowFileDiff = { [weak self] stash, file in self?.diffOpener.showStashFile(stash, file: file) }
         commitToolWindow.attachStashes(stashes)
+        let shelf = ShelfView(model: model, operations: operations)
+        #if DEBUG
+        debugShelf = shelf
+        #endif
+        commitToolWindow.attachShelf(shelf)
+        commitToolWindow.onShelve = { [weak self] paths, name in self?.operations.shelve(paths: paths, defaultName: name) }
         commitToolWindow.onStashPaths = { [weak self] paths in self?.operations.stashChanges(paths: paths) }
         let showHistory: (String) -> Void = { [weak self] path in self?.showFileHistory(path) }
         editor.onShowHistory = showHistory
@@ -287,9 +293,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     #if DEBUG
     /// 仅 Debug 构建：启动参数 `-debug.openLocalDiff <相对路径>` 在状态加载后自动打开该文件的本地 Diff，便于界面验证。
     private var debugDiffPath = UserDefaults.standard.string(forKey: "debug.openLocalDiff")
-    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge|annotate|history|stashes|rebase|console|worktrees|aiReview|aiMessage|settings|commit|rollback|clone|compare|branchDiff|replace>（compare / branchDiff 配合 `-debug.branch`，replace 配合 `-debug.historyPath`）（history 需配合 `-debug.historyPath <路径>`）` 在状态加载后自动执行对应操作。
+    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge|annotate|history|stashes|rebase|console|worktrees|aiReview|aiMessage|settings|commit|shelf|rollback|clone|compare|branchDiff|replace>（compare / branchDiff 配合 `-debug.branch`，replace 配合 `-debug.historyPath`）（history 需配合 `-debug.historyPath <路径>`）` 在状态加载后自动执行对应操作。
     private var debugAction = UserDefaults.standard.string(forKey: "debug.action")
     private weak var debugStashes: StashesView?
+    private weak var debugShelf: ShelfView?
 
     /// 仅 Debug 构建：`-debug.snapshot <路径>` 在执行调试动作约 2 秒后把窗口内容渲染为 PNG。
     /// 不依赖屏幕状态（显示器休眠或锁屏时也可用），用于界面验证。
@@ -336,6 +343,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
                 }
             case "settings": (NSApp.delegate as? AppDelegate)?.showSettings(nil)
             case "commit": show(.commit)
+            case "shelf":
+                showShelf(nil)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.debugShelf?.expandFirst() }
             case "partialCommit":
                 show(.commit)
                 // 等 Diff 计算完成、选择生效后提交。
@@ -534,6 +544,12 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     @objc func toggleAnnotations(_ sender: Any?) { editor.toggleAnnotations() }
     @objc func stashChanges(_ sender: Any?) { operations.stashChanges() }
     @objc func rollbackChanges(_ sender: Any?) { commitToolWindow.rollbackSelected() }
+    @objc func shelveChanges(_ sender: Any?) { commitToolWindow.shelveSelected() }
+
+    @objc func showShelf(_ sender: Any?) {
+        show(.commit)
+        commitToolWindow.showShelfTab()
+    }
     @objc func newTag(_ sender: Any?) { operations.newTag(at: nil) }
     @objc func manageRemotes(_ sender: Any?) { operations.manageRemotes() }
     @objc func manageSubmodules(_ sender: Any?) { operations.manageSubmodules() }
@@ -582,7 +598,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
              #selector(manageRemotes(_:)), #selector(manageSubmodules(_:)), #selector(createPatch(_:)), #selector(applyPatch(_:)),
              #selector(newWorktree(_:)):
             !operations.isRunning
-        case #selector(rollbackChanges(_:)):
+        case #selector(rollbackChanges(_:)), #selector(shelveChanges(_:)):
             !operations.isRunning && model.status.changes.contains { !$0.isUntracked && $0.conflict == nil }
         case #selector(reviewLocalChanges(_:)):
             !aiReview.isRunning && !model.status.changes.isEmpty

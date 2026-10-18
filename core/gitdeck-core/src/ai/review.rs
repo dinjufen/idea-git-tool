@@ -10,6 +10,7 @@ use super::provider::{self, Conversation, StopReason, ToolOutput, Usage};
 use super::tools::{self, SUBMIT_REVIEW, ToolContext, normalize_path, truncate};
 use super::{AiProviderConfig, AiProviderKind, AiTask};
 use crate::error::{CoreError, Result};
+use crate::patch::{section_path, split_sections};
 use crate::repo::Repository;
 
 /// 评审材料中 diff 的总长度上限；超出的文件只列出名称，由 Agent 按需读取。
@@ -407,68 +408,6 @@ fn ensure_revision(rev: &str) -> Result<()> {
     } else {
         Ok(())
     }
-}
-
-/// 拆分为前言与按文件的 diff 段（每段以 `diff --git` / `diff --cc` 开头）。
-fn split_sections(text: &str) -> (&str, Vec<&str>) {
-    let mut starts: Vec<usize> = Vec::new();
-    let mut offset = 0;
-    for line in text.split_inclusive('\n') {
-        if line.starts_with("diff --git ") || line.starts_with("diff --cc ") {
-            starts.push(offset);
-        }
-        offset += line.len();
-    }
-    let Some(&first) = starts.first() else {
-        return (text, Vec::new());
-    };
-    let mut sections = Vec::with_capacity(starts.len());
-    for (i, &start) in starts.iter().enumerate() {
-        let end = starts.get(i + 1).copied().unwrap_or(text.len());
-        sections.push(&text[start..end]);
-    }
-    (&text[..first], sections)
-}
-
-/// diff 段对应的文件路径（新版本路径；删除的文件为旧路径）。
-fn section_path(section: &str) -> String {
-    let unquote = |p: &str| p.trim().trim_matches('"').to_owned();
-    let mut old = None;
-    for line in section.lines().take(16) {
-        if line.starts_with("@@") {
-            break;
-        }
-        if let Some(p) = line.strip_prefix("+++ ") {
-            let p = unquote(p);
-            if p != "/dev/null" {
-                return p.strip_prefix("b/").unwrap_or(&p).to_owned();
-            }
-        } else if let Some(p) = line.strip_prefix("--- ") {
-            let p = unquote(p);
-            if p != "/dev/null" {
-                old = Some(p.strip_prefix("a/").unwrap_or(&p).to_owned());
-            }
-        } else if let Some(p) = line.strip_prefix("rename to ") {
-            return unquote(p);
-        }
-    }
-    if let Some(old) = old {
-        return old;
-    }
-    // 没有内容差异的段（模式变更、二进制文件）：从 `diff --git a/X b/X` 中取路径。
-    let header = section.lines().next().unwrap_or_default();
-    let rest = header
-        .strip_prefix("diff --git ")
-        .or_else(|| header.strip_prefix("diff --cc "))
-        .unwrap_or_default()
-        .trim_matches('"');
-    if rest.len() > 5 && rest.starts_with("a/") && (rest.len() - 5).is_multiple_of(2) {
-        let n = (rest.len() - 5) / 2;
-        if rest.is_char_boundary(2 + n) {
-            return rest[2..2 + n].to_owned();
-        }
-    }
-    rest.strip_prefix("b/").unwrap_or(rest).to_owned()
 }
 
 /// 给 hunk 中的每一行加上新版本行号（删除的行留空），便于模型给出准确的行号。
