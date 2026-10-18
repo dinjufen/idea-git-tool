@@ -185,10 +185,12 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
             add(tr("branches.menu.checkout")) { ops.checkout(.remote(name)) }
         }
         add(tr("branches.menu.newFrom", name)) { ops.newBranch(from: name) }
-        add(tr("branches.menu.checkoutAndRebase", current), nil)
+        add(tr("branches.menu.checkoutAndRebase", current), enabled: branch.kind == .local && !isCurrent) {
+            ops.checkoutAndRebase(name)
+        }
         menu.addItem(.separator())
-        add(tr("branches.menu.compare", current), nil)
-        add(tr("branches.menu.showDiff"), nil)
+        add(tr("branches.menu.compare", current), enabled: !isCurrent) { ops.compareWithCurrent(name) }
+        add(tr("branches.menu.showDiff")) { ops.showDiffWithWorkingTree(name) }
         add(tr("branches.menu.aiReview", current, name), enabled: !isCurrent && ops.aiReview != nil) {
             ops.aiReview?.reviewBranch(against: name)
         }
@@ -197,14 +199,14 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
         add(tr("branches.menu.mergeInto", name, current), enabled: !isCurrent) { ops.merge(name) }
         menu.addItem(.separator())
         if branch.kind == .local {
-            add(tr("branches.menu.update"), nil)
+            add(tr("branches.menu.update"), enabled: branch.upstream != nil) { ops.updateBranch(name) }
             add(tr("branches.menu.push"), enabled: isCurrent) { ops.push() }
             menu.addItem(.separator())
             add(tr("branches.menu.rename")) { ops.rename(name) }
             add(tr("branches.menu.delete"), enabled: !isCurrent) { ops.delete(name) }
         } else {
             add(tr("branches.menu.pull", name, current)) { ops.merge(name) }
-            add(tr("branches.menu.delete"), nil)
+            add(tr("branches.menu.delete")) { ops.deleteRemoteBranch(name) }
         }
         return menu
     }

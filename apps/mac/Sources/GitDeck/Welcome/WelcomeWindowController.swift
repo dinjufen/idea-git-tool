@@ -57,9 +57,7 @@ final class WelcomeWindowController: NSWindowController, NSTableViewDataSource, 
 
         let newButton = NSButton(title: tr("welcome.new"), target: appDelegate, action: #selector(AppDelegate.newProject(_:)))
         let openButton = NSButton(title: tr("welcome.open"), target: appDelegate, action: #selector(AppDelegate.openDocument(_:)))
-        let cloneButton = NSButton(title: tr("welcome.clone"), target: nil, action: nil)
-        cloneButton.isEnabled = false
-        cloneButton.toolTip = tr("common.notImplemented")
+        let cloneButton = NSButton(title: tr("welcome.clone"), target: appDelegate, action: #selector(AppDelegate.cloneProject(_:)))
         let buttons = NSStackView(views: [newButton, openButton, cloneButton])
         buttons.spacing = 8
         buttons.translatesAutoresizingMaskIntoConstraints = false

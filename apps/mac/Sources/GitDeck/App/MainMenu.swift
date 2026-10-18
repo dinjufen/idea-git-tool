@@ -42,6 +42,7 @@ enum MainMenu {
         let menu = NSMenu(title: tr("menu.file"))
         menu.addItem(item(tr("menu.file.new"), #selector(AppDelegate.newProject(_:)), "n", [.command, .shift]))
         menu.addItem(item(tr("menu.file.open"), #selector(AppDelegate.openDocument(_:)), "o"))
+        menu.addItem(item(tr("menu.file.clone"), #selector(AppDelegate.cloneProject(_:)), ""))
         menu.addItem(item(tr("menu.file.welcome"), #selector(AppDelegate.showWelcomeWindow(_:)), ""))
         menu.addItem(.separator())
         menu.addItem(item(tr("menu.file.save"), #selector(ProjectWindowController.saveDocument(_:)), "s"))
@@ -61,6 +62,7 @@ enum MainMenu {
         menu.addItem(withTitle: tr("menu.edit.selectAll"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         menu.addItem(.separator())
         menu.addItem(item(tr("menu.edit.find"), #selector(ProjectWindowController.showFindBar(_:)), "f"))
+        menu.addItem(item(tr("menu.edit.replace"), #selector(ProjectWindowController.showReplaceBar(_:)), "r"))
         menu.addItem(item(tr("menu.edit.findNext"), #selector(ProjectWindowController.findNext(_:)), "g"))
         menu.addItem(item(tr("menu.edit.findPrevious"), #selector(ProjectWindowController.findPrevious(_:)), "g", [.command, .shift]))
         return menu
@@ -123,6 +125,7 @@ enum MainMenu {
         menu.addItem(item(tr("worktree.menu.new"), #selector(ProjectWindowController.newWorktree(_:)), ""))
         menu.addItem(item(tr("console.menu"), #selector(ProjectWindowController.showGitConsole(_:)), ""))
         menu.addItem(.separator())
+        menu.addItem(item(tr("commit.action.rollback"), #selector(ProjectWindowController.rollbackChanges(_:)), "z", [.command, .option]))
         menu.addItem(item(tr("stash.menu.stash"), #selector(ProjectWindowController.stashChanges(_:)), ""))
         menu.addItem(item(tr("stash.menu.unstash"), #selector(ProjectWindowController.unstashChanges(_:)), ""))
         menu.addItem(.separator())

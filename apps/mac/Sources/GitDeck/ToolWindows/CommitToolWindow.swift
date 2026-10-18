@@ -16,6 +16,8 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     var onStashPaths: (([String]) -> Void)?
     /// 把选中的改动保存为补丁。
     var onCreatePatch: (([String]) -> Void)?
+    /// Rollback：参数为选中的文件（为空时由对话框全选）。
+    var onRollback: (([String]) -> Void)?
     /// AI 评审：评审勾选的改动、生成提交信息、提交前检查。
     weak var aiReview: AIReviewController?
 
@@ -259,7 +261,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         }
         let stack = NSStackView(views: [
             button("arrow.clockwise", tr("git.action.refresh"), #selector(refresh)),
-            button("arrow.uturn.backward", tr("commit.action.rollback"), nil),
+            button("arrow.uturn.backward", tr("commit.action.rollback"), #selector(rollbackSelected)),
             button("plus.forwardslash.minus", tr("commit.action.showDiff"), #selector(showDiffForSelection)),
             button("tray.and.arrow.down", tr("commit.action.shelve"), nil),
             button("sparkles", tr("ai.action.reviewSelected"), #selector(aiReviewSelected)),
@@ -477,6 +479,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         menu.addItem(withTitle: tr("commit.action.showDiff"), action: #selector(showDiffForSelection), keyEquivalent: "").target = self
         menu.addItem(withTitle: tr("commit.action.jumpToSource"), action: #selector(jumpToSource), keyEquivalent: "").target = self
         menu.addItem(withTitle: tr("git.action.showHistory"), action: #selector(showHistory), keyEquivalent: "").target = self
+        menu.addItem(withTitle: tr("commit.action.rollback"), action: #selector(rollbackSelected), keyEquivalent: "").target = self
         menu.addItem(withTitle: tr("stash.action.stashSelected"), action: #selector(stashSelected), keyEquivalent: "").target = self
         menu.addItem(withTitle: tr("patch.menu.createSelected"), action: #selector(createPatchSelected), keyEquivalent: "").target = self
         menu.addItem(.separator())
@@ -515,6 +518,22 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     @objc func showDiffForSelection() {
         guard let item = targetItem else { return }
         onShowDiff?(item.change)
+    }
+
+    /// 回滚选中的文件（选中分组时为该组全部文件）；未选中时对话框中全选。
+    @objc func rollbackSelected() {
+        let rows = outline.selectedRowIndexes.contains(outline.clickedRow) || outline.clickedRow < 0
+            ? outline.selectedRowIndexes
+            : IndexSet(integer: outline.clickedRow)
+        var paths: [String] = []
+        for row in rows {
+            switch outline.item(atRow: row) {
+            case let item as FileItem: paths.append(item.change.path)
+            case let group as Group: paths += group.files.map(\.path)
+            default: break
+            }
+        }
+        onRollback?(paths)
     }
 
     /// 储藏选中的已跟踪文件；没有选中文件时储藏全部。

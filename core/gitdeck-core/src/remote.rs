@@ -292,7 +292,7 @@ impl Repository {
         Some(String::from_utf8_lossy(&out.stdout).trim().to_owned())
     }
 
-    fn config(&self, key: &str) -> Option<String> {
+    pub(crate) fn config(&self, key: &str) -> Option<String> {
         let out = self.git.run(&self.root, ["config", "--get", key]).ok()?;
         let value = String::from_utf8_lossy(&out.stdout).trim().to_owned();
         (!value.is_empty()).then_some(value)

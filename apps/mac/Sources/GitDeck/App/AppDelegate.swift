@@ -64,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func presentProject(_ repository: Repository) {
+    func presentProject(_ repository: Repository) {
         let controller = ProjectWindowController(repository: repository)
         controller.onClose = { [weak self, weak controller] in
             self?.projects.removeAll { $0 === controller }
@@ -112,6 +112,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.message = tr("welcome.new.message")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         initProject(at: url)
+    }
+
+    /// 克隆仓库：克隆期间显示进度窗口，完成后打开项目。
+    @objc func cloneProject(_ sender: Any?) {
+        let parent = NSApp.keyWindow
+        CloneDialog().begin(for: parent) { [weak self] url, directory in
+            let progress = CloneProgressWindow(url: url)
+            progress.show(over: parent)
+            Task {
+                let result = await Task.detached(priority: .userInitiated) {
+                    Result { try cloneRepository(url: url, directory: directory) }
+                }.value
+                progress.close()
+                switch result {
+                case let .success(repository):
+                    self?.presentProject(repository)
+                case let .failure(error):
+                    self?.presentError(error)
+                }
+            }
+        }
     }
 
     @objc func showWelcomeWindow(_ sender: Any?) {

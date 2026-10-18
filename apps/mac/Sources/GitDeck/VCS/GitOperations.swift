@@ -14,6 +14,10 @@ final class GitOperations {
     var onProgress: ((String?) -> Void)?
     /// 出现冲突时打开 Conflicts 对话框（与 IDEA 一样自动弹出）。
     var onConflicts: (() -> Void)?
+    /// 在 Log 中定位提交。
+    var onRevealCommit: ((String) -> Void)?
+    /// 打开某个修订中的文件与工作区文件的 Diff。
+    var onShowRevisionFileDiff: ((String, ChangedFile) -> Void)?
 
     private(set) var runningTitle: String?
 

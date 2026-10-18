@@ -1,15 +1,29 @@
 import AppKit
 
 /// 编辑器顶部的查找栏（IDEA / VSCode 的 ⌘F）：输入即搜索，Return 下一个，⇧Return 上一个，Esc 关闭。
+/// 替换模式（⌘R）多一行替换输入框与 Replace / Replace All 按钮。
 final class FindBar: ColoredView, NSSearchFieldDelegate {
     var onQueryChange: ((String, Bool) -> Void)?
     var onNext: (() -> Void)?
     var onPrevious: (() -> Void)?
     var onClose: (() -> Void)?
+    var onReplace: ((String) -> Void)?
+    var onReplaceAll: ((String) -> Void)?
 
     private let field = NSSearchField()
     private let matchCase = NSButton(checkboxWithTitle: tr("find.matchCase"), target: nil, action: nil)
     private let countLabel = NSTextField.label("", font: Theme.smallFont, color: Theme.secondaryText)
+    private let replaceField = NSTextField()
+    private let replaceRow = NSStackView()
+    private var heightConstraint: NSLayoutConstraint!
+
+    /// 显示替换行。
+    var isReplaceMode = false {
+        didSet {
+            replaceRow.isHidden = !isReplaceMode
+            heightConstraint.constant = isReplaceMode ? 64 : 34
+        }
+    }
 
     init() {
         super.init(Theme.toolWindowBackground)
@@ -39,14 +53,34 @@ final class FindBar: ColoredView, NSSearchFieldDelegate {
         stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
+
+        replaceField.placeholderString = tr("find.replace.placeholder")
+        replaceField.delegate = self
+        replaceField.translatesAutoresizingMaskIntoConstraints = false
+        let replaceButton = NSButton(title: tr("find.replace"), target: self, action: #selector(replace))
+        let replaceAllButton = NSButton(title: tr("find.replaceAll"), target: self, action: #selector(replaceAll))
+        for b in [replaceButton, replaceAllButton] {
+            b.bezelStyle = .push
+            b.controlSize = .small
+        }
+        replaceRow.setViews([replaceField, replaceButton, replaceAllButton], in: .leading)
+        replaceRow.spacing = 6
+        replaceRow.isHidden = true
+        replaceRow.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(replaceRow)
+
         let bottom = SeparatorLine(.horizontal)
         addSubview(bottom)
+        heightConstraint = heightAnchor.constraint(equalToConstant: 34).withPriority(.init(999))
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 34).withPriority(.init(999)),
+            heightConstraint,
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stack.centerYAnchor.constraint(equalTo: topAnchor, constant: 17),
             field.widthAnchor.constraint(equalToConstant: 260),
+            replaceRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            replaceRow.centerYAnchor.constraint(equalTo: topAnchor, constant: 47),
+            replaceField.widthAnchor.constraint(equalTo: field.widthAnchor),
             bottom.leadingAnchor.constraint(equalTo: leadingAnchor),
             bottom.trailingAnchor.constraint(equalTo: trailingAnchor),
             bottom.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -65,6 +99,11 @@ final class FindBar: ColoredView, NSSearchFieldDelegate {
         queryChanged()
     }
 
+    func setResult(text: String) {
+        countLabel.stringValue = text
+        countLabel.textColor = Theme.secondaryText
+    }
+
     func setResult(current: Int?, total: Int) {
         if query.isEmpty {
             countLabel.stringValue = ""
@@ -76,10 +115,19 @@ final class FindBar: ColoredView, NSSearchFieldDelegate {
         countLabel.textColor = !query.isEmpty && total == 0 ? Theme.FileStatus.conflict : Theme.secondaryText
     }
 
-    func controlTextDidChange(_ obj: Notification) { queryChanged() }
+    func controlTextDidChange(_ obj: Notification) {
+        if (obj.object as? NSTextField) !== replaceField { queryChanged() }
+    }
+
+    func focusReplace() {
+        window?.makeFirstResponder(replaceField)
+    }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         switch selector {
+        case #selector(NSResponder.insertNewline(_:)) where control === replaceField:
+            replace()
+            return true
         case #selector(NSResponder.insertNewline(_:)):
             NSEvent.modifierFlags.contains(.shift) ? previous() : next()
             return true
@@ -95,4 +143,6 @@ final class FindBar: ColoredView, NSSearchFieldDelegate {
     @objc private func next() { onNext?() }
     @objc private func previous() { onPrevious?() }
     @objc private func close() { onClose?() }
+    @objc private func replace() { onReplace?(replaceField.stringValue) }
+    @objc private func replaceAll() { onReplaceAll?(replaceField.stringValue) }
 }

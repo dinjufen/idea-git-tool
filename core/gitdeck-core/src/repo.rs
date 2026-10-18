@@ -68,6 +68,45 @@ impl Repository {
     }
 }
 
+/// 克隆 `url` 到 `directory`（不能已存在且非空），完成后打开。认证经 askpass 弹窗。
+#[uniffi::export]
+pub fn clone_repository(
+    url: String,
+    directory: String,
+) -> std::result::Result<Arc<Repository>, CoreError> {
+    let url = url.trim();
+    if url.is_empty() || url.starts_with('-') {
+        return Err(CoreError::Parse {
+            detail: format!("invalid repository url: {url:?}"),
+        });
+    }
+    let git = GitExecutable::locate(None)?;
+    let dir = Path::new(&directory);
+    let parent = dir
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or_else(|| CoreError::Io {
+            detail: format!("invalid directory: {directory}"),
+        })?;
+    std::fs::create_dir_all(parent)?;
+    git.run(parent, ["clone", "--", url, directory.as_str()])
+        .map_err(CoreError::classify_remote)?;
+    Repository::open_with(git, dir).map(Arc::new)
+}
+
+/// 从仓库地址推断默认的目录名（`https://host/team/app.git` → `app`）。
+#[uniffi::export]
+pub fn clone_directory_name(url: String) -> String {
+    let trimmed = url.trim().trim_end_matches('/');
+    let last = trimmed.rsplit(['/', ':', '\\']).next().unwrap_or(trimmed);
+    let name = last.strip_suffix(".git").unwrap_or(last);
+    if name.is_empty() {
+        "repository".into()
+    } else {
+        name.to_owned()
+    }
+}
+
 impl Repository {
     pub fn open_with(git: GitExecutable, path: &Path) -> Result<Self> {
         let not_a_repo = || CoreError::NotARepository {

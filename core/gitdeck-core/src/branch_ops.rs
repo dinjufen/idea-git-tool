@@ -185,6 +185,77 @@ impl Repository {
         Ok(())
     }
 
+    /// 签出 `branch` 并把它变基到 `onto` 上（IDEA 的 Checkout and Rebase onto Current）。
+    /// 本地改动会自动暂存并在完成后恢复。
+    pub fn checkout_and_rebase(
+        &self,
+        branch: String,
+        onto: String,
+    ) -> std::result::Result<MergeOutcome, CoreError> {
+        let result = self.git.run(
+            &self.root,
+            [
+                "rebase",
+                "--autostash",
+                "--end-of-options",
+                onto.as_str(),
+                branch.as_str(),
+            ],
+        );
+        self.rebase_result(result)
+    }
+
+    /// 快进非当前的本地分支到其上游（IDEA 分支菜单的 Update）；不能快进时报错。
+    pub fn update_branch(&self, name: String) -> std::result::Result<(), CoreError> {
+        self.ensure_valid_branch_name(&name)?;
+        let remote = self.config(&format!("branch.{name}.remote"));
+        let merge = self.config(&format!("branch.{name}.merge"));
+        let (Some(remote), Some(merge)) = (remote, merge) else {
+            return Err(CoreError::NoUpstream { branch: name });
+        };
+        let refspec = format!("{merge}:refs/heads/{name}");
+        self.git
+            .run(
+                &self.root,
+                [
+                    "fetch",
+                    "--no-recurse-submodules",
+                    "--end-of-options",
+                    remote.as_str(),
+                    refspec.as_str(),
+                ],
+            )
+            .map_err(CoreError::classify_remote)?;
+        Ok(())
+    }
+
+    /// 删除远程分支（`origin/feature` → `git push origin --delete feature`）。
+    pub fn delete_remote_branch(&self, name: String) -> std::result::Result<(), CoreError> {
+        let remotes = self.remotes()?;
+        let (remote, branch) = remotes
+            .iter()
+            .filter_map(|r| {
+                name.strip_prefix(&format!("{}/", r.name))
+                    .map(|b| (r.name.clone(), b.to_owned()))
+            })
+            .max_by_key(|(r, _)| r.len())
+            .ok_or_else(|| CoreError::InvalidBranchName { name: name.clone() })?;
+        self.ensure_valid_branch_name(&branch)?;
+        self.git
+            .run(
+                &self.root,
+                [
+                    "push",
+                    "--delete",
+                    "--end-of-options",
+                    remote.as_str(),
+                    branch.as_str(),
+                ],
+            )
+            .map_err(CoreError::classify_remote)?;
+        Ok(())
+    }
+
     pub fn abort_merge(&self) -> std::result::Result<(), CoreError> {
         self.git.run(&self.root, ["merge", "--abort"])?;
         Ok(())

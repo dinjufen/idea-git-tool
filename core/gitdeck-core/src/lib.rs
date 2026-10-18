@@ -8,6 +8,7 @@ uniffi::setup_scaffolding!();
 mod ai;
 mod blame;
 mod branch_ops;
+mod changes;
 mod commit;
 mod conflicts;
 mod console;
@@ -55,7 +56,7 @@ pub use patch::{PatchFile, PatchOutcome};
 pub use remote::{
     OutgoingCommit, PushOptions, PushResult, PushTarget, Remote, UpdateMethod, UpdateResult,
 };
-pub use repo::{GitInfo, Repository, git_info};
+pub use repo::{GitInfo, Repository, clone_directory_name, clone_repository, git_info};
 pub use rewrite::{RebaseAction, RebaseCommit, RebaseStep, ResetMode};
 pub use stash::{StashEntry, StashOptions, StashRevisions, UnstashOutcome, stash_revisions};
 pub use tags::TagInfo;

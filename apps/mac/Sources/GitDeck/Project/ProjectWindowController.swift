@@ -50,6 +50,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     private var bottomHeight: CGFloat = 260
     private var observer: UUID?
     private var branchesPopover: NSPopover?
+    private var fileWatcher: FileWatcher?
 
     init(repository: Repository) {
         model = ProjectModel(repository: repository)
@@ -77,6 +78,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         applyToolWindowState()
         model.refresh()
         editor.restoreSession()
+        fileWatcher = FileWatcher(root: model.rootURL) { [weak self] paths in
+            self?.model.refresh()
+            self?.editor.reloadFromDisk(paths: paths)
+        }
+        fileWatcher?.start()
     }
 
     @available(*, unavailable)
@@ -170,6 +176,12 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             if let title { self.statusBar.setMessage(title) }
         }
         commitToolWindow.onPushAfterCommit = { [weak self] in self?.operations.push() }
+        commitToolWindow.onRollback = { [weak self] paths in self?.operations.rollback(selected: paths) }
+        operations.onRevealCommit = { [weak self] hash in
+            self?.show(.git)
+            self?.gitToolWindow.reveal(commit: hash)
+        }
+        operations.onShowRevisionFileDiff = { [weak self] revision, file in self?.diffOpener.showRevisionAgainstWorkingTree(revision: revision, file: file) }
         conflictResolver.window = window
         operations.onConflicts = { [weak self] in self?.conflictResolver.requestConflicts() }
         commitToolWindow.onResolveConflict = { [weak self] change in self?.conflictResolver.openMerge(change) }
@@ -273,7 +285,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     #if DEBUG
     /// 仅 Debug 构建：启动参数 `-debug.openLocalDiff <相对路径>` 在状态加载后自动打开该文件的本地 Diff，便于界面验证。
     private var debugDiffPath = UserDefaults.standard.string(forKey: "debug.openLocalDiff")
-    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge|annotate|history|stashes|rebase|console|worktrees|aiReview|aiMessage|settings>（history 需配合 `-debug.historyPath <路径>`）` 在状态加载后自动执行对应操作。
+    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge|annotate|history|stashes|rebase|console|worktrees|aiReview|aiMessage|settings|commit|rollback|clone|compare|branchDiff|replace>（compare / branchDiff 配合 `-debug.branch`，replace 配合 `-debug.historyPath`）（history 需配合 `-debug.historyPath <路径>`）` 在状态加载后自动执行对应操作。
     private var debugAction = UserDefaults.standard.string(forKey: "debug.action")
     private weak var debugStashes: StashesView?
 
@@ -282,7 +294,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     private func scheduleDebugSnapshot() {
         guard let path = UserDefaults.standard.string(forKey: "debug.snapshot") else { return }
         Task {
-            try? await Task.sleep(for: .seconds(2))
+            let delay = UserDefaults.standard.double(forKey: "debug.snapshotDelay")
+            try? await Task.sleep(for: .seconds(delay > 0 ? delay : 2))
             // 有表单（对话框）时截取表单，否则截取主窗口。
             guard let content = (window?.attachedSheet ?? window)?.contentView else { return }
             let bounds = content.bounds
@@ -320,6 +333,18 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
                     self.applySuggestion(0)
                 }
             case "settings": (NSApp.delegate as? AppDelegate)?.showSettings(nil)
+            case "commit": show(.commit)
+            case "rollback":
+                show(.commit)
+                commitToolWindow.rollbackSelected()
+            case "clone": (NSApp.delegate as? AppDelegate)?.cloneProject(nil)
+            case "compare": operations.compareWithCurrent(UserDefaults.standard.string(forKey: "debug.branch") ?? "")
+            case "branchDiff": operations.showDiffWithWorkingTree(UserDefaults.standard.string(forKey: "debug.branch") ?? "")
+            case "replace":
+                if let path = UserDefaults.standard.string(forKey: "debug.historyPath") {
+                    editor.open(model.rootURL.appendingPathComponent(path))
+                    DispatchQueue.main.async { self.editor.activeEditor?.showFindBar(replace: true) }
+                }
             case "aiMessage":
                 showCommitToolWindow(nil)
                 // 等提交工具窗口按最新状态勾选好文件。
@@ -485,6 +510,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     @objc func closeEditorTab(_ sender: Any?) { editor.closeActive() }
 
     @objc func showFindBar(_ sender: Any?) { editor.activeEditor?.showFindBar() }
+    @objc func showReplaceBar(_ sender: Any?) { editor.activeEditor?.showFindBar(replace: true) }
     @objc func nextDifference(_ sender: Any?) { editor.activeDiff?.nextDifference() }
     @objc func previousDifference(_ sender: Any?) { editor.activeDiff?.previousDifference() }
     @objc func findNext(_ sender: Any?) { editor.activeEditor?.findNext() }
@@ -501,6 +527,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     @objc func resolveConflicts(_ sender: Any?) { conflictResolver.showConflicts() }
     @objc func toggleAnnotations(_ sender: Any?) { editor.toggleAnnotations() }
     @objc func stashChanges(_ sender: Any?) { operations.stashChanges() }
+    @objc func rollbackChanges(_ sender: Any?) { commitToolWindow.rollbackSelected() }
     @objc func newTag(_ sender: Any?) { operations.newTag(at: nil) }
     @objc func manageRemotes(_ sender: Any?) { operations.manageRemotes() }
     @objc func manageSubmodules(_ sender: Any?) { operations.manageSubmodules() }
@@ -549,6 +576,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
              #selector(manageRemotes(_:)), #selector(manageSubmodules(_:)), #selector(createPatch(_:)), #selector(applyPatch(_:)),
              #selector(newWorktree(_:)):
             !operations.isRunning
+        case #selector(rollbackChanges(_:)):
+            !operations.isRunning && model.status.changes.contains { !$0.isUntracked && $0.conflict == nil }
         case #selector(reviewLocalChanges(_:)):
             !aiReview.isRunning && !model.status.changes.isEmpty
         case #selector(continueRebase(_:)), #selector(abortRebase(_:)):
@@ -563,7 +592,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             !operations.isRunning && model.status.state == .reverting
         case #selector(abortMerge(_:)):
             !operations.isRunning && model.status.state == .merging
-        case #selector(showFindBar(_:)), #selector(findNext(_:)), #selector(findPrevious(_:)):
+        case #selector(showFindBar(_:)), #selector(findNext(_:)), #selector(findPrevious(_:)), #selector(showReplaceBar(_:)):
             editor.activeEditor != nil
         case #selector(nextDifference(_:)), #selector(previousDifference(_:)):
             editor.activeDiff != nil
@@ -576,6 +605,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
 
     func windowWillClose(_ notification: Notification) {
         if let observer { model.removeObserver(observer) }
+        fileWatcher?.stop()
         onClose?()
     }
 

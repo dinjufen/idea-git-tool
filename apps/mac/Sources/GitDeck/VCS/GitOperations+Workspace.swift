@@ -120,6 +120,25 @@ extension GitOperations {
         RemotesDialog(model: model, operations: self).begin(for: window)
     }
 
+    // MARK: - Rollback
+
+    /// IDEA 的 Rollback：确认要回滚的文件后恢复到 HEAD；`selected` 为初始勾选的路径（为空时全选）。
+    func rollback(selected: [String]) {
+        let changes = model.status.changes.filter { !$0.isUntracked && $0.conflict == nil && $0.unstaged != .ignored }
+        guard !changes.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        RollbackDialog(changes: changes, selected: Set(selected)).begin(for: window) { [self] paths, deleteAdded in
+            run(tr("ops.progress.rollback"), { repo in try repo.rollback(paths: paths, deleteAdded: deleteAdded) }) { [self] result in
+                switch result {
+                case .success: model.post(tr("rollback.done", "\(paths.count)"))
+                case let .failure(error): showError(tr("rollback.failed"), error)
+                }
+            }
+        }
+    }
+
     // MARK: - 子模块
 
     func manageSubmodules() {

@@ -33,6 +33,31 @@ struct DiffOpener {
         }
     }
 
+    /// 某个修订（分支）中的文件与工作区文件比较（分支菜单的 Show Diff with Working Tree）。
+    func showRevisionAgainstWorkingTree(revision: String, file: ChangedFile) {
+        let repository = model.repository
+        let root = model.rootURL
+        let basePath = file.origPath ?? file.path
+        Task {
+            let (base, text) = await Task.detached(priority: .userInitiated) {
+                let base = file.kind == .added ? nil : try? repository.fileAtRevision(revision: revision, path: basePath)
+                let text = file.kind == .deleted ? nil : Self.readWorkingFile(root.appendingPathComponent(file.path))
+                return (base ?? nil, text)
+            }.value
+            editor.openDiff(
+                key: "revision:\(revision):\(file.path)",
+                title: (file.path as NSString).lastPathComponent,
+                tooltip: tr("diff.tooltip.revision", file.path, revision)
+            ) {
+                DiffView(
+                    left: DiffSide(title: revision, text: base),
+                    right: DiffSide(title: tr("diff.title.local"), text: text),
+                    path: file.path
+                )
+            }
+        }
+    }
+
     /// 历史提交中的文件：与第一个父提交比较（Log 详情中双击文件）。
     func showCommitFile(hash: String, parent: String?, file: ChangedFile, revealLine: Int? = nil) {
         let repository = model.repository

@@ -22,6 +22,8 @@ final class EditorAreaView: NSView {
         let relativePath: String?
         let editor: CodeEditorView
         var isModified = false
+        /// 正在从磁盘重新载入（编辑器内容变化不标记为已修改）。
+        var isReloading = false
         /// HEAD 中的内容；文件不在 HEAD 中时为 `nil`。
         var base: String?
         var lineStatusTask: Task<Void, Never>?
@@ -237,7 +239,7 @@ final class EditorAreaView: NSView {
         let document = Document(url: url, relativePath: relativePath(of: url), text: text)
         document.editor.onTextChange = { [weak self, weak document] in
             guard let self, let document else { return }
-            if !document.isModified {
+            if !document.isModified, !document.isReloading {
                 document.isModified = true
                 self.rebuildTabs()
             }
@@ -264,6 +266,22 @@ final class EditorAreaView: NSView {
         guard let document = documents.first(where: { $0.url == url }) else { return }
         // 新打开的编辑器尚未布局，等布局完成后再滚动。
         DispatchQueue.main.async { document.editor.reveal(line: max(0, line)) }
+    }
+
+    /// 外部修改了文件：没有未保存修改的文档重新载入磁盘内容（可撤销），有修改的保持不变。
+    func reloadFromDisk(paths: [String]) {
+        let changed = Set(paths.map { URL(fileURLWithPath: $0).standardizedFileURL.resolvingSymlinksInPath().path })
+        for document in documents where !document.isModified {
+            let path = document.url.standardizedFileURL.resolvingSymlinksInPath().path
+            guard changed.contains(path),
+                  let data = try? Data(contentsOf: document.url),
+                  let text = String(data: data, encoding: .utf8),
+                  text != document.editor.text else { continue }
+            document.isReloading = true
+            document.editor.replaceText(with: text)
+            document.isReloading = false
+            updateLineStatus(document, delay: .zero)
+        }
     }
 
     /// 已打开文件的当前内容（含未保存的修改）。

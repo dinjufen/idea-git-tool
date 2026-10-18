@@ -134,6 +134,8 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
         findBar.onNext = { [weak self] in self?.moveFind(by: 1) }
         findBar.onPrevious = { [weak self] in self?.moveFind(by: -1) }
         findBar.onClose = { [weak self] in self?.hideFindBar() }
+        findBar.onReplace = { [weak self] text in self?.replaceCurrent(with: text) }
+        findBar.onReplaceAll = { [weak self] text in self?.replaceAll(with: text) }
 
         annotationView.isHidden = true
         for view in [findBar, annotationView, gutter, scrollView] as [NSView] { addSubview(view) }
@@ -296,8 +298,9 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
 
     // MARK: - 查找
 
-    func showFindBar() {
+    func showFindBar(replace: Bool = false) {
         let selected = textView.selectionManager.textSelections.first.map { (textView.string as NSString).substring(with: $0.range) }
+        findBar.isReplaceMode = replace && textView.isEditable
         findBar.isHidden = false
         findBarHeight.isActive = false
         findBar.focus(with: selected)
@@ -309,6 +312,23 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
         textView.emphasisManager?.removeEmphases(for: Self.findGroup)
         findMatches = []
         window?.makeFirstResponder(textView)
+    }
+
+    /// 替换当前匹配并定位到下一个。
+    private func replaceCurrent(with replacement: String) {
+        guard textView.isEditable, let index = findIndex, findMatches.indices.contains(index) else { return }
+        textView.replaceCharacters(in: findMatches[index], with: replacement)
+        // 替换后重新查找（保持下标），自然落到下一个匹配。
+        find(findBar.query, caseSensitive: findBar.isCaseSensitive, keepIndex: true)
+        showFindResults(select: true)
+    }
+
+    private func replaceAll(with replacement: String) {
+        guard textView.isEditable, !findMatches.isEmpty else { return }
+        let count = findMatches.count
+        textView.replaceCharacters(in: findMatches, with: replacement)
+        find(findBar.query, caseSensitive: findBar.isCaseSensitive)
+        findBar.setResult(text: tr("find.replaced", "\(count)"))
     }
 
     func findNext() {
