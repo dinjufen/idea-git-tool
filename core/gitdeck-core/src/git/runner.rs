@@ -150,6 +150,21 @@ impl GitExecutable {
         self.exec(cwd, args, None, false, env, &[])
     }
 
+    /// 附加环境变量（例如临时索引 `GIT_INDEX_FILE`）并可写入标准输入，启用 `--literal-pathspecs`。
+    pub fn run_with_env_input<I, S>(
+        &self,
+        cwd: &Path,
+        args: I,
+        env: &[(&str, String)],
+        input: Option<&[u8]>,
+    ) -> Result<GitOutput>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.exec(cwd, args, input, true, env, &[])
+    }
+
     /// 同 [`run`](Self::run)，但把 `ok_codes` 中的退出码也视为成功（例如 `diff --no-index` 有差异时返回 1）。
     pub fn run_with_exit_codes<I, S>(
         &self,

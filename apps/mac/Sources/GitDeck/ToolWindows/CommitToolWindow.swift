@@ -21,6 +21,19 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     /// AI 评审：评审勾选的改动、生成提交信息、提交前检查。
     weak var aiReview: AIReviewController?
 
+    /// 部分提交的行选择；文件只提交部分改动时复选框显示为半选。
+    var lineSelections: LineSelectionStore? {
+        didSet {
+            if let selectionObserver { oldValue?.removeObserver(selectionObserver) }
+            selectionObserver = lineSelections?.observe { [weak self] in
+                self?.outline.reloadData()
+                self?.updateCommitButtons()
+            }
+        }
+    }
+
+    private var selectionObserver: UUID?
+
     // “提交 / 储藏” 标签（IDEA New UI 的 Commit 工具窗口）。
     private let tabs = NSSegmentedControl(labels: [tr("commit.tab.commit"), tr("commit.tab.stash")], trackingMode: .selectOne, target: nil, action: nil)
     private var commitContent: [NSView] = []
@@ -404,6 +417,15 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         }
     }
 
+    #if DEBUG
+    /// 仅 Debug：以指定提交信息提交勾选的文件（验证提交流程）。
+    func debugCommit(message: String) {
+        messageView.string = message
+        messageView.didChangeText()
+        commit()
+    }
+    #endif
+
     @objc private func commitAndPush() {
         guard commitButton.isEnabled else { return }
         pushAfterCommit = true
@@ -416,13 +438,15 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         pushAfterCommit = false
         // 只提交仍存在于当前变更中的勾选文件。
         let paths = includedPaths
-        let options = CommitOptions(
+        let selections = paths.compactMap { path in lineSelections?.selection(for: path).map { (path, $0) } }
+        var options = CommitOptions(
             message: messageView.string,
             paths: paths,
             amend: amendCheckbox.state == .on,
             signOff: signOff,
             skipHooks: !runHooks,
-            author: nil
+            author: nil,
+            partial: []
         )
         isCommitting = true
         spinner.isHidden = false
@@ -439,14 +463,57 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
                 self.updateCommitButtons()
                 return
             }
+            // 部分提交：确认选择之后文件没有变化，再计算要提交的内容。
+            if !selections.isEmpty {
+                let root = self.model.rootURL
+                let check = await Task.detached(priority: .userInitiated) {
+                    selections.map { path, selection -> (String, Bool) in
+                        let text = (try? Data(contentsOf: root.appendingPathComponent(path))).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                        let base = ((try? repository.fileAtRevision(revision: "HEAD", path: path)) ?? nil) ?? ""
+                        return (path, text == selection.text && base == selection.base)
+                    }
+                }.value
+                let stale = check.filter { !$0.1 }.map(\.0)
+                guard stale.isEmpty else {
+                    self.lineSelections?.remove(stale)
+                    self.isCommitting = false
+                    self.spinner.stopAnimation(nil)
+                    self.spinner.isHidden = true
+                    self.updateCommitButtons()
+                    let alert = NSAlert()
+                    alert.messageText = tr("commit.partial.stale")
+                    alert.informativeText = tr("commit.partial.stale.message", stale.joined(separator: "\n"))
+                    if let window = self.window { alert.beginSheetModal(for: window, completionHandler: nil) } else { alert.runModal() }
+                    return
+                }
+                for (path, selection) in selections {
+                    let content = selection.content
+                    if content == selection.base {
+                        // 文件的改动全部不提交。
+                        options.paths.removeAll { $0 == path }
+                    } else {
+                        options.partial.append(PartialFile(path: path, content: content))
+                    }
+                }
+                if options.paths.isEmpty, !options.amend {
+                    self.isCommitting = false
+                    self.spinner.stopAnimation(nil)
+                    self.spinner.isHidden = true
+                    self.updateCommitButtons()
+                    self.model.post(tr("commit.partial.nothing"), isError: true)
+                    return
+                }
+            }
+            let finalOptions = options
             let result = await Task.detached(priority: .userInitiated) {
-                Result { try repository.commit(options: options) }
+                Result { try repository.commit(options: finalOptions) }
             }.value
             self.isCommitting = false
             self.spinner.stopAnimation(nil)
             self.spinner.isHidden = true
             switch result {
             case let .success(commit):
+                self.lineSelections?.remove(paths)
                 self.messageView.string = ""
                 self.messageView.didChangeText()
                 self.amendCheckbox.state = .off
@@ -578,7 +645,16 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
                 if on { included.insert(file.path) } else { included.remove(file.path) }
             }
         case let item as FileItem:
-            if on { included.insert(item.change.path) } else { included.remove(item.change.path) }
+            let path = item.change.path
+            if lineSelections?.isPartial(path) == true, included.contains(path) {
+                // 半选的文件再次点击：改为提交整个文件。
+                lineSelections?.remove([path])
+                included.insert(path)
+            } else if on || sender.state == .mixed {
+                included.insert(path)
+            } else {
+                included.remove(path)
+            }
         default:
             break
         }
@@ -632,8 +708,10 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
             )
         case let item as FileItem:
             let change = item.change
-            cell.checkbox.allowsMixedState = false
-            cell.checkbox.state = included.contains(change.path) ? .on : .off
+            let partial = lineSelections?.isPartial(change.path) ?? false
+            cell.checkbox.allowsMixedState = partial
+            cell.checkbox.state = included.contains(change.path) ? (partial ? .mixed : .on) : .off
+            if partial { cell.toolTip = tr("commit.partial.tooltip") }
             cell.checkbox.isEnabled = change.conflict == nil
             var detail = change.directory
             if let conflict = change.conflict {

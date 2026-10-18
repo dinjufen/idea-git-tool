@@ -39,6 +39,20 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
         set { gutter.reviewMarkers = newValue }
     }
 
+    var onLineNumberClick: ((Int) -> Void)? {
+        get { gutter.onLineNumberClick }
+        set { gutter.onLineNumberClick = newValue }
+    }
+
+    /// 自定义行号（统一 Diff 视图的新旧两列行号）及其宽度（字符数）。
+    func setLineNumbers(width: Int, text: ((Int) -> String?)?) {
+        gutter.lineNumberWidth = width
+        gutter.lineNumberText = text
+    }
+
+    /// 重绘行号栏（选择状态变化后）。
+    func redrawGutter() { gutter.needsDisplay = true }
+
     var onReviewMarkerClick: ((Int) -> Void)? {
         get { gutter.onMarkerClick }
         set { gutter.onMarkerClick = newValue }

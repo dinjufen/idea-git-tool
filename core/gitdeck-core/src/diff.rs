@@ -102,6 +102,57 @@ pub fn diff_texts(base: String, text: String, whitespace: WhitespaceMode) -> Vec
         .collect()
 }
 
+/// 部分提交：从 `base` 出发只应用未被排除的变更行，得到要提交的文件内容（IDEA 的按块 / 按行提交）。
+///
+/// `excluded_lines` 为新文本中不提交的新增 / 修改行，`excluded_base_lines` 为基准文本中不提交的删除行
+/// （该行保留）。行号从 0 开始，与 [`line_changes`] 的块对应。保留各行原有的换行符。
+#[uniffi::export]
+pub fn partial_text(
+    base: String,
+    text: String,
+    excluded_lines: Vec<u32>,
+    excluded_base_lines: Vec<u32>,
+) -> String {
+    let excluded: std::collections::HashSet<u32> = excluded_lines.into_iter().collect();
+    let excluded_base: std::collections::HashSet<u32> = excluded_base_lines.into_iter().collect();
+    let raw_old: Vec<&str> = base.split_inclusive('\n').collect();
+    let raw_new: Vec<&str> = text.split_inclusive('\n').collect();
+    let blocks = line_blocks(
+        &Lines::new(&base),
+        &Lines::new(&text),
+        WhitespaceMode::Compare,
+    );
+
+    let mut out = String::with_capacity(base.len().max(text.len()));
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut push = |line: &str| {
+        // 原本没有结尾换行的最后一行后面还要接内容时，按文件的换行风格补上换行。
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push_str(newline);
+        }
+        out.push_str(line);
+    };
+    let mut base_pos = 0usize;
+    for block in blocks {
+        let base_start = block.base_start as usize;
+        let base_end = base_start + block.base_count as usize;
+        raw_old[base_pos..base_start].iter().for_each(|l| push(l));
+        for (i, line) in raw_old.iter().enumerate().take(base_end).skip(base_start) {
+            if excluded_base.contains(&(i as u32)) {
+                push(line);
+            }
+        }
+        for j in block.start..block.start + block.count {
+            if !excluded.contains(&j) {
+                push(raw_new[j as usize]);
+            }
+        }
+        base_pos = base_end;
+    }
+    raw_old[base_pos..].iter().for_each(|l| push(l));
+    out
+}
+
 pub(crate) fn line_blocks(old: &Lines, new: &Lines, whitespace: WhitespaceMode) -> Vec<LineChange> {
     let old_keys: Vec<String> = old.lines.iter().map(|l| normalize(l, whitespace)).collect();
     let new_keys: Vec<String> = new.lines.iter().map(|l| normalize(l, whitespace)).collect();
@@ -354,6 +405,46 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partial_text_applies_selected_lines() {
+        let base = "a\nb\nc\nd\n".to_owned();
+        let text = "a\nB\nc\nnew1\nnew2\nd\n".to_owned();
+        // 全部包含：等于新文本；全部排除：等于基准。
+        assert_eq!(
+            partial_text(base.clone(), text.clone(), vec![], vec![]),
+            text
+        );
+        assert_eq!(
+            partial_text(base.clone(), text.clone(), vec![1, 3, 4], vec![1]),
+            base
+        );
+        // 只提交第二个块中的 new1。
+        assert_eq!(
+            partial_text(base.clone(), text.clone(), vec![1, 4], vec![1]),
+            "a\nb\nc\nnew1\nd\n"
+        );
+        // 修改块：提交删除但不提交新行 → 该行消失。
+        assert_eq!(
+            partial_text(base.clone(), text.clone(), vec![1, 3, 4], vec![]),
+            "a\nc\nd\n"
+        );
+    }
+
+    #[test]
+    fn partial_text_keeps_line_endings() {
+        let base = "a\r\nb".to_owned();
+        let text = "a\r\nb\r\nc".to_owned();
+        assert_eq!(
+            partial_text(base.clone(), text.clone(), vec![], vec![]),
+            text
+        );
+        // 原文件最后一行没有换行符，排除对该行的改动但提交新增行时补上换行。
+        assert_eq!(
+            partial_text("x".into(), "y\nz\n".into(), vec![0], vec![0]),
+            "x\nz\n"
+        );
+    }
 
     fn change(
         kind: LineChangeKind,

@@ -6,6 +6,8 @@ import GitDeckCore
 struct DiffOpener {
     let model: ProjectModel
     let editor: EditorAreaView
+    /// 本地改动的 Diff 中可勾选要提交的改动（部分提交）。
+    var lineSelections: LineSelectionStore?
 
     /// 本地变更：HEAD 与工作区文件比较（Commit 工具窗口中的 Show Diff）。
     func showLocalChange(_ change: FileChange) {
@@ -27,7 +29,8 @@ struct DiffOpener {
                 DiffView(
                     left: DiffSide(title: headTitle, text: base),
                     right: DiffSide(title: tr("diff.title.local"), text: text),
-                    path: change.path
+                    path: change.path,
+                    inclusion: change.conflict == nil ? lineSelections.map { DiffInclusion(store: $0, path: change.path) } : nil
                 )
             }
         }

@@ -34,13 +34,14 @@ pub use ai::{
 };
 pub use blame::{BlameCommit, BlameResult, FileRevision};
 pub use branch_ops::{CheckoutMode, CheckoutOutcome, MergeOutcome};
-pub use commit::{CommitOptions, CommitResult};
+pub use commit::{CommitOptions, CommitResult, PartialFile};
 pub use conflicts::{
     ConflictLabels, ConflictSide, ConflictVersions, MergeChunk, MergeChunkKind, merge_chunks,
 };
 pub use console::{ConsoleEntry, clear_console, console_entries};
 pub use diff::{
     DiffBlock, LineChange, LineChangeKind, TextRange, WhitespaceMode, diff_texts, line_changes,
+    partial_text,
 };
 pub use error::CoreError;
 pub use git::branches::{BranchKind, BranchRef};

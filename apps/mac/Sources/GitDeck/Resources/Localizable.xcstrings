@@ -2500,6 +2500,74 @@
         }
       }
     },
+    "commit.partial.nothing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No changes are selected for commit"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有选中要提交的更改"
+          }
+        }
+      }
+    },
+    "commit.partial.stale": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Files changed after you selected lines to commit"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择要提交的行之后文件发生了变化"
+          }
+        }
+      }
+    },
+    "commit.partial.stale.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The line selection was reset for:\n%1$@\nReview the changes and commit again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "以下文件的行选择已重置：\n%1$@\n请检查更改后重新提交。"
+          }
+        }
+      }
+    },
+    "commit.partial.tooltip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only some changes in this file will be committed. Click to commit the whole file."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "该文件只提交部分更改。点击可提交整个文件。"
+          }
+        }
+      }
+    },
     "commit.renamedFrom": {
       "extractionState": "manual",
       "localizations": {
@@ -3197,6 +3265,40 @@
         }
       }
     },
+    "diff.include.tooltip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click a checkbox to include or exclude a change from the commit; click a line number to toggle a single line."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击复选框可把整处更改加入或移出提交；点击行号可切换单行。"
+          }
+        }
+      }
+    },
+    "diff.included": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ of %2$@ changes included in commit"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提交包含 %1$@/%2$@ 处更改"
+          }
+        }
+      }
+    },
     "diff.next": {
       "extractionState": "manual",
       "localizations": {
@@ -3397,6 +3499,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "%1$@（储藏：%2$@）"
+          }
+        }
+      }
+    },
+    "diff.viewer.sideBySide": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Side-by-side viewer"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "并排查看器"
+          }
+        }
+      }
+    },
+    "diff.viewer.unified": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unified viewer"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "统一查看器"
           }
         }
       }

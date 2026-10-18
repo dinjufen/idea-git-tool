@@ -260,3 +260,78 @@ fn rejects_empty_message_and_empty_selection() {
         CoreError::NothingToCommit
     );
 }
+
+#[test]
+fn partial_commit_keeps_excluded_changes_in_working_tree() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    new_repo(dir);
+    commit_file(dir, "f.txt", "1\n2\n3\n4\n", "base");
+    let working = "1\nTWO\n3\n4\nfive\n";
+    fs::write(dir.join("f.txt"), working).unwrap();
+    fs::write(dir.join("other.txt"), "other\n").unwrap();
+    git(dir, &["add", "other.txt"]);
+    let repo = open(dir);
+
+    // 只提交新增的 “five”，不提交第 2 行的修改；other.txt 整个提交。
+    let content =
+        gitdeck_core::partial_text("1\n2\n3\n4\n".into(), working.into(), vec![1], vec![1]);
+    let result = repo
+        .commit(CommitOptions {
+            message: "partial".into(),
+            paths: vec!["f.txt".into(), "other.txt".into()],
+            partial: vec![gitdeck_core::PartialFile {
+                path: "f.txt".into(),
+                content,
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(result.subject, "partial");
+    assert_eq!(git(dir, &["show", "HEAD:f.txt"]), "1\n2\n3\n4\nfive\n");
+    assert_eq!(git(dir, &["show", "HEAD:other.txt"]), "other\n");
+    // 工作区不变；剩余改动为未暂存的修改，索引中是提交后的内容。
+    assert_eq!(fs::read_to_string(dir.join("f.txt")).unwrap(), working);
+    assert_eq!(git(dir, &["diff", "--cached", "--name-only"]), "");
+    assert_eq!(git(dir, &["diff", "--name-only"]), "f.txt\n");
+    assert!(!dir.join(".git/gitdeck-partial-index").exists());
+}
+
+#[test]
+fn partial_commit_of_new_file_and_amend() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    new_repo(dir);
+    fs::write(dir.join("new.txt"), "keep\ndraft\n").unwrap();
+    let repo = open(dir);
+    repo.commit(CommitOptions {
+        message: "add new".into(),
+        paths: vec!["new.txt".into()],
+        partial: vec![gitdeck_core::PartialFile {
+            path: "new.txt".into(),
+            content: "keep\n".into(),
+        }],
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(git(dir, &["show", "HEAD:new.txt"]), "keep\n");
+    let status = repo.status().unwrap();
+    assert_eq!(status.changes.len(), 1);
+    assert_eq!(status.changes[0].unstaged, ChangeKind::Modified);
+
+    // Amend 时同样以 HEAD 为基础。
+    repo.commit(CommitOptions {
+        message: "add new (amended)".into(),
+        paths: vec!["new.txt".into()],
+        amend: true,
+        partial: vec![gitdeck_core::PartialFile {
+            path: "new.txt".into(),
+            content: "keep\ndraft\n".into(),
+        }],
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(git(dir, &["rev-list", "--count", "HEAD"]).trim(), "2");
+    assert_eq!(git(dir, &["show", "HEAD:new.txt"]), "keep\ndraft\n");
+    assert!(repo.status().unwrap().changes.is_empty());
+}

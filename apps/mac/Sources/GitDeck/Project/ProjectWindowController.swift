@@ -24,7 +24,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     private let bottomPanel = NSView()
     private let rightPanel = NSView()
     private lazy var editor = EditorAreaView(model: model)
-    private lazy var diffOpener = DiffOpener(model: model, editor: editor)
+    private let lineSelections = LineSelectionStore()
+    private lazy var diffOpener = DiffOpener(model: model, editor: editor, lineSelections: lineSelections)
     private lazy var operations = GitOperations(model: model)
     private lazy var conflictResolver = ConflictResolver(model: model)
 
@@ -177,6 +178,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         }
         commitToolWindow.onPushAfterCommit = { [weak self] in self?.operations.push() }
         commitToolWindow.onRollback = { [weak self] paths in self?.operations.rollback(selected: paths) }
+        commitToolWindow.lineSelections = lineSelections
         operations.onRevealCommit = { [weak self] hash in
             self?.show(.git)
             self?.gitToolWindow.reveal(commit: hash)
@@ -334,6 +336,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
                 }
             case "settings": (NSApp.delegate as? AppDelegate)?.showSettings(nil)
             case "commit": show(.commit)
+            case "partialCommit":
+                show(.commit)
+                // 等 Diff 计算完成、选择生效后提交。
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.commitToolWindow.debugCommit(message: "Partial commit test") }
             case "rollback":
                 show(.commit)
                 commitToolWindow.rollbackSelected()

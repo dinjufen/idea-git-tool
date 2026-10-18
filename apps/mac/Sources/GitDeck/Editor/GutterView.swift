@@ -37,6 +37,21 @@ final class GutterView: NSView, NSViewToolTipOwner {
     }
 
     var onMarkerClick: ((Int) -> Void)?
+    /// 点击行号（参数为从 0 开始的行）。Diff 中用于按行选择要提交的改动。
+    var onLineNumberClick: ((Int) -> Void)?
+
+    /// 自定义行号文本（统一 Diff 视图显示新旧两列行号）；返回 `nil` 时不显示。
+    var lineNumberText: ((Int) -> String?)? {
+        didSet {
+            invalidateIntrinsicContentSize()
+            needsDisplay = true
+        }
+    }
+
+    /// 自定义行号时预留的字符数。
+    var lineNumberWidth = 0 {
+        didSet { invalidateIntrinsicContentSize() }
+    }
     private static let reviewColumnWidth: CGFloat = 16
     private var markerRects: [(rect: NSRect, marker: ReviewMarker)] = []
 
@@ -63,7 +78,7 @@ final class GutterView: NSView, NSViewToolTipOwner {
 
     override var intrinsicContentSize: NSSize {
         let lines = max(textView?.layoutManager?.lineCount ?? 1, 1)
-        let digits = max(String(lines).count, 3)
+        let digits = lineNumberText != nil ? max(lineNumberWidth, 3) : max(String(lines).count, 3)
         let digitWidth = ("8" as NSString).size(withAttributes: [.font: numberFont]).width
         let reviewColumn = reviewMarkers.isEmpty ? 0 : Self.reviewColumnWidth
         return NSSize(width: reviewColumn + CGFloat(digits) * digitWidth + 14 + Self.markerGap + Self.markerWidth, height: NSView.noIntrinsicMetric)
@@ -77,6 +92,11 @@ final class GutterView: NSView, NSViewToolTipOwner {
         let point = convert(event.locationInWindow, from: nil)
         if let hit = markerRects.first(where: { $0.rect.insetBy(dx: -2, dy: -2).contains(point) }) {
             onMarkerClick?(hit.marker.index)
+            return
+        }
+        if let onLineNumberClick, let textView, let scrollView,
+           let line = textView.layoutManager?.lineStorage.getLine(atPosition: point.y + scrollView.contentView.bounds.minY) {
+            onLineNumberClick(line.index)
             return
         }
         super.mouseDown(with: event)
@@ -112,7 +132,7 @@ final class GutterView: NSView, NSViewToolTipOwner {
                 .font: numberFont,
                 .foregroundColor: isCaret ? SyntaxTheme.currentLineNumber : SyntaxTheme.lineNumber,
             ]
-            let number = "\(current.index + 1)" as NSString
+            let number = (lineNumberText.map { $0(current.index) ?? "" } ?? "\(current.index + 1)") as NSString
             let size = number.size(withAttributes: attrs)
             let y = current.yPos - offsetY + (current.height - size.height) / 2
             number.draw(at: NSPoint(x: numberRight - size.width, y: y), withAttributes: attrs)
