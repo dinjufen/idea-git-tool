@@ -5,7 +5,7 @@ mod common;
 use std::fs;
 use std::path::Path;
 
-use common::{canonical, commit_file, git, head, new_repo, open};
+use common::{canonical, commit_file, configure, git, head, new_repo, open};
 use gitdeck_core::{SubmoduleState, console_entries};
 
 #[test]
@@ -142,6 +142,33 @@ fn submodules_status_and_update() {
     assert_eq!(
         repo.submodules().unwrap()[0].state,
         SubmoduleState::Uninitialized
+    );
+    // 初始化并更新子模块。git 克隆子模块时不读取仓库级配置，经环境变量允许 file:// 传输
+    // （只影响本测试进程启动的 git；Rust 标准库对环境变量与进程启动加锁，不会与其他测试竞争）。
+    unsafe {
+        std::env::set_var("GIT_CONFIG_COUNT", "1");
+        std::env::set_var("GIT_CONFIG_KEY_0", "protocol.file.allow");
+        std::env::set_var("GIT_CONFIG_VALUE_0", "always");
+    }
+    repo.update_submodules(vec![], true).unwrap();
+    let subs = repo.submodules().unwrap();
+    assert_eq!(subs[0].state, SubmoduleState::UpToDate);
+    assert_eq!(subs[0].head, head(&lib));
+    assert!(clone.join("libs/lib/readme.md").exists());
+
+    // 子模块检出了不同的提交时显示为 Modified，update 后恢复。
+    let sub = clone.join("libs/lib");
+    configure(&sub);
+    commit_file(&sub, "extra.txt", "x\n", "extra in submodule");
+    assert_eq!(
+        repo.submodules().unwrap()[0].state,
+        SubmoduleState::Modified
+    );
+    repo.update_submodules(vec!["libs/lib".into()], false)
+        .unwrap();
+    assert_eq!(
+        repo.submodules().unwrap()[0].state,
+        SubmoduleState::UpToDate
     );
     assert!(
         open(tmp.path().join("lib").as_path())

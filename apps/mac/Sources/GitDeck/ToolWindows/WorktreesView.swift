@@ -148,7 +148,7 @@ final class WorktreesView: NSView, NSTableViewDataSource, NSTableViewDelegate {
             font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         }
         let label = NSTextField.label(text, font: font, color: color)
-        let cell = NSTableCellView()
+        let cell = AdaptiveCellView()
         cell.toolTip = worktree.path
         cell.addSubview(label)
         NSLayoutConstraint.activate([

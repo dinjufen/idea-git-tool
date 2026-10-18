@@ -83,6 +83,10 @@ final class ConflictResolver {
                 // 仅 Debug 构建：`-debug.mergeApplyNonConflicting YES` 打开后自动应用所有不冲突的更改，便于验证。
                 if UserDefaults.standard.bool(forKey: "debug.mergeApplyNonConflicting") {
                     controller.perform(Selector(("applyNonConflicting")))
+                    // `-debug.mergeUndo YES`：随后撤销一次，验证被撤销的块恢复为可应用。
+                    if UserDefaults.standard.bool(forKey: "debug.mergeUndo") {
+                        controller.debugUndo()
+                    }
                 }
                 #endif
             case let .failure(error):

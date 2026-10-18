@@ -82,6 +82,12 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
         }
     }
 
+    /// 编辑后注释的行号映射（见 [`AnnotationGutterView.lineMap`]）。
+    var annotationLineMap: [Int?]? {
+        get { annotationView.lineMap }
+        set { annotationView.lineMap = newValue }
+    }
+
     /// 点击注释列中的提交。
     var onAnnotationClick: ((String) -> Void)? {
         get { annotationView.onClickCommit }

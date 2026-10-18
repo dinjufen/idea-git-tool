@@ -166,3 +166,32 @@ fn unshelve_with_conflicts_uses_three_way_merge() {
             .contains("<<<<<<<")
     );
 }
+
+#[test]
+fn shelf_file_versions_for_modified_and_new_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    repo_with_changes(dir);
+    let repo = open(dir);
+    let entry = repo.shelve_changes(vec![], "all".into()).unwrap();
+    // 搁置之后 HEAD 前进，Diff 仍以搁置时的版本为基准。
+    commit_file(dir, "a.txt", "a moved on\n", "later");
+
+    let a = repo
+        .shelf_file_versions(entry.id.clone(), "a.txt".into())
+        .unwrap();
+    assert_eq!(a.base.as_deref(), Some("a\n"));
+    assert_eq!(a.text.as_deref(), Some("a changed\n"));
+    let new = repo
+        .shelf_file_versions(entry.id.clone(), "new.txt".into())
+        .unwrap();
+    assert_eq!(new.base, None);
+    assert_eq!(new.text.as_deref(), Some("untracked\n"));
+    assert!(
+        repo.shelf_file_versions(entry.id, "missing.txt".into())
+            .is_err()
+    );
+    // 临时索引已清理，真实索引不受影响。
+    assert!(!dir.join(".git/gitdeck-shelf-index").exists());
+    assert_eq!(git(dir, &["diff", "--cached", "--name-only"]), "");
+}

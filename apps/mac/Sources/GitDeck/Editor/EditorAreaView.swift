@@ -22,6 +22,9 @@ final class EditorAreaView: NSView {
         let relativePath: String?
         let editor: CodeEditorView
         var isModified = false
+        /// blame 对应的文件内容；编辑后据此把注释映射到当前行。
+        var blameText: String?
+        var annotationTask: Task<Void, Never>?
         /// 正在从磁盘重新载入（编辑器内容变化不标记为已修改）。
         var isReloading = false
         /// HEAD 中的内容；文件不在 HEAD 中时为 `nil`。
@@ -158,10 +161,17 @@ final class EditorAreaView: NSView {
     private func loadBlame(_ doc: Document) {
         guard let path = doc.relativePath else { return }
         let repository = model.repository
+        let fileURL = doc.url
         Task {
-            let result = await Task.detached { Result { try repository.blame(path: path, revision: nil) } }.value
+            let result = await Task.detached {
+                // blame 针对磁盘上的文件；同时读出该内容作为行号映射的基准。
+                Result { (try repository.blame(path: path, revision: nil), try? String(contentsOf: fileURL, encoding: .utf8)) }
+            }.value
             switch result {
-            case let .success(blame): doc.editor.annotations = blame
+            case let .success((blame, text)):
+                doc.editor.annotations = blame
+                doc.blameText = text
+                self.updateAnnotationMap(doc)
             case .failure: model.post(tr("annotate.failed", doc.url.lastPathComponent), isError: true)
             }
         }
@@ -244,6 +254,7 @@ final class EditorAreaView: NSView {
                 self.rebuildTabs()
             }
             self.updateLineStatus(document, delay: .milliseconds(250))
+            self.updateAnnotationMap(document)
         }
         document.editor.gutterMenu = { [weak self, weak document] in
             guard let self, let document else { return nil }
@@ -346,6 +357,48 @@ final class EditorAreaView: NSView {
             let base = await Task.detached { try? repository.fileAtRevision(revision: "HEAD", path: path) }.value
             doc.base = base ?? nil
             self.updateLineStatus(doc, delay: .zero)
+        }
+    }
+
+    /// 文件被编辑后，把注释映射到当前行：未改动的行沿用原注释，新增与修改的行不显示注释。
+    private func updateAnnotationMap(_ doc: Document) {
+        doc.annotationTask?.cancel()
+        guard doc.editor.annotations != nil, let base = doc.blameText else {
+            doc.editor.annotationLineMap = nil
+            return
+        }
+        let text = doc.editor.text
+        guard text != base else {
+            doc.editor.annotationLineMap = nil
+            return
+        }
+        doc.annotationTask = Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            let map = await Task.detached { () -> [Int?] in
+                let changes = GitDeckCore.lineChanges(base: base, text: text)
+                let lineCount = text.isEmpty ? 0 : text.split(separator: "\n", omittingEmptySubsequences: false).count
+                var map = [Int?](repeating: nil, count: lineCount)
+                var old = 0
+                var new = 0
+                for change in changes {
+                    while new < Int(change.start), new < lineCount {
+                        map[new] = old
+                        new += 1
+                        old += 1
+                    }
+                    new += Int(change.count)
+                    old += Int(change.baseCount)
+                }
+                while new < lineCount {
+                    map[new] = old
+                    new += 1
+                    old += 1
+                }
+                return map
+            }.value
+            guard !Task.isCancelled else { return }
+            doc.editor.annotationLineMap = map
         }
     }
 

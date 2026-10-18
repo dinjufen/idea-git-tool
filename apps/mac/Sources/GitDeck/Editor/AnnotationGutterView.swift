@@ -18,6 +18,12 @@ final class AnnotationGutterView: NSView {
         didSet { needsDisplay = true }
     }
 
+    /// 编辑后的行号映射：当前行 → blame 时的行；`nil` 元素表示新增或修改的行（不显示注释）。
+    /// 为 `nil` 时按行号一一对应（文件未修改）。
+    var lineMap: [Int?]? {
+        didSet { needsDisplay = true }
+    }
+
     var onClickCommit: ((String) -> Void)?
     var contextMenu: (() -> NSMenu?)?
 
@@ -45,8 +51,14 @@ final class AnnotationGutterView: NSView {
         newest = times.max() ?? 0
     }
 
-    private func commit(atLine line: Int) -> BlameCommit? {
-        guard let blame, blame.lines.indices.contains(line) else { return nil }
+    private func commit(atLine current: Int) -> BlameCommit? {
+        let mapped: Int?
+        if let lineMap {
+            mapped = lineMap.indices.contains(current) ? lineMap[current] : nil
+        } else {
+            mapped = current
+        }
+        guard let blame, let line = mapped, blame.lines.indices.contains(line) else { return nil }
         return blame.commits[Int(blame.lines[line])]
     }
 

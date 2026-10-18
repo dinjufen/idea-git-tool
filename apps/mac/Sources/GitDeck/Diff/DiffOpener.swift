@@ -61,6 +61,31 @@ struct DiffOpener {
         }
     }
 
+    /// 搁置中的文件：搁置时的版本与搁置的改动（Shelf 标签中双击文件）。
+    func showShelfFile(_ entry: ShelfEntry, path: String) {
+        let repository = model.repository
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { try repository.shelfFileVersions(id: entry.id, path: path) }
+            }.value
+            guard case let .success(versions) = result else {
+                NSSound.beep()
+                return
+            }
+            editor.openDiff(
+                key: "shelf:\(entry.id):\(path)",
+                title: (path as NSString).lastPathComponent,
+                tooltip: tr("diff.tooltip.shelf", path, entry.name)
+            ) {
+                DiffView(
+                    left: DiffSide(title: tr("diff.title.shelfBase"), text: versions.base),
+                    right: DiffSide(title: tr("diff.title.shelved", entry.name), text: versions.text),
+                    path: path
+                )
+            }
+        }
+    }
+
     /// 历史提交中的文件：与第一个父提交比较（Log 详情中双击文件）。
     func showCommitFile(hash: String, parent: String?, file: ChangedFile, revealLine: Int? = nil) {
         let repository = model.repository

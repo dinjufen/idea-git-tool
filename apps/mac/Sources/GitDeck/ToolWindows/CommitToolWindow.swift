@@ -47,6 +47,8 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     /// 当前的 Changelist（从核心加载并与工作区同步）。
     private var changelists: Changelists?
     private var changelistTask: Task<Void, Never>?
+    /// 最近一次从 Changelist 说明自动填入的提交信息。
+    private var autoMessage: String?
     private var contentTop: NSLayoutYAxisAnchor?
 
     /// 变更树的分组节点，顺序与 IDEA 一致。
@@ -374,6 +376,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         for group in groups where group.kind == .conflicts || (group.kind == .changes && (firstBuild || group.isActive || expandedLists.contains(group.changelist?.name ?? ""))) {
             outline.expandItem(group)
         }
+        applyChangelistComment()
         updateCommitButtons()
     }
 
@@ -603,6 +606,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
                 self.messageView.didChangeText()
                 self.amendCheckbox.state = .off
                 self.amendPrefill = nil
+                self.autoMessage = nil
                 let text = commit.fileCount == 1
                     ? tr("commit.done.one", commit.subject)
                     : tr("commit.done.many", "\(commit.fileCount)", commit.subject)
@@ -760,35 +764,51 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
 
     private var changelistNames: Set<String> { Set(changelists?.lists.map(\.name) ?? []) }
 
-    private func askChangelistName(title: String, initial: String, confirm: String, except: String? = nil, completion: @escaping (String) -> Void) {
-        let names = changelistNames.subtracting(except.map { [$0] } ?? [])
-        NameDialog(title: title, message: nil, initial: initial, confirmTitle: confirm) { name in
-            names.contains(name) ? tr("changelist.exists", name) : nil
-        }.begin(for: window) { result in completion(result.name) }
-    }
-
     @objc private func newChangelist() {
-        askChangelistName(title: tr("changelist.new.title"), initial: "", confirm: tr("changelist.new.confirm")) { [weak self] name in
-            self?.changelistAction { repo in try repo.addChangelist(name: name, comment: "", makeActive: false) }
-        }
+        ChangelistDialog(title: tr("changelist.new.title"), confirmTitle: tr("changelist.new.confirm"), name: "", comment: "", existing: changelistNames)
+            .begin(for: window) { [weak self] name, comment in
+                self?.changelistAction { repo in try repo.addChangelist(name: name, comment: comment, makeActive: false) }
+            }
     }
 
     @objc private func moveToNewChangelist() {
         let paths = selectedPaths
-        askChangelistName(title: tr("changelist.new.title"), initial: "", confirm: tr("changelist.new.confirm")) { [weak self] name in
-            self?.changelistAction { repo in
-                _ = try repo.addChangelist(name: name, comment: "", makeActive: false)
-                return try repo.moveToChangelist(paths: paths, name: name)
+        ChangelistDialog(title: tr("changelist.new.title"), confirmTitle: tr("changelist.new.confirm"), name: "", comment: "", existing: changelistNames)
+            .begin(for: window) { [weak self] name, comment in
+                self?.changelistAction { repo in
+                    _ = try repo.addChangelist(name: name, comment: comment, makeActive: false)
+                    return try repo.moveToChangelist(paths: paths, name: name)
+                }
             }
-        }
     }
 
     @objc private func editChangelist(_ sender: NSMenuItem) {
         guard let name = sender.representedObject as? String,
               let list = changelists?.lists.first(where: { $0.name == name }) else { return }
-        askChangelistName(title: tr("changelist.edit.title"), initial: name, confirm: tr("changelist.edit.confirm"), except: name) { [weak self] newName in
-            self?.changelistAction { repo in try repo.editChangelist(name: name, newName: newName, comment: list.comment) }
+        let display = name == DEFAULT_CHANGELIST ? tr("commit.group.changes") : name
+        ChangelistDialog(
+            title: tr("changelist.edit.title"), confirmTitle: tr("changelist.edit.confirm"),
+            name: display, comment: list.comment, existing: changelistNames.subtracting([name, display])
+        ).begin(for: window) { [weak self] newName, comment in
+            // 默认列表保持存储名称不变，只更新说明（除非用户真的改了显示名称）。
+            let stored = name == DEFAULT_CHANGELIST && newName == display ? name : newName
+            self?.changelistAction { repo in try repo.editChangelist(name: name, newName: stored, comment: comment) }
         }
+    }
+
+    /// IDEA 用 Changelist 的说明作为提交信息：勾选的文件都属于同一个有说明的列表、且提交信息为空
+    /// （或仍是上次自动填入的说明）时，自动填入该说明。
+    private func applyChangelistComment() {
+        let paths = Set(includedPaths)
+        guard !paths.isEmpty, let lists = changelists?.lists else { return }
+        let owners = Set(lists.filter { !Set($0.paths).isDisjoint(with: paths) }.map(\.name))
+        let comment = owners.count == 1 ? lists.first { owners.contains($0.name) }?.comment ?? "" : ""
+        let current = messageView.string
+        guard current.isEmpty || current == autoMessage else { return }
+        guard comment != current else { return }
+        messageView.string = comment
+        messageView.didChangeText()
+        autoMessage = comment.isEmpty ? nil : comment
     }
 
     @objc private func setActiveChangelist(_ sender: NSMenuItem) {
@@ -863,6 +883,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
             break
         }
         outline.reloadData()
+        applyChangelistComment()
         updateCommitButtons()
     }
 

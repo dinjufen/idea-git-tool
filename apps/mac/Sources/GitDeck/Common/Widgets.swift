@@ -178,3 +178,38 @@ extension NSView {
         ])
     }
 }
+
+/// 表格单元：所在行被强调选中（蓝底）时，内部文字与图标改为选中前景色，取消选中后恢复原色。
+/// 用于文字颜色固定（状态色、次要文字）的表格。
+final class AdaptiveCellView: NSTableCellView {
+    private var originalColors: [ObjectIdentifier: NSColor] = [:]
+    private var originalTints: [ObjectIdentifier: NSColor?] = [:]
+
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { applyStyle() }
+    }
+
+    private func applyStyle() {
+        let selected = backgroundStyle == .emphasized
+        for label in descendants(of: NSTextField.self) {
+            let id = ObjectIdentifier(label)
+            if originalColors[id] == nil { originalColors[id] = label.textColor ?? Theme.text }
+            label.textColor = selected ? .alternateSelectedControlTextColor : originalColors[id]
+        }
+        for image in descendants(of: NSImageView.self) {
+            let id = ObjectIdentifier(image)
+            if originalTints[id] == nil { originalTints[id] = .some(image.contentTintColor) }
+            image.contentTintColor = selected ? .alternateSelectedControlTextColor : originalTints[id] ?? nil
+        }
+    }
+
+    private func descendants<T: NSView>(of type: T.Type) -> [T] {
+        var result: [T] = []
+        var stack: [NSView] = subviews
+        while let view = stack.popLast() {
+            if let match = view as? T { result.append(match) }
+            stack.append(contentsOf: view.subviews)
+        }
+        return result
+    }
+}

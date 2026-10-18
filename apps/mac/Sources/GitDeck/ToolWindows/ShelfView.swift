@@ -3,6 +3,8 @@ import GitDeckCore
 
 /// 提交工具窗口的 “搁置” 标签（IDEA 的 Shelf）：搁置的改动列表，展开为文件；可取回全部或选中的文件。
 final class ShelfView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
+    /// 双击文件查看搁置的改动。
+    var onShowFileDiff: ((ShelfEntry, String) -> Void)?
     final class EntryItem {
         let entry: ShelfEntry
         private(set) var files: [FileItem] = []
@@ -74,6 +76,8 @@ final class ShelfView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         outline.dataSource = self
         outline.delegate = self
         outline.allowsMultipleSelection = true
+        outline.target = self
+        outline.doubleAction = #selector(doubleClicked)
         outline.menu = contextMenu()
         outline.setAccessibilityLabel(tr("commit.tab.shelf"))
         let scroll = NSScrollView()
@@ -126,7 +130,12 @@ final class ShelfView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     #if DEBUG
     func expandFirst() {
-        if let first = items.first { outline.expandItem(first) }
+        guard let first = items.first else { return }
+        outline.expandItem(first)
+        // `-debug.shelfDiff YES`：同时打开第一个文件的 Diff。
+        if UserDefaults.standard.bool(forKey: "debug.shelfDiff"), let file = first.files.first {
+            onShowFileDiff?(first.entry, file.file.path)
+        }
     }
     #endif
 
@@ -160,6 +169,17 @@ final class ShelfView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private func updateButtons() {
         let enabled = target != nil
         actionButtons.forEach { $0.isEnabled = enabled }
+    }
+
+    @objc private func doubleClicked() {
+        switch outline.item(atRow: outline.clickedRow) {
+        case let file as FileItem:
+            onShowFileDiff?(file.parent.entry, file.file.path)
+        case let entry as EntryItem:
+            outline.isItemExpanded(entry) ? outline.collapseItem(entry) : outline.expandItem(entry)
+        default:
+            break
+        }
     }
 
     @objc private func unshelveSelected() {

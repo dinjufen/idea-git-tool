@@ -52,6 +52,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     private var observer: UUID?
     private var branchesPopover: NSPopover?
     private var fileWatcher: FileWatcher?
+    private var trafficLightObservers: [NSObjectProtocol] = []
 
     init(repository: Repository) {
         model = ProjectModel(repository: repository)
@@ -84,6 +85,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             self?.editor.reloadFromDisk(paths: paths)
         }
         fileWatcher?.start()
+        trafficLightObservers = TrafficLights.keepCentered(in: window, height: MainToolbarView.height)
     }
 
     @available(*, unavailable)
@@ -198,6 +200,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         #if DEBUG
         debugShelf = shelf
         #endif
+        shelf.onShowFileDiff = { [weak self] entry, path in self?.diffOpener.showShelfFile(entry, path: path) }
         commitToolWindow.attachShelf(shelf)
         commitToolWindow.onShelve = { [weak self] paths, name in self?.operations.shelve(paths: paths, defaultName: name) }
         commitToolWindow.onStashPaths = { [weak self] paths in self?.operations.stashChanges(paths: paths) }
@@ -331,7 +334,17 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             case "update": operations.updateProject()
             case "newBranch": operations.newBranch()
             case "conflicts": conflictResolver.showConflicts()
-            case "annotate": editor.toggleAnnotations()
+            case "annotate":
+                if let path = UserDefaults.standard.string(forKey: "debug.historyPath") {
+                    editor.open(model.rootURL.appendingPathComponent(path))
+                }
+                editor.toggleAnnotations()
+                // `-debug.annotateInsert YES`：注释加载后在文件开头插入两行，验证注释随编辑对齐。
+                if UserDefaults.standard.bool(forKey: "debug.annotateInsert") {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                        self.editor.activeEditor?.textView.replaceCharacters(in: NSRange(location: 0, length: 0), with: "// inserted 1\n// inserted 2\n")
+                    }
+                }
             case "console": showGitConsole(nil)
             case "aiReview":
                 // `-debug.aiApply YES`：评审结束后选中第一个发现、跳转到源码并打开应用建议的预览。
@@ -628,6 +641,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     func windowWillClose(_ notification: Notification) {
         if let observer { model.removeObserver(observer) }
         fileWatcher?.stop()
+        trafficLightObservers.forEach(NotificationCenter.default.removeObserver)
         onClose?()
     }
 

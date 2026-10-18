@@ -52,6 +52,7 @@ final class MergeWindowController: NSWindowController, NSWindowDelegate {
     private let model: ProjectModel
     private let path: String
     private let labels: ConflictLabels
+    private let baseLines: [String]
     private let oursLines: [String]
     private let theirsLines: [String]
     private let leftEditor: CodeEditorView
@@ -80,6 +81,7 @@ final class MergeWindowController: NSWindowController, NSWindowDelegate {
         let base = versions.base ?? ""
         let ours = versions.ours ?? ""
         let theirs = versions.theirs ?? ""
+        baseLines = Self.splitLines(base)
         oursLines = Self.splitLines(ours)
         theirsLines = Self.splitLines(theirs)
         self.chunks = chunks.map(ChunkState.init)
@@ -117,6 +119,13 @@ final class MergeWindowController: NSWindowController, NSWindowDelegate {
     isolated deinit {
         observers.forEach(NotificationCenter.default.removeObserver)
     }
+
+    #if DEBUG
+    /// 仅 Debug：在结果栏执行一次撤销。
+    func debugUndo() {
+        centerEditor.textView._undoManager?.undo()
+    }
+    #endif
 
     /// 按 `\n` 切分并保留行尾（与核心的行号规则一致，`\r\n` 中的 `\r` 留在行内）。
     static func splitLines(_ text: String) -> [String] {
@@ -337,8 +346,46 @@ final class MergeWindowController: NSWindowController, NSWindowDelegate {
                 state.resultCount = max(0, state.resultCount + delta)
             }
         }
+        reconcileAppliedState()
         isModified = true
         refresh()
+    }
+
+    /// 撤销 / 重做会改变结果栏中块的内容：按块的当前内容重新判断哪一侧已应用，
+    /// 使撤销 “应用” 后该块恢复为未处理（可再次应用），重做后重新标记为已应用。
+    private func reconcileAppliedState() {
+        let text = centerEditor.textView.string as NSString
+        for state in chunks {
+            let c = state.chunk
+            let range = resultRange(start: state.resultStart, count: state.resultCount)
+            guard NSMaxRange(range) <= text.length else { continue }
+            let current = Self.splitLines(text.substring(with: range))
+            let base = Array(baseLines[Self.slice(c.baseStart, c.baseCount, in: baseLines)])
+            let ours = Array(oursLines[Self.slice(c.oursStart, c.oursCount, in: oursLines)])
+            let theirs = Array(theirsLines[Self.slice(c.theirsStart, c.theirsCount, in: theirsLines)])
+            switch current {
+            case base:
+                state.leftApplied = false
+                state.rightApplied = false
+            case ours where c.kind != .theirs:
+                state.leftApplied = true
+                state.rightApplied = false
+            case theirs where c.kind != .ours:
+                state.leftApplied = false
+                state.rightApplied = true
+            case ours + theirs where c.kind == .conflict, theirs + ours where c.kind == .conflict:
+                state.leftApplied = true
+                state.rightApplied = true
+            default:
+                // 手动编辑过的内容：保持原状态。
+                break
+            }
+        }
+    }
+
+    private static func slice(_ start: UInt32, _ count: UInt32, in lines: [String]) -> Range<Int> {
+        let lower = min(Int(start), lines.count)
+        return lower ..< min(lower + Int(count), lines.count)
     }
 
     // MARK: - 刷新显示

@@ -70,12 +70,12 @@
 ### 四期：Windows 端
 - 复用 Rust 核心，实现 WinUI 3 UI 层
 - 构建与验证环境待定：由用户提供 Windows 机器（SSH）或使用 GitHub Actions Windows runner
+- 2026-10-18：用户决定**暂缓 Windows**，先补齐并打磨 mac 端；开工前再确定构建与验证环境
 
 ### 五期（可选）：GitHub / GitLab PR 集成
 - PR 列表、在客户端内评审、评论、合并
 
 ## 待讨论（到对应阶段再定）
 
-- AI 评审的细节（三期开工前）
 - Windows 构建与验证环境（四期开工前）
 - 代码签名与公证：Apple Developer ID、Windows 代码签名证书（首次打包发布前）

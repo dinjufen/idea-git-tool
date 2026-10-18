@@ -62,7 +62,7 @@ pub use remote::{
 };
 pub use repo::{GitInfo, Repository, clone_directory_name, clone_repository, git_info};
 pub use rewrite::{RebaseAction, RebaseCommit, RebaseStep, ResetMode};
-pub use shelf::ShelfEntry;
+pub use shelf::{ShelfEntry, ShelfFileVersions};
 pub use stash::{StashEntry, StashOptions, StashRevisions, UnstashOutcome, stash_revisions};
 pub use tags::TagInfo;
 pub use workspace::{Submodule, SubmoduleState, Worktree};

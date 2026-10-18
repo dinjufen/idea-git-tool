@@ -101,7 +101,7 @@ final class ListSheet: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let cell = NSTableCellView()
+        let cell = AdaptiveCellView()
         let views: [NSView]
         switch items[row] {
         case let .header(text):

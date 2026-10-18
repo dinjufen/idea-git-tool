@@ -186,7 +186,7 @@ final class ConflictsDialog: NSObject, NSTableViewDataSource, NSTableViewDelegat
         default: (text, color) = (Self.sideStatus(kind, ours: false), Theme.secondaryText)
         }
         let label = NSTextField.label(text, color: color)
-        let cell = NSTableCellView()
+        let cell = AdaptiveCellView()
         cell.addSubview(label)
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),

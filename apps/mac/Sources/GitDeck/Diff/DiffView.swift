@@ -206,6 +206,8 @@ final class DiffView: NSView {
         ])
         connector.leftEditor = leftEditor
         connector.rightEditor = rightEditor
+        // 两侧同步滚动：只保留右侧的垂直滚动条，避免两个滚动条挤在中间。
+        leftEditor.scrollView.hasVerticalScroller = false
     }
 
     private func titleLabel(_ side: DiffSide) -> NSTextField {

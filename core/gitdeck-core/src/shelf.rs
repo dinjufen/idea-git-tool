@@ -26,6 +26,16 @@ pub struct ShelfEntry {
 struct Metadata {
     name: String,
     time: i64,
+    /// 搁置时的 HEAD（用于查看 Diff）；旧版本的条目没有该字段。
+    #[serde(default)]
+    base: Option<String>,
+}
+
+/// 搁置中某个文件的两个版本（Shelf 中查看 Diff）。`None` 表示该版本中文件不存在。
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ShelfFileVersions {
+    pub base: Option<String>,
+    pub text: Option<String>,
 }
 
 const PATCH_FILE: &str = "changes.patch";
@@ -67,8 +77,14 @@ impl Repository {
         } else {
             name.trim().to_owned()
         };
+        let head = self
+            .git
+            .run(&self.root, ["rev-parse", "--verify", "--quiet", "HEAD"])
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
         let meta = Metadata {
             name,
+            base: head,
             time: (time / 1000) as i64,
         };
         std::fs::write(dir.join(PATCH_FILE), &patch)?;
@@ -147,6 +163,72 @@ impl Repository {
         Ok(outcome)
     }
 
+    /// 搁置中某个文件改动前后的内容：改动前为搁置时 HEAD 中的版本，改动后由补丁应用到临时索引得到。
+    pub fn shelf_file_versions(
+        &self,
+        id: String,
+        path: String,
+    ) -> std::result::Result<ShelfFileVersions, CoreError> {
+        let dir = self.shelf_entry_dir(&id)?;
+        let meta = read_meta(&dir)?;
+        let patch = std::fs::read_to_string(dir.join(PATCH_FILE))?;
+        let (preamble, sections) = split_sections(&patch);
+        let section = sections
+            .into_iter()
+            .find(|s| section_path(s) == path)
+            .ok_or_else(|| CoreError::Io {
+                detail: format!("{path} is not in shelf {id}"),
+            })?;
+        let revision = meta
+            .base
+            .clone()
+            .filter(|_| self.has_head())
+            .unwrap_or_else(|| "HEAD".into());
+        let old_path = section_old_path(section);
+        let base = match &old_path {
+            Some(old) if self.has_head() => self.file_at_revision(revision.clone(), old.clone())?,
+            _ => None,
+        };
+        if section.lines().any(|l| l == "+++ /dev/null") {
+            return Ok(ShelfFileVersions { base, text: None });
+        }
+
+        // 在临时索引中应用该文件的补丁，读出结果，不影响工作区与真实索引。
+        let index = self.git_dir.join("gitdeck-shelf-index");
+        let _ = std::fs::remove_file(&index);
+        let env = [("GIT_INDEX_FILE", index.to_string_lossy().into_owned())];
+        let result = (|| -> Result<Option<String>> {
+            if self.has_head() {
+                self.git.run_with_env_input(
+                    &self.root,
+                    ["read-tree", revision.as_str()],
+                    &env,
+                    None,
+                )?;
+            }
+            let single = format!("{preamble}{section}");
+            self.git.run_with_env_input(
+                &self.root,
+                ["apply", "--cached", "-"],
+                &env,
+                Some(single.as_bytes()),
+            )?;
+            let object = format!(":{path}");
+            let out = self.git.run_with_env_input(
+                &self.root,
+                ["cat-file", "blob", object.as_str()],
+                &env,
+                None,
+            )?;
+            Ok(Some(String::from_utf8_lossy(&out.stdout).into_owned()))
+        })();
+        let _ = std::fs::remove_file(&index);
+        Ok(ShelfFileVersions {
+            base,
+            text: result?,
+        })
+    }
+
     pub fn delete_shelf(&self, id: String) -> std::result::Result<(), CoreError> {
         std::fs::remove_dir_all(self.shelf_entry_dir(&id)?)?;
         Ok(())
@@ -196,6 +278,24 @@ impl Repository {
             files: self.patch_files(patch)?,
         })
     }
+}
+
+/// diff 段中改动前的路径；新文件为 `None`。
+fn section_old_path(section: &str) -> Option<String> {
+    for line in section.lines().take(16) {
+        if line.starts_with("@@") {
+            break;
+        }
+        if let Some(p) = line.strip_prefix("rename from ") {
+            return Some(p.trim_matches('"').to_owned());
+        }
+        if let Some(p) = line.strip_prefix("--- ") {
+            let p = p.trim().trim_matches('"');
+            return (p != "/dev/null").then(|| p.strip_prefix("a/").unwrap_or(p).to_owned());
+        }
+    }
+    // 只有模式变更等没有内容差异的段。
+    Some(section_path(section))
 }
 
 fn read_meta(dir: &std::path::Path) -> Result<Metadata> {

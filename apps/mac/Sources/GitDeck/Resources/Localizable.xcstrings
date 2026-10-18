@@ -2024,6 +2024,40 @@
         }
       }
     },
+    "changelist.dialog.comment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment (used as the commit message)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "说明（用作提交信息）"
+          }
+        }
+      }
+    },
+    "changelist.dialog.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "名称"
+          }
+        }
+      }
+    },
     "changelist.edit": {
       "extractionState": "manual",
       "localizations": {
@@ -2047,13 +2081,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Rename"
+            "value": "OK"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "重命名"
+            "value": "确定"
           }
         }
       }
@@ -2064,13 +2098,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Rename Changelist"
+            "value": "Edit Changelist"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "重命名更改列表"
+            "value": "编辑更改列表"
           }
         }
       }
@@ -3605,6 +3639,40 @@
         }
       }
     },
+    "diff.title.shelfBase": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Base revision"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "基准版本"
+          }
+        }
+      }
+    },
+    "diff.title.shelved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shelved: %1$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搁置：%1$@"
+          }
+        }
+      }
+    },
     "diff.title.stash": {
       "extractionState": "manual",
       "localizations": {
@@ -3686,6 +3754,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "%1$@ — %2$@ 与工作区"
+          }
+        }
+      }
+    },
+    "diff.tooltip.shelf": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ — shelved in \"%2$@\""
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ — 搁置于“%2$@”"
           }
         }
       }
