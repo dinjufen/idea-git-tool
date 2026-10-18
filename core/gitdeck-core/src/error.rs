@@ -35,6 +35,9 @@ pub enum CoreError {
     #[error("invalid branch name: {name}")]
     InvalidBranchName { name: String },
 
+    #[error("invalid tag name: {name}")]
+    InvalidTagName { name: String },
+
     /// 签出、合并等操作会覆盖未提交的改动；UI 据此提供 Smart / Force 选项。
     #[error("local changes would be overwritten: {files:?}")]
     LocalChangesWouldBeOverwritten { files: Vec<String> },
@@ -53,6 +56,14 @@ pub enum CoreError {
 
     #[error("authentication failed: {detail}")]
     AuthenticationFailed { detail: String },
+
+    /// 交互式变基的范围内包含合并提交（会被线性化），暂不支持。
+    #[error("the commits to rebase contain merge commits")]
+    RebaseWithMerges,
+
+    /// 交互式变基的步骤无效，例如第一个提交被设为压缩 / 修整。
+    #[error("invalid rebase plan: {detail}")]
+    InvalidRebasePlan { detail: String },
 }
 
 impl CoreError {

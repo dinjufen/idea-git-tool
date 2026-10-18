@@ -265,7 +265,7 @@ impl Repository {
         Ok(())
     }
 
-    /// 合并进行中时 git 准备好的提交信息（去掉注释行），用于预填提交信息框。
+    /// 合并、拣选或还原进行中时 git 准备好的提交信息（去掉注释行），用于预填提交信息框。
     pub fn merge_message(&self) -> Option<String> {
         let text = std::fs::read_to_string(self.git_dir.join("MERGE_MSG")).ok()?;
         let message: Vec<&str> = text.lines().filter(|l| !l.starts_with('#')).collect();

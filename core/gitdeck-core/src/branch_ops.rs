@@ -30,6 +30,8 @@ pub enum MergeOutcome {
     Merged,
     /// 出现冲突，仓库处于合并 / 变基进行中状态，需要解决冲突后继续。
     Conflicts,
+    /// 交互式变基在 “edit” 步骤（或执行失败的步骤）停下，等待用户修改后继续。
+    Paused,
 }
 
 #[uniffi::export]

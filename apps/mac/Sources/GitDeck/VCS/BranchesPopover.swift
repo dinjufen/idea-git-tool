@@ -7,6 +7,7 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
         case action(title: String, symbol: String, shortcut: String?, run: @MainActor () -> Void)
         case section(String)
         case branch(BranchRef)
+        case tag(TagInfo)
     }
 
     /// 弹窗所在的 popover；执行操作前先关闭，使后续对话框附着在项目窗口上。
@@ -93,6 +94,16 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
                 ]
             case .merging:
                 rows.append(.action(title: tr("git.action.abortMerge"), symbol: "xmark.circle", shortcut: nil, run: { ops.abortMerge() }))
+            case .cherryPicking:
+                rows += [
+                    .action(title: tr("git.action.continueCherryPick"), symbol: "play", shortcut: nil, run: { ops.continueCherryPick() }),
+                    .action(title: tr("git.action.abortCherryPick"), symbol: "xmark.circle", shortcut: nil, run: { ops.abortCherryPick() }),
+                ]
+            case .reverting:
+                rows += [
+                    .action(title: tr("git.action.continueRevert"), symbol: "play", shortcut: nil, run: { ops.continueRevert() }),
+                    .action(title: tr("git.action.abortRevert"), symbol: "xmark.circle", shortcut: nil, run: { ops.abortRevert() }),
+                ]
             default:
                 break
             }
@@ -116,6 +127,11 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
             rows.append(.section(tr("branches.section.remote")))
             rows += remote.map(Row.branch)
         }
+        let tags = model.tags.filter { query.isEmpty || $0.name.lowercased().contains(query) }
+        if !tags.isEmpty {
+            rows.append(.section(tr("branches.section.tags")))
+            rows += tags.map(Row.tag)
+        }
         table.reloadData()
     }
 
@@ -129,6 +145,9 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
         case let .branch(branch):
             guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) else { return }
             branchMenu(for: branch).popUp(positioning: nil, at: NSPoint(x: cell.bounds.maxX - 20, y: cell.bounds.midY), in: cell)
+        case let .tag(tag):
+            guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) else { return }
+            tagMenu(for: tag).popUp(positioning: nil, at: NSPoint(x: cell.bounds.maxX - 20, y: cell.bounds.midY), in: cell)
         case .section:
             break
         }
@@ -187,6 +206,38 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
         return menu
     }
 
+    /// 标签操作菜单。
+    private func tagMenu(for tag: TagInfo) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let ops = operations
+        let name = tag.name
+        let current = model.currentBranchTitle
+        let entries: [(String, @MainActor () -> Void)?] = [
+            (tr("tags.menu.checkout"), { ops.checkout(.revision(name)) }),
+            (tr("branches.menu.newFrom", name), { ops.newBranch(from: name) }),
+            (tr("branches.menu.mergeInto", name, current), { ops.merge(name) }),
+            nil,
+            (tr("tags.menu.push"), { ops.pushTag(name) }),
+            (tr("tags.menu.delete"), { ops.deleteTag(name) }),
+        ]
+        for entry in entries {
+            guard let (title, action) = entry else {
+                menu.addItem(.separator())
+                continue
+            }
+            let handler = MenuAction { [weak self] in
+                self?.popover?.close()
+                action()
+            }
+            let item = NSMenuItem(title: title, action: #selector(MenuAction.invoke), keyEquivalent: "")
+            item.target = handler
+            item.representedObject = handler
+            menu.addItem(item)
+        }
+        return menu
+    }
+
     // MARK: - NSTableView
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -208,6 +259,10 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
             return wrap(label, leading: 12)
         case let .action(title, symbol, shortcut, _):
             return BranchRowView(symbol: symbol, title: title, detail: shortcut, enabled: true)
+        case let .tag(tag):
+            let view = BranchRowView(symbol: "tag", title: tag.name, detail: tag.message ?? String(tag.target.prefix(8)), enabled: true)
+            view.toolTip = tag.message
+            return view
         case let .branch(branch):
             var detail: [String] = []
             if branch.ahead > 0 { detail.append("↑\(branch.ahead)") }

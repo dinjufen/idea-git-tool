@@ -141,6 +141,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         toolbar.pushButton.action = #selector(pushChanges(_:))
 
         operations.window = window
+        gitToolWindow.operations = operations
         operations.onProgress = { [weak self] title in
             guard let self else { return }
             self.statusBar.setBusy(title != nil || self.model.isRefreshing)
@@ -230,7 +231,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     #if DEBUG
     /// 仅 Debug 构建：启动参数 `-debug.openLocalDiff <相对路径>` 在状态加载后自动打开该文件的本地 Diff，便于界面验证。
     private var debugDiffPath = UserDefaults.standard.string(forKey: "debug.openLocalDiff")
-    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge|annotate|history|stashes>（history 需配合 `-debug.historyPath <路径>`）` 在状态加载后自动执行对应操作。
+    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge|annotate|history|stashes|rebase>（history 需配合 `-debug.historyPath <路径>`）` 在状态加载后自动执行对应操作。
     private var debugAction = UserDefaults.standard.string(forKey: "debug.action")
     private weak var debugStashes: StashesView?
 
@@ -240,7 +241,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         guard let path = UserDefaults.standard.string(forKey: "debug.snapshot") else { return }
         Task {
             try? await Task.sleep(for: .seconds(2))
-            guard let content = window?.contentView else { return }
+            // 有表单（对话框）时截取表单，否则截取主窗口。
+            guard let content = (window?.attachedSheet ?? window)?.contentView else { return }
             let bounds = content.bounds
             guard let rep = content.bitmapImageRepForCachingDisplay(in: bounds) else { return }
             content.cacheDisplay(in: bounds, to: rep)
@@ -266,6 +268,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             case "newBranch": operations.newBranch()
             case "conflicts": conflictResolver.showConflicts()
             case "annotate": editor.toggleAnnotations()
+            case "rebase":
+                if let from = UserDefaults.standard.string(forKey: "debug.rebaseFrom"),
+                   let hash = try? model.repository.rebaseCommits(from: from).first?.hash {
+                    operations.interactiveRebase(from: hash)
+                }
             case "stashes":
                 unstashChanges(nil)
                 debugStashes?.expandFirst()
@@ -366,6 +373,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     @objc func resolveConflicts(_ sender: Any?) { conflictResolver.showConflicts() }
     @objc func toggleAnnotations(_ sender: Any?) { editor.toggleAnnotations() }
     @objc func stashChanges(_ sender: Any?) { operations.stashChanges() }
+    @objc func newTag(_ sender: Any?) { operations.newTag(at: nil) }
+    @objc func continueCherryPick(_ sender: Any?) { operations.continueCherryPick() }
+    @objc func abortCherryPick(_ sender: Any?) { operations.abortCherryPick() }
+    @objc func continueRevert(_ sender: Any?) { operations.continueRevert() }
+    @objc func abortRevert(_ sender: Any?) { operations.abortRevert() }
 
     /// IDEA 的 “Unstash Changes”：打开提交工具窗口的储藏标签。
     @objc func unstashChanges(_ sender: Any?) {
@@ -390,7 +402,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         }
         return switch menuItem.action {
         case #selector(pushChanges(_:)), #selector(updateProject(_:)), #selector(fetchChanges(_:)),
-             #selector(newBranch(_:)), #selector(checkoutRevision(_:)), #selector(stashChanges(_:)):
+             #selector(newBranch(_:)), #selector(checkoutRevision(_:)), #selector(stashChanges(_:)), #selector(newTag(_:)):
             !operations.isRunning
         case #selector(continueRebase(_:)), #selector(abortRebase(_:)):
             !operations.isRunning && model.status.state == .rebasing
@@ -398,6 +410,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             editor.activeRelativePath != nil
         case #selector(resolveConflicts(_:)):
             conflictResolver.hasConflicts
+        case #selector(continueCherryPick(_:)), #selector(abortCherryPick(_:)):
+            !operations.isRunning && model.status.state == .cherryPicking
+        case #selector(continueRevert(_:)), #selector(abortRevert(_:)):
+            !operations.isRunning && model.status.state == .reverting
         case #selector(abortMerge(_:)):
             !operations.isRunning && model.status.state == .merging
         case #selector(showFindBar(_:)), #selector(findNext(_:)), #selector(findPrevious(_:)):

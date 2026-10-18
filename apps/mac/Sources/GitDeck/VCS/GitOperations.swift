@@ -6,7 +6,7 @@ import GitDeckCore
 /// 同一项目同一时间只运行一个操作，与 IDEA 的后台任务行为一致。
 @MainActor
 final class GitOperations {
-    private let model: ProjectModel
+    let model: ProjectModel
     weak var window: NSWindow?
     /// 操作开始 / 结束时通知（状态栏显示进度）；参数为进行中的操作标题，结束时为 `nil`。
     var onProgress: ((String?) -> Void)?
@@ -24,7 +24,7 @@ final class GitOperations {
     // MARK: - 执行框架
 
     /// 在后台执行 `work`，完成后刷新状态并在主线程回调。
-    private func run<T: Sendable>(
+    func run<T: Sendable>(
         _ title: String,
         _ work: @escaping @Sendable (Repository) throws -> T,
         completion: @escaping (Result<T, any Error>) -> Void
@@ -47,7 +47,7 @@ final class GitOperations {
         }
     }
 
-    private func showError(_ title: String, _ error: any Error) {
+    func showError(_ title: String, _ error: any Error) {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = title
@@ -56,7 +56,7 @@ final class GitOperations {
         model.post(title, isError: true)
     }
 
-    private func present(_ alert: NSAlert, completion: ((NSApplication.ModalResponse) -> Void)? = nil) {
+    func present(_ alert: NSAlert, completion: ((NSApplication.ModalResponse) -> Void)? = nil) {
         if let window {
             alert.beginSheetModal(for: window, completionHandler: completion)
         } else {
@@ -243,17 +243,18 @@ final class GitOperations {
         }
     }
 
-    private func report(_ result: Result<MergeOutcome, any Error>, operation: String, failure: String) {
+    func report(_ result: Result<MergeOutcome, any Error>, operation: String, failure: String) {
         switch result {
         case .success(.upToDate): model.post(tr("ops.upToDate"))
         case .success(.fastForward), .success(.merged): model.post(tr("ops.done", operation))
+        case .success(.paused): model.post(tr("ops.paused", operation))
         case .success(.conflicts): showConflicts(operation)
         case let .failure(error): showError(failure, error)
         }
     }
 
     /// 出现冲突：提示用户在 Commit 工具窗口中解决（三栏合并在后续步骤加入）。
-    private func showConflicts(_ operation: String, stashKept: Bool = false) {
+    func showConflicts(_ operation: String, stashKept: Bool = false) {
         if let onConflicts {
             model.post(stashKept ? tr("ops.conflicts.title", operation) + " " + tr("ops.conflicts.stashKept")
                                  : tr("ops.conflicts.title", operation), isError: true)
@@ -367,7 +368,7 @@ final class GitOperations {
     }
 
     /// 破坏性操作前的确认对话框。
-    private func confirm(_ title: String, _ message: String, confirm: String, action: @escaping () -> Void) {
+    func confirm(_ title: String, _ message: String, confirm: String, action: @escaping () -> Void) {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = title
@@ -427,7 +428,7 @@ final class GitOperations {
                 switch update.outcome {
                 case .upToDate: model.post(tr("ops.update.upToDate"))
                 case .conflicts: showConflicts(tr("ops.update.name"), stashKept: update.stashKept)
-                case .fastForward, .merged:
+                case .fastForward, .merged, .paused:
                     model.post(update.stashConflicts
                         ? tr("ops.update.stashConflicts", "\(update.received)")
                         : tr("ops.update.done", "\(update.received)"), isError: update.stashConflicts)

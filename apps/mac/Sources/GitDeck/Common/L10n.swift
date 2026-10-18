@@ -57,6 +57,12 @@ extension CoreError {
             tr("ops.error.pushRejected", reason)
         case let .AuthenticationFailed(detail):
             tr("ops.error.auth", detail)
+        case let .InvalidTagName(name):
+            tr("ops.error.invalidTagName", name)
+        case .RebaseWithMerges:
+            tr("ops.error.rebaseWithMerges")
+        case let .InvalidRebasePlan(detail):
+            tr("ops.error.invalidRebasePlan", detail)
         }
     }
 }

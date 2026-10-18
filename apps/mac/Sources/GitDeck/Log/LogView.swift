@@ -4,6 +4,8 @@ import GitDeckCore
 /// Git 工具窗口的 Log 标签页：筛选栏 + 提交图表格 + 提交详情，布局对齐 IDEA。
 final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSMenuItemValidation {
     var onOpenFile: ((URL) -> Void)?
+    /// 提交级操作（右键菜单）由项目窗口的 GitOperations 执行。
+    weak var operations: GitOperations?
     /// 打开历史提交中某个文件的 Diff：提交哈希、第一个父提交、文件。
     var onShowCommitDiff: ((String, String?, ChangedFile) -> Void)?
     var onShowHistory: ((String) -> Void)? {
@@ -109,7 +111,7 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
         table.style = .plain
         table.backgroundColor = Theme.editorBackground
         table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
-        table.allowsMultipleSelection = false
+        table.allowsMultipleSelection = true
         table.dataSource = self
         table.delegate = self
         table.menu = contextMenu()
@@ -151,22 +153,29 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
 
     private func contextMenu() -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(withTitle: tr("log.menu.copyHash"), action: #selector(copyHash), keyEquivalent: "").target = self
-        menu.addItem(.separator())
-        // 以下操作在二期实现。
-        for key in ["log.menu.checkout", "log.menu.newBranch", "log.menu.newTag", "-",
-                    "log.menu.cherryPick", "log.menu.revert", "log.menu.reset", "-",
-                    "log.menu.undoCommit", "log.menu.editMessage"] {
-            if key == "-" {
+        let items: [(String, Selector)?] = [
+            ("log.menu.copyHash", #selector(copyHash)),
+            nil,
+            ("log.menu.checkout", #selector(checkoutRevision)),
+            ("log.menu.newBranch", #selector(newBranchHere)),
+            ("log.menu.newTag", #selector(newTagHere)),
+            nil,
+            ("log.menu.cherryPick", #selector(cherryPickSelected)),
+            ("log.menu.revert", #selector(revertSelected)),
+            ("log.menu.reset", #selector(resetHere)),
+            nil,
+            ("log.menu.undoCommit", #selector(undoCommit)),
+            ("log.menu.editMessage", #selector(editMessage)),
+            ("log.menu.drop", #selector(dropSelected)),
+            ("log.menu.interactiveRebase", #selector(interactiveRebaseHere)),
+        ]
+        for item in items {
+            guard let (key, action) = item else {
                 menu.addItem(.separator())
-            } else {
-                let item = NSMenuItem(title: tr(key), action: nil, keyEquivalent: "")
-                item.isEnabled = false
-                item.toolTip = tr("common.notImplemented")
-                menu.addItem(item)
+                continue
             }
+            menu.addItem(withTitle: tr(key), action: action, keyEquivalent: "").target = self
         }
-        menu.autoenablesItems = false
         return menu
     }
 
@@ -361,15 +370,103 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
         reload()
     }
 
+    /// 右键菜单作用的提交：点击行在选区内时为整个选区，否则只有点击的行；按列表顺序（从新到旧）。
+    private var targetCommits: [LogCommit] {
+        let clicked = table.clickedRow
+        let rows = clicked >= 0 && !table.selectedRowIndexes.contains(clicked)
+            ? IndexSet(integer: clicked)
+            : table.selectedRowIndexes
+        return rows.sorted().compactMap { commits.indices.contains($0) ? commits[$0] : nil }
+    }
+
+    private var targetCommit: LogCommit? {
+        let targets = targetCommits
+        return targets.count == 1 ? targets[0] : nil
+    }
+
+    /// 提交是否在当前分支上（只有这些提交可以改写信息、删除或从此处交互式变基）。
+    private func isOnCurrentBranch(_ commit: LogCommit) -> Bool {
+        model.repository.isAncestor(ancestor: commit.hash, descendant: "HEAD")
+    }
+
     @objc private func copyHash() {
-        let row = table.clickedRow >= 0 ? table.clickedRow : table.selectedRow
-        guard commits.indices.contains(row) else { return }
+        let hashes = targetCommits.map(\.hash)
+        guard !hashes.isEmpty else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(commits[row].hash, forType: .string)
+        NSPasteboard.general.setString(hashes.joined(separator: "\n"), forType: .string)
+    }
+
+    @objc private func checkoutRevision() {
+        guard let commit = targetCommit else { return }
+        operations?.checkout(.revision(commit.hash))
+    }
+
+    @objc private func newBranchHere() {
+        guard let commit = targetCommit else { return }
+        operations?.newBranch(from: commit.hash)
+    }
+
+    @objc private func newTagHere() {
+        guard let commit = targetCommit else { return }
+        operations?.newTag(at: commit.hash)
+    }
+
+    /// 拣选按从旧到新应用。
+    @objc private func cherryPickSelected() {
+        operations?.cherryPick(targetCommits.reversed().map(\.hash))
+    }
+
+    /// 还原按从新到旧进行，与 IDEA 一致。
+    @objc private func revertSelected() {
+        operations?.revert(targetCommits.map(\.hash))
+    }
+
+    @objc private func resetHere() {
+        guard let commit = targetCommit else { return }
+        operations?.resetDialog(to: commit.hash, subject: commit.subject)
+    }
+
+    @objc private func undoCommit() {
+        guard let commit = targetCommit else { return }
+        operations?.undoCommit(commit.hash)
+    }
+
+    @objc private func editMessage() {
+        guard let commit = targetCommit else { return }
+        let repository = model.repository
+        Task {
+            let message = await Task.detached { (try? repository.commitDetails(hash: commit.hash))?.message }.value
+            operations?.editMessage(commit.hash, current: message ?? commit.subject)
+        }
+    }
+
+    @objc private func dropSelected() {
+        operations?.dropCommits(targetCommits.map(\.hash))
+    }
+
+    @objc private func interactiveRebaseHere() {
+        guard let commit = targetCommit else { return }
+        operations?.interactiveRebase(from: commit.hash)
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        menuItem.action != #selector(copyHash) || table.clickedRow >= 0 || table.selectedRow >= 0
+        let targets = targetCommits
+        guard operations?.isRunning != true || menuItem.action == #selector(copyHash) else { return false }
+        switch menuItem.action {
+        case #selector(copyHash), #selector(cherryPickSelected), #selector(revertSelected):
+            return !targets.isEmpty
+        case #selector(checkoutRevision), #selector(newBranchHere), #selector(newTagHere), #selector(resetHere):
+            return targets.count == 1
+        case #selector(undoCommit):
+            // 与 IDEA 一致：只能撤销当前分支的最新提交。
+            return targetCommit?.hash == model.status.branch.oid
+        case #selector(editMessage), #selector(interactiveRebaseHere):
+            return targetCommit.map(isOnCurrentBranch) ?? false
+        case #selector(dropSelected):
+            return !targets.isEmpty && targets.allSatisfy(isOnCurrentBranch)
+        default:
+            return true
+        }
     }
 
     // MARK: - NSTableView

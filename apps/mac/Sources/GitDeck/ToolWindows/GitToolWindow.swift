@@ -18,6 +18,11 @@ final class GitToolWindow: NSView {
         }
     }
 
+    var operations: GitOperations? {
+        get { logView.operations }
+        set { logView.operations = newValue }
+    }
+
     var onShowHistory: ((String) -> Void)? {
         didSet { logView.onShowHistory = onShowHistory }
     }

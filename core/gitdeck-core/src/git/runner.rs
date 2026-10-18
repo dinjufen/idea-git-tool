@@ -112,7 +112,7 @@ impl GitExecutable {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        self.exec(cwd, args, None, true)
+        self.exec(cwd, args, None, true, &[])
     }
 
     /// 不启用 `--literal-pathspecs` 执行。用于 `git stash` 等内部依赖路径魔法（如 `:/`）的命令；
@@ -122,7 +122,7 @@ impl GitExecutable {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        self.exec(cwd, args, None, false)
+        self.exec(cwd, args, None, false, &[])
     }
 
     /// 同 [`run`](Self::run)，并把 `input` 写入 git 的标准输入（例如 `commit -F -`）。
@@ -131,7 +131,21 @@ impl GitExecutable {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        self.exec(cwd, args, Some(input), true)
+        self.exec(cwd, args, Some(input), true, &[])
+    }
+
+    /// 附加环境变量执行（例如交互式变基的 `GIT_SEQUENCE_EDITOR`），不启用 `--literal-pathspecs`。
+    pub fn run_with_env<I, S>(
+        &self,
+        cwd: &Path,
+        args: I,
+        env: &[(&str, String)],
+    ) -> Result<GitOutput>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.exec(cwd, args, None, false, env)
     }
 
     fn exec<I, S>(
@@ -140,6 +154,7 @@ impl GitExecutable {
         args: I,
         input: Option<&[u8]>,
         literal_pathspecs: bool,
+        env: &[(&str, String)],
     ) -> Result<GitOutput>
     where
         I: IntoIterator<Item = S>,
@@ -150,6 +165,7 @@ impl GitExecutable {
             .args(STABLE_OUTPUT_CONFIG)
             .args(literal_pathspecs.then_some("--literal-pathspecs"))
             .args(&args)
+            .envs(env.iter().map(|(k, v)| (*k, v.as_str())))
             .current_dir(cwd)
             .stdin(if input.is_some() {
                 Stdio::piped()

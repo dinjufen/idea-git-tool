@@ -110,6 +110,7 @@ enum MainMenu {
         menu.addItem(item(tr("git.action.branches"), #selector(ProjectWindowController.showBranchesPopup(_:)), "b", [.command, .control]))
         menu.addItem(item(tr("branches.action.new"), #selector(ProjectWindowController.newBranch(_:)), "n", [.command, .option]))
         menu.addItem(item(tr("branches.action.checkoutRevision"), #selector(ProjectWindowController.checkoutRevision(_:)), ""))
+        menu.addItem(item(tr("tag.new.menu"), #selector(ProjectWindowController.newTag(_:)), ""))
         menu.addItem(.separator())
         menu.addItem(item(tr("stash.menu.stash"), #selector(ProjectWindowController.stashChanges(_:)), ""))
         menu.addItem(item(tr("stash.menu.unstash"), #selector(ProjectWindowController.unstashChanges(_:)), ""))
@@ -121,6 +122,10 @@ enum MainMenu {
         menu.addItem(item(tr("git.action.continueRebase"), #selector(ProjectWindowController.continueRebase(_:)), ""))
         menu.addItem(item(tr("git.action.abortRebase"), #selector(ProjectWindowController.abortRebase(_:)), ""))
         menu.addItem(item(tr("git.action.abortMerge"), #selector(ProjectWindowController.abortMerge(_:)), ""))
+        menu.addItem(item(tr("git.action.continueCherryPick"), #selector(ProjectWindowController.continueCherryPick(_:)), ""))
+        menu.addItem(item(tr("git.action.abortCherryPick"), #selector(ProjectWindowController.abortCherryPick(_:)), ""))
+        menu.addItem(item(tr("git.action.continueRevert"), #selector(ProjectWindowController.continueRevert(_:)), ""))
+        menu.addItem(item(tr("git.action.abortRevert"), #selector(ProjectWindowController.abortRevert(_:)), ""))
         menu.addItem(.separator())
         menu.addItem(item(tr("git.action.refresh"), #selector(ProjectWindowController.refreshStatus(_:)), "r", [.command, .option]))
         return menu

@@ -84,8 +84,11 @@ impl Repository {
             args.push(format!("--author={author}"));
         }
 
-        if status.state == RepositoryState::Merging {
-            // git 不允许在合并过程中做部分提交：先暂存勾选文件，再提交整个索引（IDEA 同样如此）。
+        if matches!(
+            status.state,
+            RepositoryState::Merging | RepositoryState::CherryPicking | RepositoryState::Reverting
+        ) {
+            // git 不允许在合并 / 拣选 / 还原过程中做部分提交：先暂存勾选文件，再提交整个索引（IDEA 同样如此）。
             if !pathspecs.is_empty() {
                 self.git.run(
                     &self.root,
