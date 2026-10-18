@@ -149,7 +149,7 @@ impl Repository {
 
         let dirty = self.has_tracked_changes()?;
         if dirty {
-            self.git.run(
+            self.git.run_with_pathspec_magic(
                 &self.root,
                 ["stash", "push", "-m", "GitDeck: update project"],
             )?;
@@ -162,7 +162,9 @@ impl Repository {
             Ok(outcome) => outcome,
             Err(err) => {
                 if dirty {
-                    let _ = self.git.run(&self.root, ["stash", "pop"]);
+                    let _ = self
+                        .git
+                        .run_with_pathspec_magic(&self.root, ["stash", "pop"]);
                 }
                 return Err(err);
             }
@@ -175,7 +177,11 @@ impl Repository {
                 stash_kept: dirty,
             });
         }
-        let stash_conflicts = dirty && self.git.run(&self.root, ["stash", "pop"]).is_err();
+        let stash_conflicts = dirty
+            && self
+                .git
+                .run_with_pathspec_magic(&self.root, ["stash", "pop"])
+                .is_err();
         Ok(UpdateResult {
             outcome,
             received,

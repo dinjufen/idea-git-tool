@@ -12,6 +12,14 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     /// 打开 Conflicts 对话框。
     var onShowConflicts: (() -> Void)?
     var onShowHistory: ((String) -> Void)?
+    /// 储藏选中的文件（打开 Stash Changes 对话框）。
+    var onStashPaths: (([String]) -> Void)?
+
+    // “提交 / 储藏” 标签（IDEA New UI 的 Commit 工具窗口）。
+    private let tabs = NSSegmentedControl(labels: [tr("commit.tab.commit"), tr("commit.tab.stash")], trackingMode: .selectOne, target: nil, action: nil)
+    private var commitContent: [NSView] = []
+    private var stashesView: StashesView?
+    private var contentTop: NSLayoutYAxisAnchor?
 
     /// 变更树的分组节点，顺序与 IDEA 一致。
     final class Group {
@@ -71,7 +79,35 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    /// 加入 “储藏” 标签的内容（依赖 GitOperations，由项目窗口创建后传入）。
+    func attachStashes(_ view: StashesView) {
+        guard let contentTop else { return }
+        stashesView = view
+        view.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(view)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: contentTop),
+            view.leadingAnchor.constraint(equalTo: leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: trailingAnchor),
+            view.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        tabChanged()
+    }
+
+    func showStashTab() {
+        tabs.selectedSegment = 1
+        tabChanged()
+    }
+
+    @objc private func tabChanged() {
+        let showStash = tabs.selectedSegment == 1
+        commitContent.forEach { $0.isHidden = showStash }
+        stashesView?.isHidden = !showStash
+    }
+
     func focusMessage() {
+        tabs.selectedSegment = 0
+        tabChanged()
         window?.makeFirstResponder(messageView)
     }
 
@@ -82,7 +118,18 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         addSubview(background)
         background.pinEdges(to: self)
 
-        let header = ToolWindowHeader(title: tr("toolwindow.commit"))
+        let header = ToolWindowHeader(title: "")
+        tabs.segmentStyle = .texturedRounded
+        tabs.selectedSegment = 0
+        tabs.target = self
+        tabs.action = #selector(tabChanged)
+        tabs.translatesAutoresizingMaskIntoConstraints = false
+        header.addSubview(tabs)
+        NSLayoutConstraint.activate([
+            tabs.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 10),
+            tabs.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+        ])
+        contentTop = header.bottomAnchor
         let toolbar = makeToolbar()
 
         let column = NSTableColumn(identifier: .init("name"))
@@ -97,6 +144,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         outline.target = self
         // 与 IDEA 一致：双击打开 Diff，右键菜单可跳到源码。
         outline.doubleAction = #selector(showDiffForClicked)
+        outline.allowsMultipleSelection = true
         outline.menu = changeMenu()
         outline.setAccessibilityLabel(tr("commit.changes.accessibility"))
 
@@ -155,6 +203,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         buttons.spacing = 8
         buttons.translatesAutoresizingMaskIntoConstraints = false
 
+        commitContent = [toolbar, treeScroll, messageDivider, messageScroll, buttons]
         for view in [header, toolbar, treeScroll, messageDivider, messageScroll, buttons] as [NSView] { addSubview(view) }
         // 变更树占满剩余空间，提交信息区固定高度（拖拽调整高度在后续 UI 打磨阶段加入）。
         NSLayoutConstraint.activate([
@@ -361,6 +410,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         menu.addItem(withTitle: tr("commit.action.showDiff"), action: #selector(showDiffForSelection), keyEquivalent: "").target = self
         menu.addItem(withTitle: tr("commit.action.jumpToSource"), action: #selector(jumpToSource), keyEquivalent: "").target = self
         menu.addItem(withTitle: tr("git.action.showHistory"), action: #selector(showHistory), keyEquivalent: "").target = self
+        menu.addItem(withTitle: tr("stash.action.stashSelected"), action: #selector(stashSelected), keyEquivalent: "").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: tr("git.action.resolveConflicts"), action: #selector(resolveConflicts), keyEquivalent: "").target = self
         return menu
@@ -397,6 +447,17 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     @objc func showDiffForSelection() {
         guard let item = targetItem else { return }
         onShowDiff?(item.change)
+    }
+
+    /// 储藏选中的已跟踪文件；没有选中文件时储藏全部。
+    @objc private func stashSelected() {
+        let rows = outline.selectedRowIndexes.contains(outline.clickedRow) || outline.clickedRow < 0
+            ? outline.selectedRowIndexes
+            : IndexSet(integer: outline.clickedRow)
+        let paths = rows.compactMap { (outline.item(atRow: $0) as? FileItem)?.change }
+            .filter { !$0.isUntracked && $0.conflict == nil }
+            .map(\.path)
+        onStashPaths?(paths)
     }
 
     @objc private func showHistory() {

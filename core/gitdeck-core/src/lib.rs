@@ -17,6 +17,7 @@ mod highlight;
 mod history;
 mod remote;
 mod repo;
+mod stash;
 
 pub use blame::{BlameCommit, BlameResult, FileRevision};
 pub use branch_ops::{CheckoutMode, CheckoutOutcome, MergeOutcome};
@@ -41,6 +42,7 @@ pub use remote::{
     OutgoingCommit, PushOptions, PushResult, PushTarget, Remote, UpdateMethod, UpdateResult,
 };
 pub use repo::{GitInfo, Repository, git_info};
+pub use stash::{StashEntry, StashOptions, StashRevisions, UnstashOutcome, stash_revisions};
 
 /// 核心库版本，用于 About 对话框与诊断信息。
 #[uniffi::export]

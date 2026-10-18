@@ -151,6 +151,13 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         operations.onConflicts = { [weak self] in self?.conflictResolver.requestConflicts() }
         commitToolWindow.onResolveConflict = { [weak self] change in self?.conflictResolver.openMerge(change) }
         commitToolWindow.onShowConflicts = { [weak self] in self?.conflictResolver.showConflicts() }
+        let stashes = StashesView(model: model, operations: operations)
+        #if DEBUG
+        debugStashes = stashes
+        #endif
+        stashes.onShowFileDiff = { [weak self] stash, file in self?.diffOpener.showStashFile(stash, file: file) }
+        commitToolWindow.attachStashes(stashes)
+        commitToolWindow.onStashPaths = { [weak self] paths in self?.operations.stashChanges(paths: paths) }
         let showHistory: (String) -> Void = { [weak self] path in self?.showFileHistory(path) }
         editor.onShowHistory = showHistory
         commitToolWindow.onShowHistory = showHistory
@@ -223,8 +230,23 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     #if DEBUG
     /// 仅 Debug 构建：启动参数 `-debug.openLocalDiff <相对路径>` 在状态加载后自动打开该文件的本地 Diff，便于界面验证。
     private var debugDiffPath = UserDefaults.standard.string(forKey: "debug.openLocalDiff")
-    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge|annotate|history>（history 需配合 `-debug.historyPath <路径>`）` 在状态加载后自动执行对应操作。
+    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge|annotate|history|stashes>（history 需配合 `-debug.historyPath <路径>`）` 在状态加载后自动执行对应操作。
     private var debugAction = UserDefaults.standard.string(forKey: "debug.action")
+    private weak var debugStashes: StashesView?
+
+    /// 仅 Debug 构建：`-debug.snapshot <路径>` 在执行调试动作约 2 秒后把窗口内容渲染为 PNG。
+    /// 不依赖屏幕状态（显示器休眠或锁屏时也可用），用于界面验证。
+    private func scheduleDebugSnapshot() {
+        guard let path = UserDefaults.standard.string(forKey: "debug.snapshot") else { return }
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            guard let content = window?.contentView else { return }
+            let bounds = content.bounds
+            guard let rep = content.bitmapImageRepForCachingDisplay(in: bounds) else { return }
+            content.cacheDisplay(in: bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        }
+    }
     #endif
 
     private func modelChanged() {
@@ -236,6 +258,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         }
         if let action = debugAction, !model.isRefreshing, !model.branches.isEmpty {
             debugAction = nil
+            scheduleDebugSnapshot()
             switch action {
             case "branches": showBranchesPopup(nil)
             case "push": operations.push()
@@ -243,6 +266,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             case "newBranch": operations.newBranch()
             case "conflicts": conflictResolver.showConflicts()
             case "annotate": editor.toggleAnnotations()
+            case "stashes":
+                unstashChanges(nil)
+                debugStashes?.expandFirst()
             case "history":
                 if let path = UserDefaults.standard.string(forKey: "debug.historyPath") { showFileHistory(path) }
             case "merge":
@@ -339,6 +365,13 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     @objc func abortMerge(_ sender: Any?) { operations.abortMerge() }
     @objc func resolveConflicts(_ sender: Any?) { conflictResolver.showConflicts() }
     @objc func toggleAnnotations(_ sender: Any?) { editor.toggleAnnotations() }
+    @objc func stashChanges(_ sender: Any?) { operations.stashChanges() }
+
+    /// IDEA 的 “Unstash Changes”：打开提交工具窗口的储藏标签。
+    @objc func unstashChanges(_ sender: Any?) {
+        show(.commit)
+        commitToolWindow.showStashTab()
+    }
 
     @objc func showHistoryForCurrentFile(_ sender: Any?) {
         guard let path = editor.activeRelativePath else { return }
@@ -357,7 +390,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         }
         return switch menuItem.action {
         case #selector(pushChanges(_:)), #selector(updateProject(_:)), #selector(fetchChanges(_:)),
-             #selector(newBranch(_:)), #selector(checkoutRevision(_:)):
+             #selector(newBranch(_:)), #selector(checkoutRevision(_:)), #selector(stashChanges(_:)):
             !operations.isRunning
         case #selector(continueRebase(_:)), #selector(abortRebase(_:)):
             !operations.isRunning && model.status.state == .rebasing

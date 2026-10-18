@@ -58,6 +58,31 @@ struct DiffOpener {
         }
     }
 
+    /// 储藏中的文件：已跟踪文件相对储藏时的 HEAD，未跟踪文件与空内容比较。
+    func showStashFile(_ stash: StashEntry, file: ChangedFile) {
+        let repository = model.repository
+        let revisions = stashRevisions(index: stash.index, untracked: file.kind == .untracked)
+        let basePath = file.origPath ?? file.path
+        Task {
+            let (base, text) = await Task.detached(priority: .userInitiated) {
+                let base = revisions.base.flatMap { file.kind == .added ? nil : try? repository.fileAtRevision(revision: $0, path: basePath) }
+                let text = file.kind == .deleted ? nil : try? repository.fileAtRevision(revision: revisions.changed, path: file.path)
+                return (base ?? nil, text ?? nil)
+            }.value
+            editor.openDiff(
+                key: "stash:\(stash.hash):\(file.path)",
+                title: (file.path as NSString).lastPathComponent,
+                tooltip: tr("diff.tooltip.stash", file.path, stash.message)
+            ) {
+                DiffView(
+                    left: DiffSide(title: tr("diff.title.stashBase"), text: base),
+                    right: DiffSide(title: tr("diff.title.stash", stash.message), text: text),
+                    path: file.path
+                )
+            }
+        }
+    }
+
     /// 读取工作区文件；非 UTF-8 内容按有损方式解码，与核心读取历史版本的处理一致。
     nonisolated private static func readWorkingFile(_ url: URL) -> String? {
         guard let data = try? Data(contentsOf: url) else { return nil }

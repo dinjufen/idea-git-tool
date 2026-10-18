@@ -270,6 +270,115 @@ final class GitOperations {
         model.post(tr("ops.conflicts.title", operation), isError: true)
     }
 
+    // MARK: - Stash
+
+    /// IDEA 的 “Stash Changes” 对话框：消息、保留索引、包含未跟踪文件。`paths` 非空时只储藏这些文件。
+    func stashChanges(paths: [String] = []) {
+        let alert = NSAlert()
+        alert.messageText = paths.isEmpty ? tr("stash.dialog.title") : tr("stash.dialog.titleSelected", "\(paths.count)")
+        alert.informativeText = tr("stash.dialog.message", model.currentBranchTitle)
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        field.placeholderString = tr("stash.dialog.placeholder")
+        let keepIndex = NSButton(checkboxWithTitle: tr("stash.dialog.keepIndex"), target: nil, action: nil)
+        let untracked = NSButton(checkboxWithTitle: tr("stash.dialog.untracked"), target: nil, action: nil)
+        let stack = NSStackView(views: [field, keepIndex, untracked])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.frame = NSRect(x: 0, y: 0, width: 320, height: 84)
+        alert.accessoryView = stack
+        alert.window.initialFirstResponder = field
+        alert.addButton(withTitle: tr("stash.dialog.confirm"))
+        alert.addButton(withTitle: tr("common.cancel"))
+        present(alert) { [self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            let options = StashOptions(
+                message: field.stringValue.trimmingCharacters(in: .whitespaces),
+                paths: paths,
+                includeUntracked: untracked.state == .on,
+                keepIndex: keepIndex.state == .on
+            )
+            run(tr("ops.progress.stash"), { repo in try repo.stashChanges(options: options) }) { [self] result in
+                switch result {
+                case .success(true): model.post(tr("stash.done"))
+                case .success(false): model.post(tr("stash.nothing"))
+                case let .failure(error): showError(tr("stash.failed"), error)
+                }
+            }
+        }
+    }
+
+    /// 应用储藏；`pop` 成功后删除它。出现冲突时打开冲突解决流程。
+    func applyStash(_ stash: StashEntry, pop: Bool, reinstateIndex: Bool = false) {
+        run(tr("ops.progress.unstash"), { repo in
+            try repo.applyStash(index: stash.index, pop: pop, reinstateIndex: reinstateIndex)
+        }) { [self] result in
+            switch result {
+            case .success(let outcome) where outcome.conflicts:
+                showConflicts(tr("stash.unstash.name"))
+            case .success:
+                model.post(pop ? tr("stash.popped", stash.message) : tr("stash.applied", stash.message))
+            case let .failure(error):
+                showError(tr("stash.unstash.failed"), error)
+            }
+        }
+    }
+
+    func dropStash(_ stash: StashEntry) {
+        confirm(tr("stash.drop.title"), tr("stash.drop.message", stash.message), confirm: tr("stash.drop.confirm")) { [self] in
+            run(tr("ops.progress.dropStash"), { repo in try repo.dropStash(index: stash.index) }) { [self] result in
+                if case let .failure(error) = result { showError(tr("stash.drop.failed"), error) } else { model.post(tr("stash.dropped")) }
+            }
+        }
+    }
+
+    func clearStashes() {
+        guard !model.stashes.isEmpty else { return }
+        confirm(tr("stash.clear.title"), tr("stash.clear.message", "\(model.stashes.count)"), confirm: tr("stash.clear.confirm")) { [self] in
+            run(tr("ops.progress.dropStash"), { repo in try repo.clearStashes() }) { [self] result in
+                if case let .failure(error) = result { showError(tr("stash.drop.failed"), error) } else { model.post(tr("stash.cleared")) }
+            }
+        }
+    }
+
+    /// IDEA 的 “Unstash as new branch”：从储藏时的提交新建分支并应用储藏。
+    func unstashAsBranch(_ stash: StashEntry) {
+        let repository = model.repository
+        let existing = Set(model.branches.filter { $0.kind == .local }.map(\.name))
+        NameDialog(
+            title: tr("stash.branch.title"),
+            message: stash.message,
+            initial: "",
+            confirmTitle: tr("ops.newBranch.confirm"),
+            validate: { name in
+                if existing.contains(name) { return tr("ops.validate.exists", name) }
+                return repository.isValidBranchName(name: name) ? nil : tr("ops.validate.invalid")
+            }
+        ).begin(for: window) { [self] result in
+            run(tr("ops.progress.newBranch", result.name), { repo in
+                try repo.stashToBranch(index: stash.index, branch: result.name)
+            }) { [self] outcome in
+                switch outcome {
+                case .success: model.post(tr("stash.branch.done", result.name))
+                case let .failure(error): showError(tr("stash.unstash.failed"), error)
+                }
+            }
+        }
+    }
+
+    /// 破坏性操作前的确认对话框。
+    private func confirm(_ title: String, _ message: String, confirm: String, action: @escaping () -> Void) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: confirm)
+        alert.addButton(withTitle: tr("common.cancel"))
+        present(alert) { response in
+            if response == .alertFirstButtonReturn { action() }
+        }
+    }
+
     // MARK: - Fetch / Update / Push
 
     func fetch() {

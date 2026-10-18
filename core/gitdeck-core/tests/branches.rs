@@ -173,6 +173,30 @@ fn smart_checkout_stashes_and_restores_changes() {
 }
 
 #[test]
+fn smart_checkout_restores_untracked_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    new_repo(dir);
+    commit_file(dir, "a.txt", "1\n2\n3\n4\n5\n", "base");
+    git(dir, &["checkout", "-q", "-b", "other"]);
+    commit_file(dir, "a.txt", "1 other\n2\n3\n4\n5\n", "other");
+    git(dir, &["checkout", "-q", "main"]);
+    fs::write(dir.join("a.txt"), "1\n2\n3\n4\n5 local\n").unwrap();
+    // 未跟踪文件应随储藏一起暂存并在签出后原样恢复（回归：--literal-pathspecs 曾导致其未被清理）。
+    fs::write(dir.join("scratch.txt"), "notes\n").unwrap();
+
+    let outcome = open(dir)
+        .checkout_branch("other".into(), CheckoutMode::Smart)
+        .unwrap();
+    assert!(!outcome.stash_conflicts);
+    assert_eq!(
+        fs::read_to_string(dir.join("scratch.txt")).unwrap(),
+        "notes\n"
+    );
+    assert!(git(dir, &["stash", "list"]).trim().is_empty());
+}
+
+#[test]
 fn smart_checkout_keeps_stash_on_conflict() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path();

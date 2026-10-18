@@ -13,6 +13,7 @@ final class ProjectModel {
         state: .normal
     )
     private(set) var branches: [BranchRef] = []
+    private(set) var stashes: [StashEntry] = []
     private(set) var isRefreshing = false
     private(set) var lastError: String?
     /// 最近一条通知（例如提交结果），显示在状态栏，对应 IDEA 的事件通知。
@@ -86,12 +87,13 @@ final class ProjectModel {
         let repository = repository
         Task {
             let result = await Task.detached(priority: .userInitiated) {
-                Result { (try repository.status(), try repository.branches()) }
+                Result { (try repository.status(), try repository.branches(), try repository.stashes()) }
             }.value
             switch result {
-            case let .success((status, branches)):
+            case let .success((status, branches, stashes)):
                 self.status = status
                 self.branches = branches
+                self.stashes = stashes
                 self.changesByPath = Dictionary(status.changes.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
                 self.lastError = nil
             case let .failure(error):

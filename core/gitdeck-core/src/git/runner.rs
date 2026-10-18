@@ -112,7 +112,17 @@ impl GitExecutable {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        self.exec(cwd, args, None)
+        self.exec(cwd, args, None, true)
+    }
+
+    /// 不启用 `--literal-pathspecs` 执行。用于 `git stash` 等内部依赖路径魔法（如 `:/`）的命令；
+    /// 调用方需自行给路径加 `:(literal)` 前缀。
+    pub fn run_with_pathspec_magic<I, S>(&self, cwd: &Path, args: I) -> Result<GitOutput>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.exec(cwd, args, None, false)
     }
 
     /// 同 [`run`](Self::run)，并把 `input` 写入 git 的标准输入（例如 `commit -F -`）。
@@ -121,10 +131,16 @@ impl GitExecutable {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        self.exec(cwd, args, Some(input))
+        self.exec(cwd, args, Some(input), true)
     }
 
-    fn exec<I, S>(&self, cwd: &Path, args: I, input: Option<&[u8]>) -> Result<GitOutput>
+    fn exec<I, S>(
+        &self,
+        cwd: &Path,
+        args: I,
+        input: Option<&[u8]>,
+        literal_pathspecs: bool,
+    ) -> Result<GitOutput>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
@@ -132,6 +148,7 @@ impl GitExecutable {
         let args: Vec<_> = args.into_iter().map(|a| a.as_ref().to_owned()).collect();
         let mut child = base_command(&self.path)
             .args(STABLE_OUTPUT_CONFIG)
+            .args(literal_pathspecs.then_some("--literal-pathspecs"))
             .args(&args)
             .current_dir(cwd)
             .stdin(if input.is_some() {
@@ -175,6 +192,7 @@ impl GitExecutable {
 }
 
 /// 每次调用都注入的配置，保证输出格式不受用户全局配置影响。
+/// 此外默认加 `--literal-pathspecs`：传入的路径都按字面量处理，文件名中的 `*`、`[` 等不会被当作通配符。
 const STABLE_OUTPUT_CONFIG: &[&str] = &[
     "-c",
     "core.quotepath=false",
@@ -183,8 +201,6 @@ const STABLE_OUTPUT_CONFIG: &[&str] = &[
     "-c",
     "log.showSignature=false",
     "--no-pager",
-    // 传入的路径都按字面量处理，文件名中的 `*`、`[` 等不会被当作通配符。
-    "--literal-pathspecs",
 ];
 
 /// 认证提示程序（askpass）。设置后 git 与 ssh 需要用户名、密码或口令时会调用它，

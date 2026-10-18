@@ -248,7 +248,8 @@ impl Repository {
         operation: impl FnOnce() -> Result<()>,
     ) -> Result<bool> {
         let message = format!("GitDeck: {purpose}");
-        self.git.run(
+        // `stash -u` 依赖路径魔法清理未跟踪文件，不能启用 --literal-pathspecs。
+        self.git.run_with_pathspec_magic(
             &self.root,
             [
                 "stash",
@@ -259,10 +260,15 @@ impl Repository {
             ],
         )?;
         if let Err(err) = operation() {
-            let _ = self.git.run(&self.root, ["stash", "pop"]);
+            let _ = self
+                .git
+                .run_with_pathspec_magic(&self.root, ["stash", "pop"]);
             return Err(err);
         }
-        Ok(self.git.run(&self.root, ["stash", "pop"]).is_err())
+        Ok(self
+            .git
+            .run_with_pathspec_magic(&self.root, ["stash", "pop"])
+            .is_err())
     }
 
     fn rebase_result(&self, result: Result<crate::git::runner::GitOutput>) -> Result<MergeOutcome> {
