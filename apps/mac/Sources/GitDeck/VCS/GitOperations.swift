@@ -8,6 +8,8 @@ import GitDeckCore
 final class GitOperations {
     let model: ProjectModel
     weak var window: NSWindow?
+    /// AI 评审（Log 与分支菜单中的评审入口）。
+    weak var aiReview: AIReviewController?
     /// 操作开始 / 结束时通知（状态栏显示进度）；参数为进行中的操作标题，结束时为 `nil`。
     var onProgress: ((String?) -> Void)?
     /// 出现冲突时打开 Conflicts 对话框（与 IDEA 一样自动弹出）。

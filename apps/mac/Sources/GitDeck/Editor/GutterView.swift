@@ -2,8 +2,18 @@ import AppKit
 import CodeEditTextView
 import GitDeckCore
 
-/// 编辑器左侧 gutter：行号 + 相对 HEAD 的变更标记（IDEA 的 line status markers）。
-final class GutterView: NSView {
+/// AI 评审发现在编辑器中的标记。
+struct ReviewMarker {
+    /// 在评审结果中的下标。
+    let index: Int
+    /// 从 0 开始的行号。
+    let line: Int
+    let severity: ReviewSeverity
+    let title: String
+}
+
+/// 编辑器左侧 gutter：AI 评审标记 + 行号 + 相对 HEAD 的变更标记（IDEA 的 line status markers）。
+final class GutterView: NSView, NSViewToolTipOwner {
     /// 相对基准版本的行变更；为空时不显示标记。
     var changes: [LineChange] = [] {
         didSet { needsDisplay = true }
@@ -17,6 +27,18 @@ final class GutterView: NSView {
     }
 
     var contextMenu: (() -> NSMenu?)?
+
+    /// AI 评审标记；有标记时在行号左侧显示严重程度图标。
+    var reviewMarkers: [ReviewMarker] = [] {
+        didSet {
+            if reviewMarkers.isEmpty != oldValue.isEmpty { invalidateIntrinsicContentSize() }
+            needsDisplay = true
+        }
+    }
+
+    var onMarkerClick: ((Int) -> Void)?
+    private static let reviewColumnWidth: CGFloat = 16
+    private var markerRects: [(rect: NSRect, marker: ReviewMarker)] = []
 
     private weak var textView: TextView?
     private weak var scrollView: NSScrollView?
@@ -43,11 +65,26 @@ final class GutterView: NSView {
         let lines = max(textView?.layoutManager?.lineCount ?? 1, 1)
         let digits = max(String(lines).count, 3)
         let digitWidth = ("8" as NSString).size(withAttributes: [.font: numberFont]).width
-        return NSSize(width: CGFloat(digits) * digitWidth + 14 + Self.markerGap + Self.markerWidth, height: NSView.noIntrinsicMetric)
+        let reviewColumn = reviewMarkers.isEmpty ? 0 : Self.reviewColumnWidth
+        return NSSize(width: reviewColumn + CGFloat(digits) * digitWidth + 14 + Self.markerGap + Self.markerWidth, height: NSView.noIntrinsicMetric)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         contextMenu?()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if let hit = markerRects.first(where: { $0.rect.insetBy(dx: -2, dy: -2).contains(point) }) {
+            onMarkerClick?(hit.marker.index)
+            return
+        }
+        super.mouseDown(with: event)
+    }
+
+    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
+        let markers = markerRects.filter { $0.rect.insetBy(dx: -2, dy: -2).contains(point) }.map(\.marker)
+        return markers.map { "\(AIReviewToolWindow.severityTitle($0.severity)): \($0.title)" }.joined(separator: "\n")
     }
 
     /// 行数位数变化时调整宽度。
@@ -82,6 +119,8 @@ final class GutterView: NSView {
             line = layout.lineStorage.getLine(atIndex: current.index + 1)
         }
 
+        drawReviewMarkers(layout: layout, offsetY: offsetY)
+
         // 变更标记。
         let markerX = bounds.width - Self.markerWidth - 2
         for change in changes {
@@ -114,6 +153,37 @@ final class GutterView: NSView {
                 LineStatusColors.deleted.setFill()
                 triangle.fill()
             }
+        }
+    }
+}
+
+extension GutterView {
+    /// 每行只画最严重的一个图标，并为图标区域注册提示。
+    fileprivate func drawReviewMarkers(layout: TextLayoutManager, offsetY: CGFloat) {
+        removeAllToolTips()
+        markerRects = []
+        guard !reviewMarkers.isEmpty else { return }
+        let rank: (ReviewSeverity) -> Int = { $0 == .error ? 0 : ($0 == .warning ? 1 : 2) }
+        var byLine: [Int: ReviewMarker] = [:]
+        for marker in reviewMarkers {
+            if let existing = byLine[marker.line], rank(existing.severity) <= rank(marker.severity) { continue }
+            byLine[marker.line] = marker
+        }
+        for (line, marker) in byLine {
+            guard let position = layout.lineStorage.getLine(atIndex: line) else { continue }
+            let size: CGFloat = 12
+            let y = position.yPos - offsetY + (position.height - size) / 2
+            guard y + size >= 0, y <= bounds.height else { continue }
+            let rect = NSRect(x: 3, y: y, width: size, height: size)
+            let (symbol, color) = AIReviewToolWindow.severitySymbol(marker.severity)
+            if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 10, weight: .regular).applying(.init(paletteColors: [color]))) {
+                image.draw(in: rect)
+            }
+            for other in reviewMarkers where other.line == line {
+                markerRects.append((rect, other))
+            }
+            addToolTip(rect, owner: self, userData: nil)
         }
     }
 }

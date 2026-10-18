@@ -122,7 +122,7 @@ fn is_background(args: &[String]) -> bool {
             Some(
                 "status" | "log" | "show" | "cat-file" | "diff-tree" | "rev-list" | "rev-parse"
                 | "for-each-ref" | "symbolic-ref" | "show-ref" | "merge-base" | "check-ref-format"
-                | "blame" | "ls-tree" | "ls-files" | "--version",
+                | "blame" | "ls-tree" | "ls-files" | "grep" | "diff" | "--version",
             ),
             _,
         ) => true,

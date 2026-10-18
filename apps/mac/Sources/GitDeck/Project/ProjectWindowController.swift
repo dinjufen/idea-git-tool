@@ -5,9 +5,9 @@ import GitDeckCore
 ///
 /// ```
 /// ┌ 主工具栏（项目组件 · VCS 分支组件 · 操作按钮）────────────┐
-/// │ 图标条 │ 左侧工具窗口 │ 编辑器区域                          │
-/// │        ├──────────────┴──────────────────────────────────── │
-/// │        │ 底部工具窗口（Git: Log / Console）                  │
+/// │ 图标条 │ 左侧工具窗口 │ 编辑器区域          │ 右侧工具窗口 │ 图标条 │
+/// │        ├──────────────┴─────────────────────┴──────────────┤        │
+/// │        │ 底部工具窗口（Git: Log / Console）                  │        │
 /// └ 状态栏 ─────────────────────────────────────────────────────┘
 /// ```
 final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSplitViewDelegate, NSMenuItemValidation {
@@ -16,11 +16,13 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
 
     private let toolbar = MainToolbarView()
     private let stripe = ToolWindowStripe(top: [.project, .commit], bottom: [.git])
+    private let rightStripe = ToolWindowStripe(top: [.aiReview], bottom: [])
     private let statusBar = StatusBarView()
     private let verticalSplit = NSSplitView()
     private let horizontalSplit = NSSplitView()
     private let leftPanel = NSView()
     private let bottomPanel = NSView()
+    private let rightPanel = NSView()
     private lazy var editor = EditorAreaView(model: model)
     private lazy var diffOpener = DiffOpener(model: model, editor: editor)
     private lazy var operations = GitOperations(model: model)
@@ -29,6 +31,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     private lazy var projectToolWindow = ProjectToolWindow(model: model)
     private lazy var commitToolWindow = CommitToolWindow(model: model)
     private lazy var gitToolWindow = GitToolWindow(model: model)
+    private lazy var aiReview = AIReviewController(model: model)
+    private lazy var aiToolWindow = AIReviewToolWindow(controller: aiReview)
 
     // 工具窗口布局在各项目间共用并持久化，与 IDEA 重启后恢复布局的行为一致。
     private var leftToolWindow: ToolWindowID? = ToolWindowLayout.left {
@@ -38,7 +42,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     private var bottomVisible = ToolWindowLayout.bottomVisible {
         didSet { ToolWindowLayout.bottomVisible = bottomVisible }
     }
+    private var rightVisible = ToolWindowLayout.rightVisible {
+        didSet { ToolWindowLayout.rightVisible = rightVisible }
+    }
     private var leftWidth: CGFloat = 300
+    private var rightWidth: CGFloat = 380
     private var bottomHeight: CGFloat = 260
     private var observer: UUID?
     private var branchesPopover: NSPopover?
@@ -85,8 +93,12 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         horizontalSplit.delegate = self
         horizontalSplit.addArrangedSubview(leftPanel)
         horizontalSplit.addArrangedSubview(editor)
+        horizontalSplit.addArrangedSubview(rightPanel)
         horizontalSplit.setHoldingPriority(.defaultHigh, forSubviewAt: 0)
         horizontalSplit.setHoldingPriority(.defaultLow, forSubviewAt: 1)
+        horizontalSplit.setHoldingPriority(.defaultHigh, forSubviewAt: 2)
+        rightPanel.addSubview(aiToolWindow)
+        aiToolWindow.pinEdges(to: rightPanel)
 
         verticalSplit.isVertical = false
         verticalSplit.dividerStyle = .thin
@@ -101,7 +113,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         gitToolWindow.pinEdges(to: bottomPanel)
 
         let stripeDivider = SeparatorLine(.vertical)
-        for view in [toolbar, stripe, stripeDivider, verticalSplit, statusBar] as [NSView] { content.addSubview(view) }
+        let rightStripeDivider = SeparatorLine(.vertical)
+        for view in [toolbar, stripe, stripeDivider, verticalSplit, rightStripeDivider, rightStripe, statusBar] as [NSView] { content.addSubview(view) }
         NSLayoutConstraint.activate([
             toolbar.topAnchor.constraint(equalTo: content.topAnchor),
             toolbar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -116,7 +129,13 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
 
             verticalSplit.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
             verticalSplit.leadingAnchor.constraint(equalTo: stripeDivider.trailingAnchor),
-            verticalSplit.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            verticalSplit.trailingAnchor.constraint(equalTo: rightStripeDivider.leadingAnchor),
+            rightStripeDivider.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            rightStripeDivider.trailingAnchor.constraint(equalTo: rightStripe.leadingAnchor),
+            rightStripeDivider.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+            rightStripe.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            rightStripe.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            rightStripe.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
             verticalSplit.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
 
             statusBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -127,6 +146,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
 
     private func wireActions() {
         stripe.onToggle = { [weak self] id in self?.toggle(id) }
+        rightStripe.onToggle = { [weak self] id in self?.toggle(id) }
         toolbar.vcsWidget.target = self
         toolbar.vcsWidget.action = #selector(showBranchesPopup(_:))
         toolbar.projectWidget.target = self
@@ -180,6 +200,19 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             self?.diffOpener.showCommitFile(hash: hash, parent: parent, file: file)
         }
         editor.onCaretChange = { [weak self] info in self?.statusBar.setEditorInfo(info) }
+
+        aiReview.window = window
+        aiReview.onReveal = { [weak self] in self?.show(.aiReview) }
+        operations.aiReview = aiReview
+        commitToolWindow.aiReview = aiReview
+        editor.aiReview = aiReview
+        editor.onReviewMarkerClick = { [weak self] index in
+            self?.show(.aiReview)
+            self?.aiToolWindow.select(findingIndex: index)
+        }
+        aiToolWindow.onReviewLocalChanges = { [weak self] in self?.reviewLocalChanges(nil) }
+        aiToolWindow.onOpenFinding = { [weak self] index in self?.openFinding(index) }
+        aiToolWindow.onApplySuggestion = { [weak self] index in self?.applySuggestion(index) }
     }
 
     // MARK: - 工具窗口
@@ -191,6 +224,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             leftToolWindow = leftToolWindow == id ? nil : id
         case .bottom:
             bottomVisible.toggle()
+        case .right:
+            rightVisible.toggle()
         }
         applyToolWindowState()
     }
@@ -199,6 +234,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         switch id.anchor {
         case .left: leftToolWindow = id
         case .bottom: bottomVisible = true
+        case .right: rightVisible = true
         }
         applyToolWindowState()
     }
@@ -206,6 +242,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     private func applyToolWindowState() {
         if !leftPanel.isHidden, leftPanel.frame.width > 0 { leftWidth = leftPanel.frame.width }
         if !bottomPanel.isHidden, bottomPanel.frame.height > 0 { bottomHeight = bottomPanel.frame.height }
+        if !rightPanel.isHidden, rightPanel.frame.width > 0 { rightWidth = rightPanel.frame.width }
 
         leftPanel.subviews.forEach { $0.removeFromSuperview() }
         if let id = leftToolWindow {
@@ -215,17 +252,20 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         }
         leftPanel.isHidden = leftToolWindow == nil
         bottomPanel.isHidden = !bottomVisible
+        rightPanel.isHidden = !rightVisible
         // 首次调用时窗口尚未布局，分割视图尺寸为 0，需先布局才能设置分隔条位置。
         window?.contentView?.layoutSubtreeIfNeeded()
         horizontalSplit.adjustSubviews()
         verticalSplit.adjustSubviews()
         if !leftPanel.isHidden { horizontalSplit.setPosition(leftWidth, ofDividerAt: 0) }
+        if !rightPanel.isHidden { horizontalSplit.setPosition(horizontalSplit.bounds.width - rightWidth, ofDividerAt: 1) }
         if !bottomPanel.isHidden { verticalSplit.setPosition(verticalSplit.bounds.height - bottomHeight, ofDividerAt: 0) }
 
         var active = Set<ToolWindowID>()
         if let id = leftToolWindow { active.insert(id) }
         if bottomVisible { active.insert(.git) }
         stripe.setActive(active)
+        rightStripe.setActive(rightVisible ? [.aiReview] : [])
     }
 
     // MARK: - 模型变化
@@ -233,7 +273,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     #if DEBUG
     /// 仅 Debug 构建：启动参数 `-debug.openLocalDiff <相对路径>` 在状态加载后自动打开该文件的本地 Diff，便于界面验证。
     private var debugDiffPath = UserDefaults.standard.string(forKey: "debug.openLocalDiff")
-    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge|annotate|history|stashes|rebase|console|worktrees>（history 需配合 `-debug.historyPath <路径>`）` 在状态加载后自动执行对应操作。
+    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge|annotate|history|stashes|rebase|console|worktrees|aiReview|aiMessage|settings>（history 需配合 `-debug.historyPath <路径>`）` 在状态加载后自动执行对应操作。
     private var debugAction = UserDefaults.standard.string(forKey: "debug.action")
     private weak var debugStashes: StashesView?
 
@@ -271,6 +311,19 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             case "conflicts": conflictResolver.showConflicts()
             case "annotate": editor.toggleAnnotations()
             case "console": showGitConsole(nil)
+            case "aiReview":
+                // `-debug.aiApply YES`：评审结束后选中第一个发现、跳转到源码并打开应用建议的预览。
+                aiReview.start(scope: .localChanges(paths: []), title: tr("ai.scope.local", "\(model.status.changes.count)")) { [weak self] result in
+                    guard let self, result != nil, UserDefaults.standard.bool(forKey: "debug.aiApply") else { return }
+                    self.aiToolWindow.select(findingIndex: 0)
+                    self.openFinding(0)
+                    self.applySuggestion(0)
+                }
+            case "settings": (NSApp.delegate as? AppDelegate)?.showSettings(nil)
+            case "aiMessage":
+                showCommitToolWindow(nil)
+                // 等提交工具窗口按最新状态勾选好文件。
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.commitToolWindow.generateMessage() }
             case "worktrees":
                 show(.git)
                 gitToolWindow.showWorktrees()
@@ -311,6 +364,75 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     }
 
     @objc func showGitToolWindow(_ sender: Any?) { show(.git) }
+
+    @objc func showAIReviewToolWindow(_ sender: Any?) { show(.aiReview) }
+
+    /// AI 评审本地改动：Commit 工具窗口中勾选了文件时只评审勾选的文件。
+    @objc func reviewLocalChanges(_ sender: Any?) {
+        aiReview.reviewLocalChanges(paths: commitToolWindow.includedPaths)
+    }
+
+    /// 跳转到发现所在位置：工作区版本在编辑器中打开，历史版本打开该提交中文件的 Diff。
+    private func openFinding(_ index: Int) {
+        guard let result = aiReview.result, result.findings.indices.contains(index) else { return }
+        let finding = result.findings[index]
+        let line = Int(finding.line) - 1
+        if aiReview.isWorkingTreeResult(for: finding.file) {
+            let url = model.rootURL.appendingPathComponent(finding.file)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                NSSound.beep()
+                return
+            }
+            editor.open(url, line: line)
+        } else if let revision = result.revision {
+            diffOpener.showCommitFile(
+                hash: revision,
+                parent: revision + "^",
+                file: ChangedFile(path: finding.file, origPath: nil, kind: .modified),
+                revealLine: line
+            )
+        }
+    }
+
+    /// 预览并应用修改建议：在当前内容（含未保存的编辑）中定位原文，确认后写入。
+    private func applySuggestion(_ index: Int) {
+        guard let window, let result = aiReview.result, result.findings.indices.contains(index) else { return }
+        let finding = result.findings[index]
+        guard let suggestion = finding.suggestion, aiReview.isWorkingTreeResult(for: finding.file) else { return }
+        let url = model.rootURL.appendingPathComponent(finding.file)
+        guard let current = editor.text(of: url) ?? (try? String(contentsOf: url, encoding: .utf8)) else {
+            NSSound.beep()
+            return
+        }
+        guard let updated = applyReviewSuggestion(
+            content: current, line: finding.line, original: suggestion.original, replacement: suggestion.replacement
+        ) else {
+            let alert = NSAlert()
+            alert.messageText = tr("ai.apply.notFound")
+            alert.informativeText = tr("ai.apply.notFound.message")
+            alert.beginSheetModal(for: window)
+            return
+        }
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "debug.aiApplyNow") {
+            writeSuggestion(index, url: url, text: updated)
+            return
+        }
+        #endif
+        SuggestionPreview.present(on: window, path: finding.file, title: finding.title, before: current, after: updated) { [weak self] in
+            self?.writeSuggestion(index, url: url, text: updated)
+        }
+    }
+
+    private func writeSuggestion(_ index: Int, url: URL, text: String) {
+        do {
+            try editor.applyEdit(to: url, newText: text)
+            aiReview.markApplied(index)
+            model.refresh()
+        } catch {
+            statusBar.setMessage(error.localizedDescription, isError: true)
+        }
+    }
 
     @objc func refreshStatus(_ sender: Any?) { model.refresh() }
 
@@ -427,6 +549,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
              #selector(manageRemotes(_:)), #selector(manageSubmodules(_:)), #selector(createPatch(_:)), #selector(applyPatch(_:)),
              #selector(newWorktree(_:)):
             !operations.isRunning
+        case #selector(reviewLocalChanges(_:)):
+            !aiReview.isRunning && !model.status.changes.isEmpty
         case #selector(continueRebase(_:)), #selector(abortRebase(_:)):
             !operations.isRunning && model.status.state == .rebasing
         case #selector(toggleAnnotations(_:)), #selector(showHistoryForCurrentFile(_:)):
@@ -463,12 +587,18 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     // MARK: - NSSplitViewDelegate
 
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        splitView === horizontalSplit ? 180 : 200
+        guard splitView === horizontalSplit else { return 200 }
+        // 右侧面板的分隔条：编辑器至少保留 300 点宽。
+        return dividerIndex == 0 ? 180 : (leftPanel.isHidden ? 0 : leftPanel.frame.maxX) + 300
     }
 
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
         let total = splitView.isVertical ? splitView.bounds.width : splitView.bounds.height
-        return splitView === horizontalSplit ? total - 300 : total - 120
+        guard splitView === horizontalSplit else { return total - 120 }
+        if dividerIndex == 0 {
+            return total - 300 - (rightPanel.isHidden ? 0 : rightPanel.frame.width)
+        }
+        return total - 260
     }
 }
 
@@ -476,6 +606,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
 private enum ToolWindowLayout {
     private static let leftKey = "toolWindow.left"
     private static let bottomKey = "toolWindow.bottomVisible"
+    private static let rightKey = "toolWindow.rightVisible"
 
     static var left: ToolWindowID? {
         get {
@@ -489,5 +620,10 @@ private enum ToolWindowLayout {
     static var bottomVisible: Bool {
         get { UserDefaults.standard.bool(forKey: bottomKey) }
         set { UserDefaults.standard.set(newValue, forKey: bottomKey) }
+    }
+
+    static var rightVisible: Bool {
+        get { UserDefaults.standard.bool(forKey: rightKey) }
+        set { UserDefaults.standard.set(newValue, forKey: rightKey) }
     }
 }

@@ -161,6 +161,7 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
             ("log.menu.newTag", #selector(newTagHere)),
             nil,
             ("log.menu.createPatch", #selector(createPatchSelected)),
+            ("log.menu.aiReview", #selector(aiReviewSelected)),
             nil,
             ("log.menu.cherryPick", #selector(cherryPickSelected)),
             ("log.menu.revert", #selector(revertSelected)),
@@ -418,6 +419,13 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
         operations?.createPatch(commits: targetCommits.reversed().map(\.hash))
     }
 
+    /// AI 评审选中的提交（按从旧到新传入）。
+    @objc private func aiReviewSelected() {
+        let targets = targetCommits
+        guard !targets.isEmpty else { return }
+        operations?.aiReview?.reviewCommits(targets.reversed().map(\.hash), subject: targets.count == 1 ? targets[0].subject : nil)
+    }
+
     /// 拣选按从旧到新应用。
     @objc private func cherryPickSelected() {
         operations?.cherryPick(targetCommits.reversed().map(\.hash))
@@ -462,6 +470,8 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
         switch menuItem.action {
         case #selector(copyHash), #selector(cherryPickSelected), #selector(revertSelected), #selector(createPatchSelected):
             return !targets.isEmpty
+        case #selector(aiReviewSelected):
+            return !targets.isEmpty && operations?.aiReview?.isRunning == false
         case #selector(checkoutRevision), #selector(newBranchHere), #selector(newTagHere), #selector(resetHere):
             return targets.count == 1
         case #selector(undoCommit):

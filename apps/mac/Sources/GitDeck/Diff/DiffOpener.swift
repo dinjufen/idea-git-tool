@@ -34,7 +34,7 @@ struct DiffOpener {
     }
 
     /// 历史提交中的文件：与第一个父提交比较（Log 详情中双击文件）。
-    func showCommitFile(hash: String, parent: String?, file: ChangedFile) {
+    func showCommitFile(hash: String, parent: String?, file: ChangedFile, revealLine: Int? = nil) {
         let repository = model.repository
         let basePath = file.origPath ?? file.path
         Task {
@@ -49,11 +49,15 @@ struct DiffOpener {
                 title: name,
                 tooltip: tr("diff.tooltip.commit", file.path, String(hash.prefix(8)))
             ) {
-                DiffView(
+                let view = DiffView(
                     left: DiffSide(title: parent.map { String($0.prefix(8)) } ?? tr("diff.title.empty"), text: base),
                     right: DiffSide(title: String(hash.prefix(8)), text: text),
                     path: file.path
                 )
+                if let revealLine {
+                    DispatchQueue.main.async { view.reveal(line: revealLine) }
+                }
+                return view
             }
         }
     }

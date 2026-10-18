@@ -62,6 +62,11 @@ final class DiffView: NSView {
         diffTask?.cancel()
     }
 
+    /// 把新版本一侧的第 `line` 行（从 0 开始）滚动到视口中。
+    func reveal(line: Int) {
+        rightEditor.reveal(line: line)
+    }
+
     private var isBinary: Bool {
         (left.text?.contains("\0") ?? false) || (right.text?.contains("\0") ?? false)
     }

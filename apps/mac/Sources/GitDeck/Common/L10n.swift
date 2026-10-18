@@ -63,6 +63,22 @@ extension CoreError {
             tr("ops.error.rebaseWithMerges")
         case let .InvalidRebasePlan(detail):
             tr("ops.error.invalidRebasePlan", detail)
+        case let .AiNetwork(detail):
+            tr("ai.error.network", detail)
+        case let .AiAuthenticationFailed(message):
+            tr("ai.error.auth", message)
+        case let .AiRequestFailed(status, message):
+            switch status {
+            case 429: tr("ai.error.rateLimited", message)
+            case 529, 503: tr("ai.error.overloaded", message)
+            default: tr("ai.error.request", "\(status)", message)
+            }
+        case let .AiRefused(category):
+            tr("ai.error.refused", category ?? "-")
+        case let .AiInvalidResponse(detail):
+            tr("ai.error.invalidResponse", detail)
+        case .AiCancelled:
+            tr("ai.error.cancelled")
         }
     }
 }

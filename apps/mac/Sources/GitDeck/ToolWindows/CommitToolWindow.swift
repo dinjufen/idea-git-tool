@@ -16,6 +16,8 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     var onStashPaths: (([String]) -> Void)?
     /// 把选中的改动保存为补丁。
     var onCreatePatch: (([String]) -> Void)?
+    /// AI 评审：评审勾选的改动、生成提交信息、提交前检查。
+    weak var aiReview: AIReviewController?
 
     // “提交 / 储藏” 标签（IDEA New UI 的 Commit 工具窗口）。
     private let tabs = NSSegmentedControl(labels: [tr("commit.tab.commit"), tr("commit.tab.stash")], trackingMode: .selectOne, target: nil, action: nil)
@@ -52,6 +54,8 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     private let commitButton = NSButton(title: tr("commit.button.commit"), target: nil, action: nil)
     private let commitPushButton = NSButton(title: tr("commit.button.commitAndPush"), target: nil, action: nil)
     private let optionsButton = IconButton(symbol: "gearshape", tooltip: tr("commit.options"), size: 24, pointSize: 12)
+    private let generateButton = IconButton(symbol: "sparkles", tooltip: tr("ai.message.generate"), size: 22, pointSize: 11)
+    private let generateSpinner = NSProgressIndicator()
     private let spinner = NSProgressIndicator()
 
     private var groups: [Group] = []
@@ -173,6 +177,13 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         messageView.autoresizingMask = [.width]
         messageView.isVerticallyResizable = true
         messageView.textContainer?.widthTracksTextView = true
+        // 提交信息框右上角的 “生成提交信息”（IDEA 的 AI Assistant 按钮位置）。
+        generateButton.target = self
+        generateButton.action = #selector(generateMessage)
+        generateSpinner.style = .spinning
+        generateSpinner.controlSize = .small
+        generateSpinner.isDisplayedWhenStopped = false
+        generateSpinner.translatesAutoresizingMaskIntoConstraints = false
 
         treeScroll.translatesAutoresizingMaskIntoConstraints = false
         messageScroll.translatesAutoresizingMaskIntoConstraints = false
@@ -206,7 +217,8 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         buttons.translatesAutoresizingMaskIntoConstraints = false
 
         commitContent = [toolbar, treeScroll, messageDivider, messageScroll, buttons]
-        for view in [header, toolbar, treeScroll, messageDivider, messageScroll, buttons] as [NSView] { addSubview(view) }
+        for view in [header, toolbar, treeScroll, messageDivider, messageScroll, buttons, generateButton, generateSpinner] as [NSView] { addSubview(view) }
+        commitContent += [generateButton, generateSpinner]
         // 变更树占满剩余空间，提交信息区固定高度（拖拽调整高度在后续 UI 打磨阶段加入）。
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: topAnchor),
@@ -226,6 +238,10 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
             messageScroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             messageScroll.trailingAnchor.constraint(equalTo: trailingAnchor),
             messageScroll.heightAnchor.constraint(equalToConstant: 140),
+            generateButton.topAnchor.constraint(equalTo: messageScroll.topAnchor, constant: 4),
+            generateButton.trailingAnchor.constraint(equalTo: messageScroll.trailingAnchor, constant: -18),
+            generateSpinner.centerXAnchor.constraint(equalTo: generateButton.centerXAnchor),
+            generateSpinner.centerYAnchor.constraint(equalTo: generateButton.centerYAnchor),
             buttons.topAnchor.constraint(equalTo: messageScroll.bottomAnchor, constant: 8),
             buttons.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             buttons.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
@@ -246,6 +262,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
             button("arrow.uturn.backward", tr("commit.action.rollback"), nil),
             button("plus.forwardslash.minus", tr("commit.action.showDiff"), #selector(showDiffForSelection)),
             button("tray.and.arrow.down", tr("commit.action.shelve"), nil),
+            button("sparkles", tr("ai.action.reviewSelected"), #selector(aiReviewSelected)),
             button("arrow.up.left.and.arrow.down.right", tr("tree.expandAll"), #selector(expandAll)),
             button("arrow.down.right.and.arrow.up.left", tr("tree.collapseAll"), #selector(collapseAll)),
         ])
@@ -339,12 +356,51 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         let hooksItem = NSMenuItem(title: tr("commit.option.runHooks"), action: #selector(toggleHooks), keyEquivalent: "")
         hooksItem.state = runHooks ? .on : .off
         hooksItem.target = self
-        menu.items = [signOffItem, hooksItem]
+        let aiItem = NSMenuItem(title: tr("commit.option.aiReview"), action: #selector(toggleAIReview), keyEquivalent: "")
+        aiItem.state = AISettings.reviewBeforeCommit ? .on : .off
+        aiItem.target = self
+        menu.items = [signOffItem, hooksItem, .separator(), aiItem]
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: optionsButton.bounds.height + 4), in: optionsButton)
     }
 
     @objc private func toggleSignOff() { signOff.toggle() }
     @objc private func toggleHooks() { runHooks.toggle() }
+    @objc private func toggleAIReview() { AISettings.reviewBeforeCommit.toggle() }
+
+    /// 勾选的、仍存在于当前变更中的文件。
+    var includedPaths: [String] {
+        model.status.changes.map(\.path).filter { included.contains($0) }
+    }
+
+    @objc private func aiReviewSelected() {
+        aiReview?.reviewLocalChanges(paths: includedPaths)
+    }
+
+    /// 根据勾选的文件生成提交信息；生成中再次点击取消。
+    @objc func generateMessage() {
+        guard let aiReview else { return }
+        let paths = includedPaths
+        guard !paths.isEmpty || aiReview.isGeneratingMessage else {
+            NSSound.beep()
+            return
+        }
+        Task {
+            let wasGenerating = aiReview.isGeneratingMessage
+            let generating = !wasGenerating
+            generateSpinner.isHidden = !generating
+            generateButton.alphaValue = generating ? 0 : 1
+            if generating { generateSpinner.startAnimation(nil) }
+            let message = await aiReview.generateCommitMessage(paths: paths)
+            guard !wasGenerating else { return }
+            generateSpinner.stopAnimation(nil)
+            generateButton.alphaValue = 1
+            if let message {
+                messageView.string = message
+                messageView.didChangeText()
+                window?.makeFirstResponder(messageView)
+            }
+        }
+    }
 
     @objc private func commitAndPush() {
         guard commitButton.isEnabled else { return }
@@ -357,7 +413,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         let pushAfter = pushAfterCommit
         pushAfterCommit = false
         // 只提交仍存在于当前变更中的勾选文件。
-        let paths = model.status.changes.map(\.path).filter { included.contains($0) }
+        let paths = includedPaths
         let options = CommitOptions(
             message: messageView.string,
             paths: paths,
@@ -371,7 +427,16 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         spinner.startAnimation(nil)
         updateCommitButtons()
         let repository = model.repository
+        let reviewFirst = AISettings.reviewBeforeCommit && !paths.isEmpty ? aiReview : nil
         Task {
+            // 提交前检查：AI 评审勾选的改动，发现问题时由用户决定是否继续。
+            if let reviewFirst, await !reviewFirst.reviewBeforeCommit(paths: paths) {
+                self.isCommitting = false
+                self.spinner.stopAnimation(nil)
+                self.spinner.isHidden = true
+                self.updateCommitButtons()
+                return
+            }
             let result = await Task.detached(priority: .userInitiated) {
                 Result { try repository.commit(options: options) }
             }.value

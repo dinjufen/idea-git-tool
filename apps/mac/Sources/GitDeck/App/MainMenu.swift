@@ -24,6 +24,8 @@ enum MainMenu {
         let menu = NSMenu(title: name)
         menu.addItem(withTitle: tr("menu.app.about", name), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         menu.addItem(.separator())
+        menu.addItem(item(tr("menu.app.settings"), #selector(AppDelegate.showSettings(_:)), ","))
+        menu.addItem(.separator())
         let services = NSMenu()
         menu.addItem(withTitle: tr("menu.app.services"), action: nil, keyEquivalent: "").submenu = services
         NSApp.servicesMenu = services
@@ -70,6 +72,7 @@ enum MainMenu {
         toolWindows.addItem(item(tr("toolwindow.project"), #selector(ProjectWindowController.showProjectToolWindow(_:)), "1"))
         toolWindows.addItem(item(tr("toolwindow.commit"), #selector(ProjectWindowController.showCommitToolWindow(_:)), "0"))
         toolWindows.addItem(item(tr("toolwindow.git"), #selector(ProjectWindowController.showGitToolWindow(_:)), "9"))
+        toolWindows.addItem(item(tr("toolwindow.aiReview"), #selector(ProjectWindowController.showAIReviewToolWindow(_:)), ""))
         menu.addItem(withTitle: tr("menu.view.toolWindows"), action: nil, keyEquivalent: "").submenu = toolWindows
         let theme = NSMenu(title: tr("menu.view.theme"))
         for setting in AppearanceSetting.allCases {
@@ -122,6 +125,8 @@ enum MainMenu {
         menu.addItem(.separator())
         menu.addItem(item(tr("stash.menu.stash"), #selector(ProjectWindowController.stashChanges(_:)), ""))
         menu.addItem(item(tr("stash.menu.unstash"), #selector(ProjectWindowController.unstashChanges(_:)), ""))
+        menu.addItem(.separator())
+        menu.addItem(item(tr("ai.menu.reviewLocal"), #selector(ProjectWindowController.reviewLocalChanges(_:)), ""))
         menu.addItem(.separator())
         menu.addItem(item(tr("git.action.annotate"), #selector(ProjectWindowController.toggleAnnotations(_:)), ""))
         menu.addItem(item(tr("git.action.showHistoryCurrent"), #selector(ProjectWindowController.showHistoryForCurrentFile(_:)), ""))

@@ -5,6 +5,7 @@
 
 uniffi::setup_scaffolding!();
 
+mod ai;
 mod blame;
 mod branch_ops;
 mod commit;
@@ -24,6 +25,12 @@ mod stash;
 mod tags;
 mod workspace;
 
+pub use ai::{
+    AiProviderConfig, AiProviderKind, AiTask, ReviewEvent, ReviewFinding, ReviewListener,
+    ReviewOptions, ReviewResult, ReviewScope, ReviewSeverity, ReviewSuggestion,
+    apply_review_suggestion, default_ai_base_url, default_sensitive_patterns, is_sensitive_path,
+    test_ai_connection,
+};
 pub use blame::{BlameCommit, BlameResult, FileRevision};
 pub use branch_ops::{CheckoutMode, CheckoutOutcome, MergeOutcome};
 pub use commit::{CommitOptions, CommitResult};

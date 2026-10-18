@@ -118,6 +118,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showWelcome()
     }
 
+    @objc func showSettings(_ sender: Any?) {
+        SettingsWindowController.shared.show()
+    }
+
     // MARK: - 编辑器字体
 
     @objc func showEditorFontPanel(_ sender: Any?) {

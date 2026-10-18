@@ -64,6 +64,29 @@ pub enum CoreError {
     /// 交互式变基的步骤无效，例如第一个提交被设为压缩 / 修整。
     #[error("invalid rebase plan: {detail}")]
     InvalidRebasePlan { detail: String },
+
+    /// 无法连接模型服务（DNS、TLS、超时等）。
+    #[error("AI network error: {detail}")]
+    AiNetwork { detail: String },
+
+    /// API Key 无效或无权访问（HTTP 401 / 403）。
+    #[error("AI authentication failed: {message}")]
+    AiAuthenticationFailed { message: String },
+
+    /// 模型服务返回错误；`status` 为 HTTP 状态码（429 限流、529 过载等），流中途的错误按对应状态码给出。
+    #[error("AI request failed ({status}): {message}")]
+    AiRequestFailed { status: u16, message: String },
+
+    /// 模型拒绝处理请求（`stop_reason: refusal`）。
+    #[error("AI model declined the request ({category:?})")]
+    AiRefused { category: Option<String> },
+
+    /// 模型的输出不符合预期格式。
+    #[error("unexpected AI response: {detail}")]
+    AiInvalidResponse { detail: String },
+
+    #[error("AI task cancelled")]
+    AiCancelled,
 }
 
 impl CoreError {

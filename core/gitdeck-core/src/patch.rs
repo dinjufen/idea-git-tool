@@ -21,49 +21,7 @@ pub struct PatchOutcome {
 impl Repository {
     /// 本地改动相对 HEAD 的补丁；`paths` 为空时包含全部改动。未跟踪的文件以新增文件的形式包含。
     pub fn create_patch(&self, paths: Vec<String>) -> std::result::Result<String, CoreError> {
-        let status = self.status()?;
-        let selected: Vec<_> = status
-            .changes
-            .iter()
-            .filter(|c| c.unstaged != ChangeKind::Ignored && c.conflict.is_none())
-            .filter(|c| paths.is_empty() || paths.contains(&c.path))
-            .collect();
-        let has_head = self.has_head();
-        // 空仓库没有 HEAD：所有文件都按新增文件生成补丁。
-        let (untracked, tracked): (Vec<&FileChange>, Vec<&FileChange>) = selected
-            .into_iter()
-            .partition(|c| c.unstaged == ChangeKind::Untracked || !has_head);
-
-        let mut patch = String::new();
-        if !tracked.is_empty() {
-            let mut args: Vec<String> =
-                vec!["diff".into(), "--binary".into(), "HEAD".into(), "--".into()];
-            for change in &tracked {
-                args.push(change.path.clone());
-                if let Some(orig) = &change.orig_path {
-                    args.push(orig.clone());
-                }
-            }
-            let out = self.git.run(&self.root, &args)?;
-            patch.push_str(&String::from_utf8_lossy(&out.stdout));
-        }
-        for change in untracked {
-            // `diff --no-index` 有差异时退出码为 1。
-            let out = self.git.run_with_exit_codes(
-                &self.root,
-                [
-                    "diff",
-                    "--binary",
-                    "--no-index",
-                    "--",
-                    "/dev/null",
-                    change.path.as_str(),
-                ],
-                &[1],
-            )?;
-            patch.push_str(&String::from_utf8_lossy(&out.stdout));
-        }
-        Ok(patch)
+        self.local_diff(&paths, true)
     }
 
     /// 若干提交的补丁（邮件格式，可用 `git am` 或 Apply Patch 应用）；`hashes` 按从旧到新排列。
@@ -142,5 +100,55 @@ impl Repository {
                 }
             },
         }
+    }
+}
+
+impl Repository {
+    /// 本地改动相对 HEAD 的 diff；`binary` 为 false 时二进制文件只显示 “Binary files differ”。
+    pub(crate) fn local_diff(
+        &self,
+        paths: &[String],
+        binary: bool,
+    ) -> crate::error::Result<String> {
+        let status = self.status()?;
+        let selected: Vec<_> = status
+            .changes
+            .iter()
+            .filter(|c| c.unstaged != ChangeKind::Ignored && c.conflict.is_none())
+            .filter(|c| paths.is_empty() || paths.contains(&c.path))
+            .collect();
+        let has_head = self.has_head();
+        // 空仓库没有 HEAD：所有文件都按新增文件生成补丁。
+        let (untracked, tracked): (Vec<&FileChange>, Vec<&FileChange>) = selected
+            .into_iter()
+            .partition(|c| c.unstaged == ChangeKind::Untracked || !has_head);
+
+        let mut patch = String::new();
+        if !tracked.is_empty() {
+            let mut args: Vec<String> = vec!["diff".into()];
+            if binary {
+                args.push("--binary".into());
+            }
+            args.extend(["HEAD".into(), "--".into()]);
+            for change in &tracked {
+                args.push(change.path.clone());
+                if let Some(orig) = &change.orig_path {
+                    args.push(orig.clone());
+                }
+            }
+            let out = self.git.run(&self.root, &args)?;
+            patch.push_str(&String::from_utf8_lossy(&out.stdout));
+        }
+        for change in untracked {
+            // `diff --no-index` 有差异时退出码为 1。
+            let mut args = vec!["diff", "--no-index"];
+            if binary {
+                args.push("--binary");
+            }
+            args.extend(["--", "/dev/null", change.path.as_str()]);
+            let out = self.git.run_with_exit_codes(&self.root, args, &[1])?;
+            patch.push_str(&String::from_utf8_lossy(&out.stdout));
+        }
+        Ok(patch)
     }
 }

@@ -33,6 +33,31 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
 
     var text: String { textView.string }
 
+    /// AI 评审发现的标记（显示在行号栏）。
+    var reviewMarkers: [ReviewMarker] {
+        get { gutter.reviewMarkers }
+        set { gutter.reviewMarkers = newValue }
+    }
+
+    var onReviewMarkerClick: ((Int) -> Void)? {
+        get { gutter.onMarkerClick }
+        set { gutter.onMarkerClick = newValue }
+    }
+
+    /// 把全文替换为 `newText`：只替换前后不同的部分，保留撤销与滚动位置。
+    func replaceText(with newText: String) {
+        let old = Array(text.utf16)
+        let new = Array(newText.utf16)
+        var prefix = 0
+        while prefix < old.count, prefix < new.count, old[prefix] == new[prefix] { prefix += 1 }
+        var suffix = 0
+        while suffix < old.count - prefix, suffix < new.count - prefix,
+              old[old.count - 1 - suffix] == new[new.count - 1 - suffix] { suffix += 1 }
+        let range = NSRange(location: prefix, length: old.count - prefix - suffix)
+        let replacement = String(utf16CodeUnits: Array(new[prefix ..< new.count - suffix]), count: new.count - prefix - suffix)
+        textView.replaceCharacters(in: range, with: replacement)
+    }
+
     /// Annotate（git blame）结果；`nil` 时隐藏注释列。
     var annotations: BlameResult? {
         get { annotationView.blame }

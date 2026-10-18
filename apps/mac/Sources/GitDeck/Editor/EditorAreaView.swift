@@ -65,6 +65,19 @@ final class EditorAreaView: NSView {
     var onShowCommit: ((String) -> Void)?
     /// 显示某个文件（相对路径）的历史。
     var onShowHistory: ((String) -> Void)?
+    /// 点击编辑器中的 AI 评审标记（参数为发现的下标）。
+    var onReviewMarkerClick: ((Int) -> Void)?
+
+    /// AI 评审：在打开的文件上显示发现的标记。
+    var aiReview: AIReviewController? {
+        didSet {
+            if let reviewObserver { oldValue?.removeObserver(reviewObserver) }
+            reviewObserver = aiReview?.observe { [weak self] in self?.updateReviewMarkers() }
+            updateReviewMarkers()
+        }
+    }
+
+    private var reviewObserver: UUID?
 
     private let model: ProjectModel
     private let tabBar = NSStackView()
@@ -238,9 +251,50 @@ final class EditorAreaView: NSView {
         document.editor.onCaretChange = { [weak self] line, column in
             self?.onCaretChange?("\(line):\(column)    LF    UTF-8")
         }
+        document.editor.onReviewMarkerClick = { [weak self] index in self?.onReviewMarkerClick?(index) }
         tabs.append(document)
         activate(document)
         loadBase(document)
+        updateReviewMarkers(document)
+    }
+
+    /// 打开文件并把第 `line` 行（从 0 开始）滚动到视口中。
+    func open(_ url: URL, line: Int) {
+        open(url)
+        guard let document = documents.first(where: { $0.url == url }) else { return }
+        // 新打开的编辑器尚未布局，等布局完成后再滚动。
+        DispatchQueue.main.async { document.editor.reveal(line: max(0, line)) }
+    }
+
+    /// 已打开文件的当前内容（含未保存的修改）。
+    func text(of url: URL) -> String? {
+        documents.first(where: { $0.url == url })?.editor.text
+    }
+
+    /// 修改文件内容：已打开时在编辑器中替换（可撤销）并保存，否则直接写入文件。
+    func applyEdit(to url: URL, newText: String) throws {
+        if let document = documents.first(where: { $0.url == url }) {
+            document.editor.replaceText(with: newText)
+            try document.editor.text.write(to: url, atomically: true, encoding: .utf8)
+            document.isModified = false
+            rebuildTabs()
+        } else {
+            try newText.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    private func updateReviewMarkers() {
+        documents.forEach(updateReviewMarkers)
+    }
+
+    private func updateReviewMarkers(_ document: Document) {
+        guard let path = document.relativePath, let aiReview else {
+            document.editor.reviewMarkers = []
+            return
+        }
+        document.editor.reviewMarkers = aiReview.workingTreeFindings(for: path)
+            .filter { !aiReview.applied.contains($0.index) }
+            .map { ReviewMarker(index: $0.index, line: Int($0.finding.line) - 1, severity: $0.finding.severity, title: $0.finding.title) }
     }
 
     func saveActive() throws {

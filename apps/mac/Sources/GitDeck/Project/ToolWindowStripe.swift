@@ -5,12 +5,14 @@ enum ToolWindowID: String, CaseIterable {
     case project
     case commit
     case git
+    case aiReview
 
     var title: String {
         switch self {
         case .project: tr("toolwindow.project")
         case .commit: tr("toolwindow.commit")
         case .git: tr("toolwindow.git")
+        case .aiReview: tr("toolwindow.aiReview")
         }
     }
 
@@ -19,21 +21,23 @@ enum ToolWindowID: String, CaseIterable {
         case .project: "folder"
         case .commit: "checkmark.circle"
         case .git: "arrow.triangle.branch"
+        case .aiReview: "sparkles"
         }
     }
 
-    /// 工具窗口停靠位置：Project / Commit 在左侧面板，Git 在底部面板。
+    /// 工具窗口停靠位置：Project / Commit 在左侧面板，Git 在底部面板，AI Review 在右侧面板。
     var anchor: Anchor {
         switch self {
         case .project, .commit: .left
         case .git: .bottom
+        case .aiReview: .right
         }
     }
 
-    enum Anchor { case left, bottom }
+    enum Anchor { case left, bottom, right }
 }
 
-/// 窗口左侧的工具窗口图标条：上半部分为左侧面板，下半部分为底部面板。
+/// 窗口侧边的工具窗口图标条。左侧图标条：上半部分为左侧面板，下半部分为底部面板；右侧图标条对应右侧面板。
 final class ToolWindowStripe: ColoredView {
     static let width: CGFloat = 40
 
