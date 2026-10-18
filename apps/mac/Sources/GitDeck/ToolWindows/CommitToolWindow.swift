@@ -14,6 +14,8 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     var onShowHistory: ((String) -> Void)?
     /// 储藏选中的文件（打开 Stash Changes 对话框）。
     var onStashPaths: (([String]) -> Void)?
+    /// 把选中的改动保存为补丁。
+    var onCreatePatch: (([String]) -> Void)?
 
     // “提交 / 储藏” 标签（IDEA New UI 的 Commit 工具窗口）。
     private let tabs = NSSegmentedControl(labels: [tr("commit.tab.commit"), tr("commit.tab.stash")], trackingMode: .selectOne, target: nil, action: nil)
@@ -411,6 +413,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         menu.addItem(withTitle: tr("commit.action.jumpToSource"), action: #selector(jumpToSource), keyEquivalent: "").target = self
         menu.addItem(withTitle: tr("git.action.showHistory"), action: #selector(showHistory), keyEquivalent: "").target = self
         menu.addItem(withTitle: tr("stash.action.stashSelected"), action: #selector(stashSelected), keyEquivalent: "").target = self
+        menu.addItem(withTitle: tr("patch.menu.createSelected"), action: #selector(createPatchSelected), keyEquivalent: "").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: tr("git.action.resolveConflicts"), action: #selector(resolveConflicts), keyEquivalent: "").target = self
         return menu
@@ -458,6 +461,17 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
             .filter { !$0.isUntracked && $0.conflict == nil }
             .map(\.path)
         onStashPaths?(paths)
+    }
+
+    /// 把选中的改动（含未跟踪文件）保存为补丁；未选中时保存全部改动。
+    @objc private func createPatchSelected() {
+        let rows = outline.selectedRowIndexes.contains(outline.clickedRow) || outline.clickedRow < 0
+            ? outline.selectedRowIndexes
+            : IndexSet(integer: outline.clickedRow)
+        let paths = rows.compactMap { (outline.item(atRow: $0) as? FileItem)?.change }
+            .filter { $0.conflict == nil }
+            .map(\.path)
+        onCreatePatch?(paths)
     }
 
     @objc private func showHistory() {

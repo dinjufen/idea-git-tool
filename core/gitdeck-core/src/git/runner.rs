@@ -9,7 +9,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::RwLock;
+use std::time::{Instant, SystemTime};
 
+use crate::console;
 use crate::error::{CoreError, Result};
 
 /// 支持的最低 git 版本（见 docs/DECISIONS.md 第 4 项）。
@@ -112,7 +114,7 @@ impl GitExecutable {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        self.exec(cwd, args, None, true, &[])
+        self.exec(cwd, args, None, true, &[], &[])
     }
 
     /// 不启用 `--literal-pathspecs` 执行。用于 `git stash` 等内部依赖路径魔法（如 `:/`）的命令；
@@ -122,7 +124,7 @@ impl GitExecutable {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        self.exec(cwd, args, None, false, &[])
+        self.exec(cwd, args, None, false, &[], &[])
     }
 
     /// 同 [`run`](Self::run)，并把 `input` 写入 git 的标准输入（例如 `commit -F -`）。
@@ -131,7 +133,7 @@ impl GitExecutable {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        self.exec(cwd, args, Some(input), true, &[])
+        self.exec(cwd, args, Some(input), true, &[], &[])
     }
 
     /// 附加环境变量执行（例如交互式变基的 `GIT_SEQUENCE_EDITOR`），不启用 `--literal-pathspecs`。
@@ -145,7 +147,21 @@ impl GitExecutable {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        self.exec(cwd, args, None, false, env)
+        self.exec(cwd, args, None, false, env, &[])
+    }
+
+    /// 同 [`run`](Self::run)，但把 `ok_codes` 中的退出码也视为成功（例如 `diff --no-index` 有差异时返回 1）。
+    pub fn run_with_exit_codes<I, S>(
+        &self,
+        cwd: &Path,
+        args: I,
+        ok_codes: &[i32],
+    ) -> Result<GitOutput>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.exec(cwd, args, None, true, &[], ok_codes)
     }
 
     fn exec<I, S>(
@@ -155,12 +171,15 @@ impl GitExecutable {
         input: Option<&[u8]>,
         literal_pathspecs: bool,
         env: &[(&str, String)],
+        ok_codes: &[i32],
     ) -> Result<GitOutput>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
         let args: Vec<_> = args.into_iter().map(|a| a.as_ref().to_owned()).collect();
+        let started = SystemTime::now();
+        let timer = Instant::now();
         let mut child = base_command(&self.path)
             .args(STABLE_OUTPUT_CONFIG)
             .args(literal_pathspecs.then_some("--literal-pathspecs"))
@@ -189,14 +208,27 @@ impl GitExecutable {
             let _ = writer.join();
         }
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        if !output.status.success() {
+        let exit_code = output.status.code().unwrap_or(-1);
+        let display_args: Vec<String> = args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        console::record(
+            &cwd.to_string_lossy(),
+            &display_args,
+            started,
+            timer.elapsed(),
+            exit_code,
+            &stderr,
+        );
+        if !output.status.success() && !ok_codes.contains(&exit_code) {
             return Err(CoreError::CommandFailed {
                 command: args
                     .iter()
                     .map(|a| a.to_string_lossy())
                     .collect::<Vec<_>>()
                     .join(" "),
-                exit_code: output.status.code().unwrap_or(-1),
+                exit_code,
                 stderr: stderr.trim().to_owned(),
             });
         }

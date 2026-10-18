@@ -28,17 +28,21 @@ final class GitToolWindow: NSView {
     }
 
     private let tabs = NSSegmentedControl(
-        labels: [tr("git.tab.log"), tr("git.tab.console")],
+        labels: [tr("git.tab.log"), tr("git.tab.console"), tr("git.tab.worktrees")],
         trackingMode: .selectOne,
         target: nil,
         action: nil
     )
     private let logView: LogView
-    private let consolePlaceholder = NSTextField.label(tr("git.console.placeholder"), color: Theme.secondaryText)
+    private let consoleView: ConsoleView
+    private var worktreesView: WorktreesView?
+    /// 文件历史标签页的下标（日志、控制台、工作树之后）。
+    private static let historyTab = 3
 
     init(model: ProjectModel) {
         self.model = model
         logView = LogView(model: model)
+        consoleView = ConsoleView(root: model.repository.root())
         super.init(frame: .zero)
         let background = ColoredView(Theme.toolWindowBackground)
         addSubview(background)
@@ -51,14 +55,14 @@ final class GitToolWindow: NSView {
         tabs.action = #selector(tabChanged)
         tabs.translatesAutoresizingMaskIntoConstraints = false
         logView.translatesAutoresizingMaskIntoConstraints = false
-        consolePlaceholder.alignment = .center
+        consoleView.translatesAutoresizingMaskIntoConstraints = false
 
         closeHistoryButton.target = self
         closeHistoryButton.action = #selector(closeHistory)
         closeHistoryButton.isHidden = true
 
         let top = SeparatorLine(.horizontal)
-        for view in [top, header, tabs, closeHistoryButton, logView, consolePlaceholder] as [NSView] { addSubview(view) }
+        for view in [top, header, tabs, closeHistoryButton, logView, consoleView] as [NSView] { addSubview(view) }
         NSLayoutConstraint.activate([
             top.topAnchor.constraint(equalTo: topAnchor),
             top.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -74,8 +78,10 @@ final class GitToolWindow: NSView {
             logView.leadingAnchor.constraint(equalTo: leadingAnchor),
             logView.trailingAnchor.constraint(equalTo: trailingAnchor),
             logView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            consolePlaceholder.centerXAnchor.constraint(equalTo: centerXAnchor),
-            consolePlaceholder.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 18),
+            consoleView.topAnchor.constraint(equalTo: header.bottomAnchor),
+            consoleView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            consoleView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            consoleView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         tabChanged()
     }
@@ -83,11 +89,37 @@ final class GitToolWindow: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    /// 加入工作树标签（依赖 GitOperations，由项目窗口创建后传入）。
+    func attachWorktrees(operations: GitOperations) {
+        let view = WorktreesView(model: model, operations: operations)
+        view.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(view)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: logView.topAnchor),
+            view.leadingAnchor.constraint(equalTo: leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: trailingAnchor),
+            view.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        worktreesView = view
+        tabChanged()
+    }
+
     @objc private func tabChanged() {
         let selected = tabs.selectedSegment
         logView.isHidden = selected != 0
-        consolePlaceholder.isHidden = selected != 1
-        historyView?.isHidden = selected != 2
+        consoleView.isHidden = selected != 1
+        worktreesView?.isHidden = selected != 2
+        historyView?.isHidden = selected != Self.historyTab
+    }
+
+    func showConsole() {
+        tabs.selectedSegment = 1
+        tabChanged()
+    }
+
+    func showWorktrees() {
+        tabs.selectedSegment = 2
+        tabChanged()
     }
 
     /// 在 Log 标签页中定位某个提交。
@@ -112,10 +144,10 @@ final class GitToolWindow: NSView {
         ])
         historyView = view
         let title = tr("git.tab.history", (path as NSString).lastPathComponent)
-        if tabs.segmentCount < 3 { tabs.segmentCount = 3 }
-        tabs.setLabel(title, forSegment: 2)
-        tabs.setWidth(0, forSegment: 2)
-        tabs.selectedSegment = 2
+        if tabs.segmentCount <= Self.historyTab { tabs.segmentCount = Self.historyTab + 1 }
+        tabs.setLabel(title, forSegment: Self.historyTab)
+        tabs.setWidth(0, forSegment: Self.historyTab)
+        tabs.selectedSegment = Self.historyTab
         closeHistoryButton.isHidden = false
         tabChanged()
     }
@@ -123,7 +155,7 @@ final class GitToolWindow: NSView {
     @objc private func closeHistory() {
         historyView?.removeFromSuperview()
         historyView = nil
-        tabs.segmentCount = 2
+        tabs.segmentCount = Self.historyTab
         tabs.selectedSegment = 0
         closeHistoryButton.isHidden = true
         tabChanged()

@@ -142,6 +142,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
 
         operations.window = window
         gitToolWindow.operations = operations
+        gitToolWindow.attachWorktrees(operations: operations)
+        commitToolWindow.onCreatePatch = { [weak self] paths in self?.operations.createPatch(paths: paths) }
         operations.onProgress = { [weak self] title in
             guard let self else { return }
             self.statusBar.setBusy(title != nil || self.model.isRefreshing)
@@ -231,7 +233,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     #if DEBUG
     /// 仅 Debug 构建：启动参数 `-debug.openLocalDiff <相对路径>` 在状态加载后自动打开该文件的本地 Diff，便于界面验证。
     private var debugDiffPath = UserDefaults.standard.string(forKey: "debug.openLocalDiff")
-    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge|annotate|history|stashes|rebase>（history 需配合 `-debug.historyPath <路径>`）` 在状态加载后自动执行对应操作。
+    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge|annotate|history|stashes|rebase|console|worktrees>（history 需配合 `-debug.historyPath <路径>`）` 在状态加载后自动执行对应操作。
     private var debugAction = UserDefaults.standard.string(forKey: "debug.action")
     private weak var debugStashes: StashesView?
 
@@ -268,6 +270,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             case "newBranch": operations.newBranch()
             case "conflicts": conflictResolver.showConflicts()
             case "annotate": editor.toggleAnnotations()
+            case "console": showGitConsole(nil)
+            case "worktrees":
+                show(.git)
+                gitToolWindow.showWorktrees()
             case "rebase":
                 if let from = UserDefaults.standard.string(forKey: "debug.rebaseFrom"),
                    let hash = try? model.repository.rebaseCommits(from: from).first?.hash {
@@ -374,6 +380,21 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     @objc func toggleAnnotations(_ sender: Any?) { editor.toggleAnnotations() }
     @objc func stashChanges(_ sender: Any?) { operations.stashChanges() }
     @objc func newTag(_ sender: Any?) { operations.newTag(at: nil) }
+    @objc func manageRemotes(_ sender: Any?) { operations.manageRemotes() }
+    @objc func manageSubmodules(_ sender: Any?) { operations.manageSubmodules() }
+    @objc func createPatch(_ sender: Any?) { operations.createPatch(paths: []) }
+    @objc func applyPatch(_ sender: Any?) { operations.applyPatch() }
+
+    @objc func newWorktree(_ sender: Any?) {
+        show(.git)
+        gitToolWindow.showWorktrees()
+        operations.newWorktree()
+    }
+
+    @objc func showGitConsole(_ sender: Any?) {
+        show(.git)
+        gitToolWindow.showConsole()
+    }
     @objc func continueCherryPick(_ sender: Any?) { operations.continueCherryPick() }
     @objc func abortCherryPick(_ sender: Any?) { operations.abortCherryPick() }
     @objc func continueRevert(_ sender: Any?) { operations.continueRevert() }
@@ -402,7 +423,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         }
         return switch menuItem.action {
         case #selector(pushChanges(_:)), #selector(updateProject(_:)), #selector(fetchChanges(_:)),
-             #selector(newBranch(_:)), #selector(checkoutRevision(_:)), #selector(stashChanges(_:)), #selector(newTag(_:)):
+             #selector(newBranch(_:)), #selector(checkoutRevision(_:)), #selector(stashChanges(_:)), #selector(newTag(_:)),
+             #selector(manageRemotes(_:)), #selector(manageSubmodules(_:)), #selector(createPatch(_:)), #selector(applyPatch(_:)),
+             #selector(newWorktree(_:)):
             !operations.isRunning
         case #selector(continueRebase(_:)), #selector(abortRebase(_:)):
             !operations.isRunning && model.status.state == .rebasing

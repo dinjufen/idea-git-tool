@@ -160,6 +160,8 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
             ("log.menu.newBranch", #selector(newBranchHere)),
             ("log.menu.newTag", #selector(newTagHere)),
             nil,
+            ("log.menu.createPatch", #selector(createPatchSelected)),
+            nil,
             ("log.menu.cherryPick", #selector(cherryPickSelected)),
             ("log.menu.revert", #selector(revertSelected)),
             ("log.menu.reset", #selector(resetHere)),
@@ -411,6 +413,11 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
         operations?.newTag(at: commit.hash)
     }
 
+    /// 补丁按从旧到新排列。
+    @objc private func createPatchSelected() {
+        operations?.createPatch(commits: targetCommits.reversed().map(\.hash))
+    }
+
     /// 拣选按从旧到新应用。
     @objc private func cherryPickSelected() {
         operations?.cherryPick(targetCommits.reversed().map(\.hash))
@@ -453,7 +460,7 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
         let targets = targetCommits
         guard operations?.isRunning != true || menuItem.action == #selector(copyHash) else { return false }
         switch menuItem.action {
-        case #selector(copyHash), #selector(cherryPickSelected), #selector(revertSelected):
+        case #selector(copyHash), #selector(cherryPickSelected), #selector(revertSelected), #selector(createPatchSelected):
             return !targets.isEmpty
         case #selector(checkoutRevision), #selector(newBranchHere), #selector(newTagHere), #selector(resetHere):
             return targets.count == 1

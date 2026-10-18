@@ -9,17 +9,20 @@ mod blame;
 mod branch_ops;
 mod commit;
 mod conflicts;
+mod console;
 mod diff;
 mod error;
 pub mod git;
 mod graph;
 mod highlight;
 mod history;
+mod patch;
 mod remote;
 mod repo;
 mod rewrite;
 mod stash;
 mod tags;
+mod workspace;
 
 pub use blame::{BlameCommit, BlameResult, FileRevision};
 pub use branch_ops::{CheckoutMode, CheckoutOutcome, MergeOutcome};
@@ -27,6 +30,7 @@ pub use commit::{CommitOptions, CommitResult};
 pub use conflicts::{
     ConflictLabels, ConflictSide, ConflictVersions, MergeChunk, MergeChunkKind, merge_chunks,
 };
+pub use console::{ConsoleEntry, clear_console, console_entries};
 pub use diff::{
     DiffBlock, LineChange, LineChangeKind, TextRange, WhitespaceMode, diff_texts, line_changes,
 };
@@ -40,6 +44,7 @@ pub use git::status::{
 pub use graph::{EdgePart, GraphEdge, GraphRow};
 pub use highlight::{HighlightSpan, TokenKind, highlight, language_for_path};
 pub use history::{CommitDetails, LogCommit, LogFilter, LogOrder, LogPage};
+pub use patch::{PatchFile, PatchOutcome};
 pub use remote::{
     OutgoingCommit, PushOptions, PushResult, PushTarget, Remote, UpdateMethod, UpdateResult,
 };
@@ -47,6 +52,7 @@ pub use repo::{GitInfo, Repository, git_info};
 pub use rewrite::{RebaseAction, RebaseCommit, RebaseStep, ResetMode};
 pub use stash::{StashEntry, StashOptions, StashRevisions, UnstashOutcome, stash_revisions};
 pub use tags::TagInfo;
+pub use workspace::{Submodule, SubmoduleState, Worktree};
 
 /// 核心库版本，用于 About 对话框与诊断信息。
 #[uniffi::export]
