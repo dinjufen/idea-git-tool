@@ -68,7 +68,7 @@ pub use rewrite::{RebaseAction, RebaseCommit, RebaseStep, ResetMode};
 pub use shelf::{ShelfEntry, ShelfFileVersions};
 pub use stash::{StashEntry, StashOptions, StashRevisions, UnstashOutcome, stash_revisions};
 pub use tags::TagInfo;
-pub use workspace::{Submodule, SubmoduleState, Worktree};
+pub use workspace::{NestedRepository, Submodule, SubmoduleState, Worktree};
 
 /// 核心库版本，用于 About 对话框与诊断信息。
 #[uniffi::export]

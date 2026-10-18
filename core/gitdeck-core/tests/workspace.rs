@@ -258,3 +258,41 @@ fn console_records_commands() {
             .any(|e| e.command.contains("check-ref-format") && e.background)
     );
 }
+
+#[test]
+fn finds_nested_repositories_and_submodules() {
+    let tmp = tempfile::tempdir().unwrap();
+    let lib = tmp.path().join("lib");
+    fs::create_dir_all(&lib).unwrap();
+    new_repo(&lib);
+    let app = tmp.path().join("app");
+    fs::create_dir_all(&app).unwrap();
+    new_repo(&app);
+    git(
+        &app,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            lib.to_str().unwrap(),
+            "libs/lib",
+        ],
+    );
+    git(&app, &["commit", "-qm", "add submodule"]);
+    // 独立的嵌套仓库（被父仓库忽略）、过深的仓库与依赖目录中的仓库。
+    fs::write(app.join(".gitignore"), "services/\nnode_modules/\n").unwrap();
+    for dir in ["services/api", "a/b/c/d/deep", "node_modules/pkg"] {
+        let path = app.join(dir);
+        fs::create_dir_all(&path).unwrap();
+        new_repo(&path);
+    }
+    let found = open(&app).nested_repositories(3).unwrap();
+    let names: Vec<_> = found
+        .iter()
+        .map(|r| (r.relative_path.as_str(), r.is_submodule))
+        .collect();
+    assert_eq!(names, [("libs/lib", true), ("services/api", false)]);
+    assert!(Path::new(&found[1].path).ends_with("services/api"));
+}

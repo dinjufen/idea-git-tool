@@ -14,6 +14,15 @@ final class GitOperations {
     var onProgress: ((String?) -> Void)?
     /// 出现冲突时打开 Conflicts 对话框（与 IDEA 一样自动弹出）。
     var onConflicts: (() -> Void)?
+    /// 同一窗口中其他仓库的操作对象（同步分支控制时对它们执行相同的分支操作）。
+    var peers: (() -> [GitOperations])?
+
+    /// 同步分支控制：对其他仓库执行 `action`（被同步的操作不再继续传播）。
+    private func propagate(_ action: (GitOperations) -> Void) {
+        guard SyncBranchControl.isEnabled, let peers else { return }
+        for peer in peers() where peer !== self { action(peer) }
+    }
+
     /// 在 Log 中定位提交。
     var onRevealCommit: ((String) -> Void)?
     /// 打开某个修订中的文件与工作区文件的 Diff。
@@ -84,7 +93,7 @@ final class GitOperations {
         }
     }
 
-    func checkout(_ target: CheckoutTarget, mode: CheckoutMode = .normal) {
+    func checkout(_ target: CheckoutTarget, mode: CheckoutMode = .normal, synchronize: Bool = true) {
         run(tr("ops.progress.checkout", target.name), { repo in
             switch target {
             case let .local(name): try repo.checkoutBranch(name: name, mode: mode)
@@ -97,6 +106,15 @@ final class GitOperations {
                 model.post(outcome.stashConflicts
                     ? tr("ops.checkout.stashConflicts", target.name)
                     : tr("ops.checkout.done", target.name), isError: outcome.stashConflicts)
+                // 同步分支控制：其他仓库中有同名本地分支时一并签出。
+                if synchronize, case let .local(name) = target {
+                    propagate { peer in
+                        let hasBranch = peer.model.branches.contains { $0.kind == .local && $0.name == name }
+                        if hasBranch, peer.model.status.branch.head != name {
+                            peer.checkout(.local(name), mode: mode, synchronize: false)
+                        }
+                    }
+                }
             case let .failure(CoreError.LocalChangesWouldBeOverwritten(files)):
                 askCheckoutProblem(target, files: files)
             case let .failure(error):
@@ -156,10 +174,25 @@ final class GitOperations {
                 try repo.createBranch(name: result.name, startPoint: startPoint, checkout: result.checked)
             }) { [self] outcome in
                 switch outcome {
-                case .success: model.post(tr("ops.newBranch.done", result.name))
+                case .success:
+                    model.post(tr("ops.newBranch.done", result.name))
+                    // 同步分支控制：从当前提交新建分支时，在其他仓库的当前提交上也新建同名分支。
+                    if startPoint == nil {
+                        propagate { peer in peer.createBranchQuietly(result.name, checkout: result.checked) }
+                    }
                 case let .failure(error): showError(tr("ops.newBranch.failed"), error)
                 }
             }
+        }
+    }
+
+    /// 同步分支控制：在本仓库的当前提交上新建分支（已存在时跳过），不弹对话框。
+    func createBranchQuietly(_ name: String, checkout: Bool) {
+        guard !model.branches.contains(where: { $0.kind == .local && $0.name == name }) else { return }
+        run(tr("ops.progress.newBranch", name), { repo in
+            try repo.createBranch(name: name, startPoint: nil, checkout: checkout)
+        }) { [self] outcome in
+            if case let .failure(error) = outcome { showError(tr("ops.newBranch.failed"), error) }
         }
     }
 
@@ -400,8 +433,13 @@ final class GitOperations {
     /// IDEA 的 “Update Project” 对话框：选择 Merge 或 Rebase，记住上次的选择。
     /// 勾选 “不再显示” 后直接按设置中的方式更新（可在 设置 > Git 中恢复显示）。
     func updateProject() {
+        chooseUpdateMethod { [self] method in performUpdate(method) }
+    }
+
+    /// 询问更新方式（或按设置直接使用默认方式）；多仓库更新时也复用这个对话框。
+    func chooseUpdateMethod(_ completion: @escaping (UpdateMethod) -> Void) {
         guard GitSettings.showUpdateDialog else {
-            performUpdate(GitSettings.updateMethod)
+            completion(GitSettings.updateMethod)
             return
         }
         let alert = NSAlert()
@@ -416,12 +454,12 @@ final class GitOperations {
         alert.suppressionButton?.title = tr("ops.update.dontShow")
         alert.addButton(withTitle: tr("ops.update.confirm"))
         alert.addButton(withTitle: tr("common.cancel"))
-        present(alert) { [self] response in
+        present(alert) { response in
             guard response == .alertFirstButtonReturn else { return }
             let method: UpdateMethod = options.selectedIndex == 1 ? .rebase : .merge
             GitSettings.updateMethod = method
             if alert.suppressionButton?.state == .on { GitSettings.showUpdateDialog = false }
-            performUpdate(method)
+            completion(method)
         }
     }
 
@@ -462,7 +500,7 @@ final class GitOperations {
         }
     }
 
-    private func performPush(_ options: PushOptions) {
+    func performPush(_ options: PushOptions) {
         let destination = "\(options.remote)/\(options.remoteBranch)"
         run(tr("ops.progress.push", destination), { repo in try repo.push(options: options) }) { [self] result in
             switch result {

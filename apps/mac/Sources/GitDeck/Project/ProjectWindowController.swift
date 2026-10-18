@@ -18,6 +18,15 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     private let stripe = ToolWindowStripe(top: [.project, .commit], bottom: [.git])
     private let rightStripe = ToolWindowStripe(top: [.aiReview], bottom: [])
     private let statusBar = StatusBarView()
+    private let banner = WorkspaceBanner()
+    /// 本窗口中的所有仓库（主仓库 + 加入的嵌套仓库 / 子模块）。
+    private lazy var workspace = Workspace(primary: model)
+    private lazy var workspaceOperations = WorkspaceOperations(workspace: workspace) { [unowned self] model in
+        self.operations(for: model)
+    }
+    /// 非主仓库的操作对象（按仓库缓存）。
+    private var extraOperations: [ObjectIdentifier: GitOperations] = [:]
+    private var workspaceObserver: UUID?
     private let verticalSplit = NSSplitView()
     private let horizontalSplit = NSSplitView()
     private let leftPanel = NSView()
@@ -68,7 +77,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         window.backgroundColor = Theme.headerBackground
         window.title = model.projectName
         window.representedURL = model.rootURL
-        window.tabbingMode = .disallowed
+        // 多个项目可以合并为同一窗口中的标签页（窗口 > 合并所有窗口）；设置中可选择总是以标签页打开。
+        window.tabbingIdentifier = "GitDeckProject"
+        window.tabbingMode = GeneralSettings.openProjectsAsTabs ? .preferred : .automatic
         super.init(window: window)
         window.delegate = self
         window.setFrameAutosaveName("project:" + model.rootURL.path)
@@ -77,11 +88,13 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         buildLayout()
         wireActions()
         observer = model.observe { [weak self] in self?.modelChanged() }
+        workspaceObserver = workspace.observe { [weak self] in self?.workspaceChanged() }
         applyToolWindowState()
         model.refresh()
+        workspace.load()
         editor.restoreSession()
         fileWatcher = FileWatcher(root: model.rootURL) { [weak self] paths in
-            self?.model.refresh()
+            self?.workspace.refreshAll()
             self?.editor.reloadFromDisk(paths: paths)
         }
         fileWatcher?.start()
@@ -123,26 +136,29 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
 
         let stripeDivider = SeparatorLine(.vertical)
         let rightStripeDivider = SeparatorLine(.vertical)
-        for view in [toolbar, stripe, stripeDivider, verticalSplit, rightStripeDivider, rightStripe, statusBar] as [NSView] { content.addSubview(view) }
+        for view in [toolbar, banner, stripe, stripeDivider, verticalSplit, rightStripeDivider, rightStripe, statusBar] as [NSView] { content.addSubview(view) }
         NSLayoutConstraint.activate([
             toolbar.topAnchor.constraint(equalTo: content.topAnchor),
             toolbar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
 
-            stripe.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            banner.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            banner.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            banner.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            stripe.topAnchor.constraint(equalTo: banner.bottomAnchor),
             stripe.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             stripe.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
-            stripeDivider.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            stripeDivider.topAnchor.constraint(equalTo: banner.bottomAnchor),
             stripeDivider.leadingAnchor.constraint(equalTo: stripe.trailingAnchor),
             stripeDivider.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
 
-            verticalSplit.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            verticalSplit.topAnchor.constraint(equalTo: banner.bottomAnchor),
             verticalSplit.leadingAnchor.constraint(equalTo: stripeDivider.trailingAnchor),
             verticalSplit.trailingAnchor.constraint(equalTo: rightStripeDivider.leadingAnchor),
-            rightStripeDivider.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            rightStripeDivider.topAnchor.constraint(equalTo: banner.bottomAnchor),
             rightStripeDivider.trailingAnchor.constraint(equalTo: rightStripe.leadingAnchor),
             rightStripeDivider.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
-            rightStripe.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            rightStripe.topAnchor.constraint(equalTo: banner.bottomAnchor),
             rightStripe.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             rightStripe.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
             verticalSplit.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
@@ -177,6 +193,18 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             guard let self else { return }
             self.statusBar.setBusy(title != nil || self.model.isRefreshing)
             if let title { self.statusBar.setMessage(title) }
+        }
+        operations.peers = { [weak self] in self?.allOperations ?? [] }
+        projectToolWindow.workspace = workspace
+        workspaceOperations.window = window
+        workspaceOperations.onProgress = operations.onProgress
+        banner.onAdd = { [weak self] in
+            guard let self else { return }
+            self.workspace.add(paths: self.workspace.candidates.map(\.path))
+        }
+        banner.onIgnore = { [weak self] in
+            guard let self else { return }
+            self.workspace.ignore(paths: self.workspace.candidates.map(\.path))
         }
         commitToolWindow.onPushAfterCommit = { [weak self] in self?.operations.push() }
         commitToolWindow.onRollback = { [weak self] paths in self?.operations.rollback(selected: paths) }
@@ -310,7 +338,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             try? await Task.sleep(for: .seconds(delay > 0 ? delay : 2))
             // 设置窗口打开时截取设置窗口；有表单（对话框）时截取表单，否则截取主窗口。
             let settings = SettingsWindowController.shared.window.flatMap { $0.isVisible ? $0 : nil }
-            guard let content = (settings ?? window?.attachedSheet ?? window)?.contentView else { return }
+            // 打开着的分支弹窗：截取弹窗内容。
+            let popoverView = branchesPopover?.contentViewController?.view
+            guard let content = popoverView ?? (settings ?? window?.attachedSheet ?? window)?.contentView else { return }
             let bounds = content.bounds
             guard let rep = content.bitmapImageRepForCachingDisplay(in: bounds) else { return }
             content.cacheDisplay(in: bounds, to: rep)
@@ -330,7 +360,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             debugAction = nil
             scheduleDebugSnapshot()
             switch action {
-            case "branches": showBranchesPopup(nil)
+            case "branches":
+                // 等加入的仓库加载完成（多仓库时显示带仓库选择的弹窗）。
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.showBranchesPopup(nil) }
             case "push": operations.push()
             case "update": operations.updateProject()
             case "newBranch": operations.newBranch()
@@ -360,6 +392,18 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
                 let pane = SettingsWindowController.Pane(rawValue: UserDefaults.standard.integer(forKey: "debug.settingsPane")) ?? .general
                 SettingsWindowController.shared.show(pane)
             case "commit": show(.commit)
+            case "checkoutBranch":
+                // 等加入的仓库加载后在主仓库签出 `-debug.branch`（验证同步分支控制）。
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    self.operations.checkout(.local(UserDefaults.standard.string(forKey: "debug.branch") ?? ""))
+                }
+            case "addRepos":
+                // 等检测完成后点 “加入”，再显示 Project 工具窗口。
+                show(.project)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    self.workspace.add(paths: self.workspace.candidates.map(\.path))
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.projectToolWindow.expandAllForDebug() }
+                }
             case "shelf":
                 showShelf(nil)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.debugShelf?.expandFirst() }
@@ -403,7 +447,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             }
         }
         #endif
-        toolbar.vcsWidget.title = model.branchWidgetTitle
+        toolbar.vcsWidget.title = workspace.branchWidgetTitle
         statusBar.setBusy(model.isRefreshing)
         if let error = model.lastError {
             statusBar.setMessage(error, isError: true)
@@ -501,11 +545,18 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         }
         let popover = NSPopover()
         popover.behavior = .transient
-        let controller = BranchesPopover(model: model, operations: operations) { [weak self] in
-            self?.showCommitToolWindow(nil)
+        let onCommit: @MainActor () -> Void = { [weak self] in self?.showCommitToolWindow(nil) }
+        if workspace.isMultiRoot {
+            // 多仓库：默认选中当前编辑的文件所在的仓库。
+            let selected = editor.activeFileURL.map(workspace.model(containing:)) ?? model
+            let controller = RepositoryBranchesPopover(workspace: workspace, selected: selected, operationsFor: { [unowned self] in self.operations(for: $0) }, onCommit: onCommit)
+            popover.contentViewController = controller
+            controller.popover = popover
+        } else {
+            let controller = BranchesPopover(model: model, operations: operations, onCommit: onCommit)
+            controller.popover = popover
+            popover.contentViewController = controller
         }
-        controller.popover = popover
-        popover.contentViewController = controller
         popover.show(relativeTo: toolbar.vcsWidget.bounds, of: toolbar.vcsWidget, preferredEdge: .maxY)
         branchesPopover = popover
     }
@@ -549,9 +600,47 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     @objc func findNext(_ sender: Any?) { editor.activeEditor?.findNext() }
     @objc func findPrevious(_ sender: Any?) { editor.activeEditor?.findPrevious() }
 
-    @objc func pushChanges(_ sender: Any?) { operations.push() }
-    @objc func updateProject(_ sender: Any?) { operations.updateProject() }
-    @objc func fetchChanges(_ sender: Any?) { operations.fetch() }
+    @objc func pushChanges(_ sender: Any?) { workspaceOperations.pushAll() }
+    @objc func updateProject(_ sender: Any?) { workspaceOperations.updateAll() }
+    @objc func fetchChanges(_ sender: Any?) { workspaceOperations.fetchAll() }
+
+    /// 把选择的目录作为仓库加入本项目（Git > 加入仓库）。
+    @objc func addRepository(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.directoryURL = model.rootURL
+        panel.message = tr("workspace.add.message")
+        let handle: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.workspace.add(paths: [url.path])
+        }
+        if let window { panel.beginSheetModal(for: window, completionHandler: handle) } else { handle(panel.runModal()) }
+    }
+
+    /// 某个仓库的操作对象：主仓库用窗口的 `operations`，其他仓库按需创建并共享窗口回调。
+    func operations(for repositoryModel: ProjectModel) -> GitOperations {
+        if repositoryModel === model { return operations }
+        let key = ObjectIdentifier(repositoryModel)
+        if let existing = extraOperations[key] { return existing }
+        let ops = GitOperations(model: repositoryModel)
+        ops.window = window
+        ops.aiReview = aiReview
+        ops.onProgress = operations.onProgress
+        ops.onRevealCommit = operations.onRevealCommit
+        ops.peers = { [weak self] in self?.allOperations ?? [] }
+        extraOperations[key] = ops
+        return ops
+    }
+
+    private var allOperations: [GitOperations] { workspace.models.map(operations(for:)) }
+
+    /// 仓库列表或任一仓库状态变化：更新分支组件与提示条。
+    private func workspaceChanged() {
+        toolbar.vcsWidget.title = workspace.branchWidgetTitle
+        statusBar.setBusy(workspace.isRefreshing || operations.isRunning || workspaceOperations.isRunning)
+        banner.show(workspace.candidates)
+    }
     @objc func newBranch(_ sender: Any?) { operations.newBranch() }
     @objc func checkoutRevision(_ sender: Any?) { operations.checkoutRevisionDialog() }
     @objc func continueRebase(_ sender: Any?) { operations.continueRebase() }
@@ -650,8 +739,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
-        // 与 IDEA 一致：窗口重新获得焦点时刷新 VCS 状态（文件监听在后续步骤加入）。
-        model.refresh()
+        // 与 IDEA 一致：窗口重新获得焦点时刷新所有仓库的状态。
+        workspace.refreshAll()
     }
 
     // MARK: - NSSplitViewDelegate

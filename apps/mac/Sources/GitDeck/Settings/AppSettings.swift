@@ -32,6 +32,18 @@ enum LanguageSetting: String, CaseIterable {
     }
 }
 
+/// 通用设置中与窗口相关的选项。
+@MainActor
+enum GeneralSettings {
+    private static let tabsKey = "projects.openAsTabs"
+
+    /// 新打开的项目作为现有窗口中的标签页（否则遵循系统的 “打开文稿时首选标签页” 设置）。
+    static var openProjectsAsTabs: Bool {
+        get { UserDefaults.standard.bool(forKey: tabsKey) }
+        set { UserDefaults.standard.set(newValue, forKey: tabsKey) }
+    }
+}
+
 /// Git 设置（设置 > Git）。
 @MainActor
 enum GitSettings {

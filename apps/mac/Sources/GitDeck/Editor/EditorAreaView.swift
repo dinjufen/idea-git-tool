@@ -144,6 +144,9 @@ final class EditorAreaView: NSView {
     /// 当前文件文档相对仓库根目录的路径。
     var activeRelativePath: String? { (active as? Document)?.relativePath }
 
+    /// 当前编辑的文件。
+    var activeFileURL: URL? { (active as? Document)?.url }
+
     var isActiveAnnotated: Bool { activeEditor?.annotations != nil }
 
     // MARK: - Annotate

@@ -4,6 +4,7 @@ import AppKit
 final class GeneralSettingsPane: NSViewController {
     private let languagePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let themePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let tabsCheckbox = NSButton(checkboxWithTitle: tr("settings.tabs"), target: nil, action: nil)
 
     init() {
         super.init(nibName: nil, bundle: nil)
@@ -25,7 +26,11 @@ final class GeneralSettingsPane: NSViewController {
             [SettingsForm.label("settings.language"), languagePopup],
             [NSGridCell.emptyContentView, SettingsForm.hint(tr("settings.language.hint"))],
             [SettingsForm.label("settings.theme"), themePopup],
+            [SettingsForm.label("settings.projects"), tabsCheckbox],
+            [NSGridCell.emptyContentView, SettingsForm.hint(tr("settings.tabs.hint"))],
         ], in: view)
+        tabsCheckbox.target = self
+        tabsCheckbox.action = #selector(tabsChanged)
         SettingsForm.fitPreferredSize(self)
     }
 
@@ -33,6 +38,11 @@ final class GeneralSettingsPane: NSViewController {
         super.viewWillAppear()
         languagePopup.selectItem(at: LanguageSetting.allCases.firstIndex(of: .current) ?? 0)
         themePopup.selectItem(at: AppearanceSetting.allCases.firstIndex(of: .current) ?? 0)
+        tabsCheckbox.state = GeneralSettings.openProjectsAsTabs ? .on : .off
+    }
+
+    @objc private func tabsChanged() {
+        GeneralSettings.openProjectsAsTabs = tabsCheckbox.state == .on
     }
 
     @objc private func themeChanged() {

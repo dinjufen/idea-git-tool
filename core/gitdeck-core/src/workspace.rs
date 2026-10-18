@@ -30,6 +30,32 @@ pub enum SubmoduleState {
     Conflict,
 }
 
+/// 项目目录中发现的其他 git 仓库（IDEA 的 “Unregistered VCS roots”）。
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NestedRepository {
+    /// 工作区根目录的绝对路径。
+    pub path: String,
+    /// 相对本仓库根目录的路径。
+    pub relative_path: String,
+    /// 是本仓库的子模块（否则为独立的嵌套仓库）。
+    pub is_submodule: bool,
+}
+
+/// 查找嵌套仓库时跳过的目录（依赖、构建产物等，通常很大且不含需要管理的仓库）。
+const SKIPPED_DIRECTORIES: &[&str] = &[
+    "node_modules",
+    "target",
+    "build",
+    "dist",
+    "out",
+    "Pods",
+    "DerivedData",
+    ".build",
+    "vendor",
+    "venv",
+    ".venv",
+];
+
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Submodule {
     pub name: String,
@@ -223,6 +249,60 @@ impl Repository {
             });
         }
         Ok(submodules)
+    }
+
+    /// 查找项目目录中的其他 git 仓库：已初始化的子模块与独立的嵌套仓库（最多 `max_depth` 层，
+    /// 不进入找到的仓库内部，跳过隐藏目录与依赖 / 构建目录）。
+    pub fn nested_repositories(
+        &self,
+        max_depth: u32,
+    ) -> std::result::Result<Vec<NestedRepository>, CoreError> {
+        let submodules: Vec<String> = self
+            .submodules()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|s| s.path)
+            .collect();
+        let mut found = Vec::new();
+        let mut queue: Vec<(std::path::PathBuf, u32)> = vec![(self.root.clone(), 0)];
+        while let Some((dir, depth)) = queue.pop() {
+            if depth >= max_depth {
+                continue;
+            }
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            let mut children: Vec<std::path::PathBuf> = entries
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+                .map(|e| e.path())
+                .filter(|p| {
+                    let name = p
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    !name.starts_with('.') && !SKIPPED_DIRECTORIES.contains(&name.as_str())
+                })
+                .collect();
+            children.sort();
+            for child in children {
+                if child.join(".git").exists() {
+                    let relative = child
+                        .strip_prefix(&self.root)
+                        .map(|p| p.to_string_lossy().replace('\\', "/"))
+                        .unwrap_or_default();
+                    found.push(NestedRepository {
+                        path: child.to_string_lossy().into_owned(),
+                        is_submodule: submodules.contains(&relative),
+                        relative_path: relative,
+                    });
+                } else {
+                    queue.push((child, depth + 1));
+                }
+            }
+        }
+        found.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+        Ok(found)
     }
 
     /// 初始化并更新子模块（`git submodule update --init`），`recursive` 时包括嵌套子模块。

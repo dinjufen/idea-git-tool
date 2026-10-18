@@ -22,6 +22,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showWelcome()
         }
         NSApp.activate()
+        #if DEBUG
+        // 仅 Debug：`-debug.openAlso <路径>` 启动后再打开一个项目（验证多项目标签页）。
+        if let also = UserDefaults.standard.string(forKey: "debug.openAlso") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.openProject(at: URL(fileURLWithPath: also)) }
+        }
+        #endif
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {

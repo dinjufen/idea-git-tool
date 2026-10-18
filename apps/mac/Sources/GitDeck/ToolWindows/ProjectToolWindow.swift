@@ -64,6 +64,16 @@ final class ProjectToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDel
     private let outline = NSOutlineView()
     private var observer: UUID?
 
+    /// 多仓库项目：嵌套仓库的根目录显示分支标签，其中的文件按所属仓库的状态着色。
+    var workspace: Workspace? {
+        didSet {
+            if let workspaceObserver { oldValue?.removeObserver(workspaceObserver) }
+            workspaceObserver = workspace?.observe { [weak self] in self?.outline.reloadData() }
+        }
+    }
+
+    private var workspaceObserver: UUID?
+
     init(model: ProjectModel) {
         self.model = model
         root = FileNode(url: model.rootURL, isDirectory: true, relativePath: "")
@@ -178,12 +188,23 @@ final class ProjectToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDel
         let id = NSUserInterfaceItemIdentifier("FileCell")
         let cell = outlineView.makeView(withIdentifier: id, owner: nil) as? FileCellView ?? FileCellView(identifier: id)
         let isRoot = node === root
+        // 其他仓库的根目录：用仓库标识色的图标并显示当前分支（IDEA 多仓库项目中的仓库根标记）。
+        let repositoryRoot = repositoryModel(rootedAt: node)
+        var image = icon(for: node)
+        var detail = isRoot ? (model.rootURL.path as NSString).abbreviatingWithTildeInPath : nil
+        if let repositoryRoot, let workspace {
+            image = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 12, weight: .regular).applying(.init(paletteColors: [workspace.color(for: repositoryRoot)])))
+            detail = "[\(repositoryRoot.branchWidgetTitle)]"
+        } else if isRoot, let workspace, workspace.isMultiRoot {
+            detail = "[\(model.branchWidgetTitle)]  " + (detail ?? "")
+        }
         cell.configure(
-            icon: icon(for: node),
+            icon: image,
             name: node.name,
-            detail: isRoot ? (model.rootURL.path as NSString).abbreviatingWithTildeInPath : nil,
+            detail: detail,
             color: color(for: node),
-            bold: isRoot
+            bold: isRoot || repositoryRoot != nil
         )
         return cell
     }
@@ -193,12 +214,30 @@ final class ProjectToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDel
             .withSymbolConfiguration(.init(pointSize: 12, weight: .regular))
     }
 
+    /// 以该目录为根目录的其他仓库。
+    #if DEBUG
+    func expandAllForDebug() {
+        outline.expandItem(nil, expandChildren: true)
+    }
+    #endif
+
+    private func repositoryModel(rootedAt node: FileNode) -> ProjectModel? {
+        guard node.isDirectory, node !== root, let workspace, workspace.isMultiRoot else { return nil }
+        let path = node.url.standardizedFileURL.path
+        return workspace.models.first { $0 !== model && $0.rootURL.standardizedFileURL.path == path }
+    }
+
     private func color(for node: FileNode) -> NSColor {
-        if let change = model.changesByPath[node.relativePath] { return change.statusColor }
+        // 文件所属的仓库（嵌套仓库中的文件使用嵌套仓库的状态）。
+        let owner = workspace?.model(containing: node.url) ?? model
+        let ownerRoot = owner.rootURL.standardizedFileURL.path
+        let nodePath = node.url.standardizedFileURL.path
+        let relative = nodePath == ownerRoot ? "" : String(nodePath.dropFirst(ownerRoot.count + 1))
+        if let change = owner.changesByPath[relative] { return change.statusColor }
         // 目录下有变更时目录名也着色（IDEA 的 “Highlight directories that contain modified files”）。
-        if node.isDirectory, !node.relativePath.isEmpty {
-            let prefix = node.relativePath + "/"
-            if model.status.changes.contains(where: { $0.path.hasPrefix(prefix) && !$0.isIgnored }) {
+        if node.isDirectory, !relative.isEmpty || owner !== model {
+            let prefix = relative.isEmpty ? "" : relative + "/"
+            if owner.status.changes.contains(where: { $0.path.hasPrefix(prefix) && !$0.isIgnored }) {
                 return Theme.FileStatus.modified
             }
         }
