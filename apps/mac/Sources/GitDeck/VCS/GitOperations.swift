@@ -404,24 +404,17 @@ final class GitOperations {
         let alert = NSAlert()
         alert.messageText = tr("ops.update.title")
         alert.informativeText = tr("ops.update.message")
-        let merge = NSButton(radioButtonWithTitle: tr("ops.update.merge"), target: nil, action: nil)
-        let rebase = NSButton(radioButtonWithTitle: tr("ops.update.rebase"), target: nil, action: nil)
-        // 单选按钮需要共享 action 才会互斥。
-        let toggle = RadioGroup([merge, rebase])
         let rememberedRebase = UserDefaults.standard.string(forKey: Self.updateMethodKey) == "rebase"
-        (rememberedRebase ? rebase : merge).state = .on
-        let stack = NSStackView(views: [merge, rebase])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.frame = NSRect(x: 0, y: 0, width: 300, height: 48)
-        alert.accessoryView = stack
+        let options = RadioOptionsView(options: [
+            (tr("ops.update.merge.title"), tr("ops.update.merge")),
+            (tr("ops.update.rebase.title"), tr("ops.update.rebase")),
+        ], selected: rememberedRebase ? 1 : 0)
+        alert.accessoryView = options
         alert.addButton(withTitle: tr("ops.update.confirm"))
         alert.addButton(withTitle: tr("common.cancel"))
         present(alert) { [self] response in
-            // 单选按钮的 target 是弱引用：在对话框关闭前保持 RadioGroup 存活。
-            withExtendedLifetime(toggle) {}
             guard response == .alertFirstButtonReturn else { return }
-            let method: UpdateMethod = rebase.state == .on ? .rebase : .merge
+            let method: UpdateMethod = options.selectedIndex == 1 ? .rebase : .merge
             UserDefaults.standard.set(method == .rebase ? "rebase" : "merge", forKey: Self.updateMethodKey)
             performUpdate(method)
         }

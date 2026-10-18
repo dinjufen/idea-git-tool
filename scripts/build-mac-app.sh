@@ -34,6 +34,19 @@ for lang in en zh-Hans; do
   printf '"CFBundleName" = "%s";\n' "$PRODUCT_NAME" > "$APP/Contents/Resources/$lang.lproj/InfoPlist.strings"
 done
 
+# 应用图标：由 assets/icon/GitDeck-1024.png（scripts/make-icon.swift 生成）缩放出各尺寸并打包为 .icns。
+ICON_SRC="$ROOT/assets/icon/GitDeck-1024.png"
+if [ -f "$ICON_SRC" ]; then
+  ICONSET="$ROOT/build/$CONFIG/AppIcon.iconset"
+  rm -rf "$ICONSET" && mkdir -p "$ICONSET"
+  for size in 16 32 128 256 512; do
+    sips -z $size $size "$ICON_SRC" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+    sips -z $((size * 2)) $((size * 2)) "$ICON_SRC" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+  rm -rf "$ICONSET"
+fi
+
 VERSION="$(grep -m1 '^version' "$ROOT/Cargo.toml" | sed -E 's/.*"(.*)".*/\1/')"
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -45,6 +58,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleDisplayName</key><string>$PRODUCT_NAME</string>
   <key>CFBundleExecutable</key><string>$PRODUCT_NAME</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>CFBundleDevelopmentRegion</key><string>en</string>

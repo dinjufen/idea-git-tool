@@ -46,7 +46,11 @@ final class WelcomeWindowController: NSWindowController, NSTableViewDataSource, 
         let navBackground = ColoredView(Theme.selectedStripeButton)
         navBackground.translatesAutoresizingMaskIntoConstraints = false
         navBackground.layer?.cornerRadius = 6
-        for view in [name, version, navBackground, nav] as [NSView] { sidebar.addSubview(view) }
+        // 产品图标（与 IDEA 欢迎页左上角的产品标志一致）。
+        let logo = NSImageView(image: NSApp.applicationIconImage)
+        logo.translatesAutoresizingMaskIntoConstraints = false
+        logo.imageScaling = .scaleProportionallyUpOrDown
+        for view in [logo, name, version, navBackground, nav] as [NSView] { sidebar.addSubview(view) }
 
         // 右侧：搜索框 + 按钮 + 最近项目。
         let main = ColoredView(Theme.editorBackground)
@@ -89,8 +93,12 @@ final class WelcomeWindowController: NSWindowController, NSTableViewDataSource, 
             sidebar.topAnchor.constraint(equalTo: content.topAnchor),
             sidebar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
             sidebar.widthAnchor.constraint(equalToConstant: 220),
+            logo.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 14),
+            logo.centerYAnchor.constraint(equalTo: name.bottomAnchor, constant: 1),
+            logo.widthAnchor.constraint(equalToConstant: 40),
+            logo.heightAnchor.constraint(equalToConstant: 40),
             name.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 48),
-            name.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 20),
+            name.leadingAnchor.constraint(equalTo: logo.trailingAnchor, constant: 8),
             version.topAnchor.constraint(equalTo: name.bottomAnchor, constant: 2),
             version.leadingAnchor.constraint(equalTo: name.leadingAnchor),
             navBackground.topAnchor.constraint(equalTo: version.bottomAnchor, constant: 24),

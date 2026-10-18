@@ -8229,6 +8229,23 @@
         }
       }
     },
+    "ops.update.merge.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "合并"
+          }
+        }
+      }
+    },
     "ops.update.message": {
       "extractionState": "manual",
       "localizations": {
@@ -8276,6 +8293,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "将当前分支变基到传入更改之上"
+          }
+        }
+      }
+    },
+    "ops.update.rebase.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rebase"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "变基"
           }
         }
       }

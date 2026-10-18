@@ -56,29 +56,12 @@ extension GitOperations {
             (.hard, tr("reset.hard"), tr("reset.hard.help")),
             (.keep, tr("reset.keep"), tr("reset.keep.help")),
         ]
-        var buttons: [NSButton] = []
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 4
-        for (_, title, help) in modes {
-            let radio = NSButton(radioButtonWithTitle: title, target: nil, action: nil)
-            buttons.append(radio)
-            let helpLabel = NSTextField.label(help, font: Theme.smallFont, color: Theme.secondaryText)
-            helpLabel.translatesAutoresizingMaskIntoConstraints = true
-            stack.addArrangedSubview(radio)
-            stack.addArrangedSubview(helpLabel)
-        }
-        let group = RadioGroup(buttons)
-        buttons[1].state = .on
-        stack.frame = NSRect(x: 0, y: 0, width: 380, height: 160)
-        alert.accessoryView = stack
+        let options = RadioOptionsView(options: modes.map { ($0.1, $0.2) }, selected: 1)
+        alert.accessoryView = options
         alert.addButton(withTitle: tr("reset.confirm"))
         alert.addButton(withTitle: tr("common.cancel"))
         present(alert) { [self] response in
-            withExtendedLifetime(group) {}
-            guard response == .alertFirstButtonReturn,
-                  let index = buttons.firstIndex(where: { $0.state == .on }) else { return }
+            guard response == .alertFirstButtonReturn, let index = options.selectedIndex else { return }
             let mode = modes[index].0
             run(tr("ops.progress.reset"), { repo in try repo.resetTo(revision: hash, mode: mode) }) { [self] result in
                 switch result {
