@@ -3,7 +3,8 @@ import GitDeckCore
 
 /// 提交工具窗口的 “储藏” 标签（IDEA New UI 的 Stash 标签）：储藏列表，展开为改动的文件。
 final class StashesView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
-    var onShowFileDiff: ((StashEntry, ChangedFile) -> Void)?
+    /// 打开储藏中文件的 Diff（参数含储藏所在的仓库）。
+    var onShowFileDiff: ((ProjectModel, StashEntry, ChangedFile) -> Void)?
 
     /// 储藏节点；文件在首次展开时加载。
     final class StashItem {
@@ -21,8 +22,10 @@ final class StashesView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         }
     }
 
-    private let model: ProjectModel
-    private let operations: GitOperations
+    private var model: ProjectModel
+    private var operations: GitOperations
+    /// 多仓库项目中选择显示哪个仓库。
+    private let repositoryPopup = RepositoryPopup()
     private let outline = NSOutlineView()
     private let emptyLabel = NSTextField.label(tr("stash.empty"), color: Theme.secondaryText)
     private var items: [StashItem] = []
@@ -36,6 +39,19 @@ final class StashesView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         buildLayout()
         observer = model.observe { [weak self] in self?.reload() }
         reload()
+    }
+
+    /// 多仓库项目：在工具栏显示仓库选择，切换后显示所选仓库的储藏。
+    func attach(workspace: Workspace, operationsFor: @escaping (ProjectModel) -> GitOperations) {
+        repositoryPopup.configure(workspace: workspace, selected: model) { [weak self] repository in
+            guard let self else { return }
+            if let observer = self.observer { self.model.removeObserver(observer) }
+            self.model = repository
+            self.operations = operationsFor(repository)
+            self.observer = repository.observe { [weak self] in self?.reload() }
+            self.items = []
+            self.reload()
+        }
     }
 
     @available(*, unavailable)
@@ -56,6 +72,7 @@ final class StashesView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
             button("arrow.triangle.branch", tr("stash.action.branch"), #selector(branchSelected)),
             button("trash", tr("stash.action.drop"), #selector(dropSelected)),
             button("xmark.bin", tr("stash.action.clear"), #selector(clearAll), needsSelection: false),
+            repositoryPopup,
         ])
         toolbar.spacing = 0
         toolbar.translatesAutoresizingMaskIntoConstraints = false
@@ -156,7 +173,7 @@ final class StashesView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     @objc private func doubleClicked() {
         switch outline.item(atRow: outline.clickedRow) {
         case let file as FileItem:
-            if let stash = file.stash { onShowFileDiff?(stash.entry, file.file) }
+            if let stash = file.stash { onShowFileDiff?(model, stash.entry, file.file) }
         case let item as StashItem:
             outline.isItemExpanded(item) ? outline.collapseItem(item) : outline.expandItem(item)
         default:

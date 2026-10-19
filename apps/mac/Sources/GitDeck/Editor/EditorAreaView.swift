@@ -336,12 +336,12 @@ final class EditorAreaView: NSView {
     }
 
     private func updateReviewMarkers(_ document: Document) {
-        // AI 评审结果针对主仓库。
-        guard let path = document.relativePath, let aiReview, document.owner == nil || document.owner === model else {
+        // AI 评审结果的路径相对被评审的仓库：只在属于该仓库的文件上显示标记。
+        guard let path = document.relativePath, let aiReview else {
             document.editor.reviewMarkers = []
             return
         }
-        document.editor.reviewMarkers = aiReview.workingTreeFindings(for: path)
+        document.editor.reviewMarkers = aiReview.workingTreeFindings(for: path, in: document.owner ?? model)
             .filter { !aiReview.applied.contains($0.index) }
             .map { ReviewMarker(index: $0.index, line: Int($0.finding.line) - 1, severity: $0.finding.severity, title: $0.finding.title) }
     }

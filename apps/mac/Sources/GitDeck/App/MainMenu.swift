@@ -121,6 +121,7 @@ enum MainMenu {
         menu.addItem(item(tr("patch.menu.apply"), #selector(ProjectWindowController.applyPatch(_:)), ""))
         menu.addItem(.separator())
         menu.addItem(item(tr("workspace.menu.add"), #selector(ProjectWindowController.addRepository(_:)), ""))
+        menu.addItem(item(tr("workspace.menu.manage"), #selector(ProjectWindowController.manageRepositories(_:)), ""))
         menu.addItem(item(tr("remotes.menu"), #selector(ProjectWindowController.manageRemotes(_:)), ""))
         menu.addItem(item(tr("submodules.menu"), #selector(ProjectWindowController.manageSubmodules(_:)), ""))
         menu.addItem(item(tr("worktree.menu.new"), #selector(ProjectWindowController.newWorktree(_:)), ""))

@@ -25,6 +25,9 @@ final class LogSubjectCellView: NSView {
     /// 是否为当前 HEAD 所在提交（标题加粗，与 IDEA 一致）。
     var isHead = false
 
+    /// 多仓库合并显示时提交所属仓库的标识色：在行首画色条，节点也使用该颜色。
+    var stripeColor: NSColor?
+
     override var isFlipped: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -52,10 +55,14 @@ final class LogSubjectCellView: NSView {
             GraphPalette.color(edge.color).setStroke()
             path.stroke()
         }
+        if let stripeColor {
+            stripeColor.setFill()
+            NSRect(x: 0, y: 0, width: 3, height: h).fill()
+        }
         let center = NSPoint(x: x(graph.lane), y: h / 2)
         let r = Self.nodeRadius
         let node = NSBezierPath(ovalIn: NSRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2))
-        GraphPalette.color(graph.color).setFill()
+        (stripeColor ?? GraphPalette.color(graph.color)).setFill()
         node.fill()
 
         // 引用标签与标题。

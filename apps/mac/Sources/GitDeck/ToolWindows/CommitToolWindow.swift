@@ -585,8 +585,26 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         }
     }
 
+    /// AI 评审勾选的改动：只涉及一个仓库时直接评审，涉及多个仓库时先选择仓库。
     @objc private func aiReviewSelected() {
-        aiReview?.reviewLocalChanges(paths: includedPaths)
+        let groups = grouped(includedEntries)
+        guard groups.count > 1 else {
+            let (repository, paths) = groups.first ?? (model, [])
+            aiReview?.reviewLocalChanges(paths: paths, in: repository)
+            return
+        }
+        let menu = NSMenu(title: tr("ai.pickRepository"))
+        menu.addItem(withTitle: tr("ai.pickRepository"), action: nil, keyEquivalent: "").isEnabled = false
+        for (repository, paths) in groups {
+            let handler = MenuAction { [weak self] in self?.aiReview?.reviewLocalChanges(paths: paths, in: repository) }
+            let item = NSMenuItem(title: "\(workspace.displayName(of: repository))  (\(paths.count))", action: #selector(MenuAction.invoke), keyEquivalent: "")
+            item.image = RepositoryBranchesPopover.chip(workspace.color(for: repository))
+            item.target = handler
+            item.representedObject = handler
+            menu.addItem(item)
+        }
+        let anchor = NSApp.currentEvent.map { convert($0.locationInWindow, from: nil) } ?? NSPoint(x: 40, y: bounds.height - 60)
+        menu.popUp(positioning: nil, at: anchor, in: self)
     }
 
     /// 根据勾选的文件生成提交信息；生成中再次点击取消。

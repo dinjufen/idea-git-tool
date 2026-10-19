@@ -96,6 +96,9 @@ final class Workspace {
                 self.append(ProjectModel(repository: repository))
             }
             self.save()
+            var ignored = Set(UserDefaults.standard.stringArray(forKey: self.ignoredKey) ?? [])
+            ignored.subtract(paths)
+            UserDefaults.standard.set(Array(ignored), forKey: self.ignoredKey)
             self.candidates.removeAll { candidate in self.contains(path: candidate.path) }
             self.notify()
         }
@@ -109,7 +112,7 @@ final class Workspace {
         notify()
     }
 
-    /// 不再提示这些嵌套仓库。
+    /// 不再提示这些嵌套仓库。加入时从忽略列表中移除。
     func ignore(paths: [String]) {
         var ignored = Set(UserDefaults.standard.stringArray(forKey: ignoredKey) ?? [])
         ignored.formUnion(paths)

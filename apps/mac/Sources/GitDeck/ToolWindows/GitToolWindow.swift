@@ -11,6 +11,28 @@ final class GitToolWindow: NSView {
         didSet { logView.onOpenFile = onOpenFile }
     }
 
+    /// 多仓库项目：Log 显示全部或某个仓库的提交。
+    var workspace: Workspace? {
+        didSet { logView.workspace = workspace }
+    }
+
+    #if DEBUG
+    func debugShowAllRepositories() { logView.debugShowAll() }
+    #endif
+
+    /// Worktrees 标签显示所选仓库的工作树。
+    func attachWorkspaceToWorktrees(_ workspace: Workspace, operationsFor: @escaping (ProjectModel) -> GitOperations) {
+        worktreesView?.attach(workspace: workspace, operationsFor: operationsFor)
+    }
+
+    var operationsFor: ((ProjectModel) -> GitOperations)? {
+        didSet { logView.operationsFor = operationsFor }
+    }
+
+    var onShowRepositoryCommitDiff: ((ProjectModel, String, String?, ChangedFile) -> Void)? {
+        didSet { logView.onShowRepositoryCommitDiff = onShowRepositoryCommitDiff }
+    }
+
     var onShowCommitDiff: ((String, String?, ChangedFile) -> Void)? {
         didSet {
             logView.onShowCommitDiff = onShowCommitDiff

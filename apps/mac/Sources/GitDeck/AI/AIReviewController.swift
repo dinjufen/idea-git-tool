@@ -64,6 +64,13 @@ final class AIReviewController {
         for handler in observers.values { handler() }
     }
 
+    /// 正在或最近一次评审的仓库（多仓库项目中可能是嵌套仓库）；发现中的路径相对该仓库。
+    private(set) var reviewedModel: ProjectModel?
+    /// 正在评审的仓库（未开始过评审时为主仓库）。
+    var target: ProjectModel { reviewedModel ?? model }
+    /// 多仓库项目：评审标题中带上仓库名。
+    weak var workspace: Workspace?
+
     var isRunning: Bool { phase == .running }
     var canRerun: Bool { scope != nil && !isRunning }
 
@@ -71,14 +78,14 @@ final class AIReviewController {
     func isWorkingTreeResult(for path: String) -> Bool {
         guard let result else { return false }
         guard let revision = result.revision else { return true }
-        let head = model.status.branch.oid ?? ""
+        let head = target.status.branch.oid ?? ""
         let matchesHead = revision == "HEAD" || (!head.isEmpty && head.hasPrefix(revision)) || (!revision.isEmpty && revision.hasPrefix(head))
-        return matchesHead && !model.status.changes.contains { $0.path == path }
+        return matchesHead && !target.status.changes.contains { $0.path == path }
     }
 
-    /// 工作区文件上的发现（下标与发现），用于编辑器标记。
-    func workingTreeFindings(for path: String) -> [(index: Int, finding: ReviewFinding)] {
-        guard let result, isWorkingTreeResult(for: path) else { return [] }
+    /// 工作区文件上的发现（下标与发现），用于编辑器标记；`repository` 为文件所属的仓库。
+    func workingTreeFindings(for path: String, in repository: ProjectModel? = nil) -> [(index: Int, finding: ReviewFinding)] {
+        guard (repository ?? model) === target, let result, isWorkingTreeResult(for: path) else { return [] }
         return result.findings.enumerated().filter { $0.element.file == path }.map { ($0.offset, $0.element) }
     }
 
@@ -118,30 +125,39 @@ final class AIReviewController {
 
     // MARK: - 评审
 
-    func reviewLocalChanges(paths: [String]) {
-        let count = paths.isEmpty ? model.status.changes.count : paths.count
-        start(scope: .localChanges(paths: paths), title: tr("ai.scope.local", "\(count)"))
+    /// 多仓库项目中评审其他仓库时，标题前加上仓库名。
+    private func titled(_ title: String, _ repository: ProjectModel) -> String {
+        guard let workspace, workspace.isMultiRoot else { return title }
+        return "\(workspace.displayName(of: repository)): \(title)"
     }
 
-    func reviewCommits(_ hashes: [String], subject: String?) {
+    func reviewLocalChanges(paths: [String], in repository: ProjectModel? = nil) {
+        let owner = repository ?? model
+        let count = paths.isEmpty ? owner.status.changes.count : paths.count
+        start(scope: .localChanges(paths: paths), title: titled(tr("ai.scope.local", "\(count)"), owner), in: owner)
+    }
+
+    func reviewCommits(_ hashes: [String], subject: String?, in repository: ProjectModel? = nil) {
+        let owner = repository ?? model
         let title = hashes.count == 1
             ? tr("ai.scope.commit", String(hashes[0].prefix(8)), subject ?? "")
             : tr("ai.scope.commits", "\(hashes.count)")
-        start(scope: .commits(hashes: hashes), title: title)
+        start(scope: .commits(hashes: hashes), title: titled(title, owner), in: owner)
     }
 
-    func reviewBranch(against base: String) {
-        let head = model.status.branch.head ?? "HEAD"
-        start(scope: .branchCompare(base: base, head: "HEAD"), title: tr("ai.scope.branch", head, base))
+    func reviewBranch(against base: String, in repository: ProjectModel? = nil) {
+        let owner = repository ?? model
+        let head = owner.status.branch.head ?? "HEAD"
+        start(scope: .branchCompare(base: base, head: "HEAD"), title: titled(tr("ai.scope.branch", head, base), owner), in: owner)
     }
 
     func rerun() {
         guard let scope, !isRunning else { return }
-        start(scope: scope, title: title)
+        start(scope: scope, title: title, in: target)
     }
 
     /// 开始评审；`completion` 在结束时调用（失败或取消时参数为 `nil`）。
-    func start(scope: ReviewScope, title: String, allowSkip: Bool = false, completion: ((ReviewResult?) -> Void)? = nil) {
+    func start(scope: ReviewScope, title: String, in repository: ProjectModel? = nil, allowSkip: Bool = false, completion: ((ReviewResult?) -> Void)? = nil) {
         guard !isRunning else {
             onReveal?()
             return
@@ -188,7 +204,8 @@ final class AIReviewController {
                 MainActor.assumeIsolated { self?.handle(event, generation: current) }
             }
         }
-        task = model.repository.startAiReview(config: config, apiKey: apiKey, scope: scope, options: options, listener: listener)
+        reviewedModel = repository ?? model
+        task = target.repository.startAiReview(config: config, apiKey: apiKey, scope: scope, options: options, listener: listener)
     }
 
     func cancel() {

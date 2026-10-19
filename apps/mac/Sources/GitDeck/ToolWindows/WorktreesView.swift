@@ -3,8 +3,10 @@ import GitDeckCore
 
 /// Git 工具窗口的 Worktrees 标签（IDEA 2023.3+）：列出工作树，可新建、在新窗口中打开、删除。
 final class WorktreesView: NSView, NSTableViewDataSource, NSTableViewDelegate {
-    private let model: ProjectModel
-    private let operations: GitOperations
+    private var model: ProjectModel
+    private var operations: GitOperations
+    /// 多仓库项目中选择显示哪个仓库。
+    private let repositoryPopup = RepositoryPopup()
     private let table = NSTableView()
     private let statusLabel = NSTextField.label("", font: Theme.smallFont, color: Theme.secondaryText)
     private var worktrees: [Worktree] = []
@@ -19,6 +21,21 @@ final class WorktreesView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         // 分支或 HEAD 变化（例如新建了工作树）后刷新。
         observer = model.observe { [weak self] in
             guard let self, !self.model.isRefreshing, !self.isHidden else { return }
+            self.reload()
+        }
+    }
+
+    /// 多仓库项目：在工具栏显示仓库选择，切换后显示所选仓库的内容。
+    func attach(workspace: Workspace, operationsFor: @escaping (ProjectModel) -> GitOperations) {
+        repositoryPopup.configure(workspace: workspace, selected: model) { [weak self] repository in
+            guard let self else { return }
+            if let observer = self.observer { self.model.removeObserver(observer) }
+            self.model = repository
+            self.operations = operationsFor(repository)
+            self.observer = repository.observe { [weak self] in
+                guard let self, !self.model.isRefreshing, !self.isHidden else { return }
+                self.reload()
+            }
             self.reload()
         }
     }
@@ -43,6 +60,7 @@ final class WorktreesView: NSView, NSTableViewDataSource, NSTableViewDelegate {
             button("plus", tr("worktree.new"), #selector(newWorktree), needsSelection: false),
             button("macwindow.badge.plus", tr("worktree.open"), #selector(openSelected), needsSelection: true),
             button("trash", tr("worktree.remove"), #selector(removeSelected), needsSelection: true),
+            repositoryPopup,
             NSView(), statusLabel,
         ])
         toolbar.spacing = 2

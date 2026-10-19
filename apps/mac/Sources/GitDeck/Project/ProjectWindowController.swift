@@ -196,6 +196,13 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         }
         operations.peers = { [weak self] in self?.allOperations ?? [] }
         projectToolWindow.workspace = workspace
+        gitToolWindow.workspace = workspace
+        gitToolWindow.operationsFor = { [unowned self] in self.operations(for: $0) }
+        gitToolWindow.attachWorkspaceToWorktrees(workspace) { [unowned self] in self.operations(for: $0) }
+        gitToolWindow.onShowRepositoryCommitDiff = { [weak self] repository, hash, parent, file in
+            guard let self else { return }
+            self.diffOpener(for: repository).showCommitFile(hash: hash, parent: parent, file: file)
+        }
         workspaceOperations.window = window
         workspaceOperations.onProgress = operations.onProgress
         banner.onAdd = { [weak self] in
@@ -224,16 +231,18 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         commitToolWindow.onResolveConflict = { [weak self] repository, change in self?.conflictResolver(for: repository).openMerge(change) }
         commitToolWindow.onShowConflicts = { [weak self] repository in self?.conflictResolver(for: repository).showConflicts() }
         let stashes = StashesView(model: model, operations: operations)
+        stashes.attach(workspace: workspace) { [unowned self] in self.operations(for: $0) }
         #if DEBUG
         debugStashes = stashes
         #endif
-        stashes.onShowFileDiff = { [weak self] stash, file in self?.diffOpener.showStashFile(stash, file: file) }
+        stashes.onShowFileDiff = { [weak self] repository, stash, file in self?.diffOpener(for: repository).showStashFile(stash, file: file) }
         commitToolWindow.attachStashes(stashes)
         let shelf = ShelfView(model: model, operations: operations)
+        shelf.attach(workspace: workspace) { [unowned self] in self.operations(for: $0) }
         #if DEBUG
         debugShelf = shelf
         #endif
-        shelf.onShowFileDiff = { [weak self] entry, path in self?.diffOpener.showShelfFile(entry, path: path) }
+        shelf.onShowFileDiff = { [weak self] repository, entry, path in self?.diffOpener(for: repository).showShelfFile(entry, path: path) }
         commitToolWindow.attachShelf(shelf)
         commitToolWindow.onShelve = { [weak self] groups, name in
             guard let self else { return }
@@ -282,6 +291,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         editor.onCaretChange = { [weak self] info in self?.statusBar.setEditorInfo(info) }
 
         aiReview.window = window
+        aiReview.workspace = workspace
         aiReview.onReveal = { [weak self] in self?.show(.aiReview) }
         operations.aiReview = aiReview
         commitToolWindow.aiReview = aiReview
@@ -426,6 +436,12 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                     self.operations.checkout(.local(UserDefaults.standard.string(forKey: "debug.branch") ?? ""))
                 }
+            case "logAll":
+                // 多仓库：Log 切换到 “所有仓库”。
+                show(.git)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.gitToolWindow.debugShowAllRepositories() }
+            case "manageRepos":
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.manageRepositories(nil) }
             case "addRepos":
                 // 等检测完成后点 “加入”，再显示 Project 工具窗口。
                 show(.project)
@@ -509,14 +525,14 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         let finding = result.findings[index]
         let line = Int(finding.line) - 1
         if aiReview.isWorkingTreeResult(for: finding.file) {
-            let url = model.rootURL.appendingPathComponent(finding.file)
+            let url = aiReview.target.rootURL.appendingPathComponent(finding.file)
             guard FileManager.default.fileExists(atPath: url.path) else {
                 NSSound.beep()
                 return
             }
             editor.open(url, line: line)
         } else if let revision = result.revision {
-            diffOpener.showCommitFile(
+            diffOpener(for: aiReview.target).showCommitFile(
                 hash: revision,
                 parent: revision + "^",
                 file: ChangedFile(path: finding.file, origPath: nil, kind: .modified),
@@ -530,7 +546,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         guard let window, let result = aiReview.result, result.findings.indices.contains(index) else { return }
         let finding = result.findings[index]
         guard let suggestion = finding.suggestion, aiReview.isWorkingTreeResult(for: finding.file) else { return }
-        let url = model.rootURL.appendingPathComponent(finding.file)
+        let url = aiReview.target.rootURL.appendingPathComponent(finding.file)
         guard let current = editor.text(of: url) ?? (try? String(contentsOf: url, encoding: .utf8)) else {
             NSSound.beep()
             return
@@ -632,6 +648,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     @objc func pushChanges(_ sender: Any?) { workspaceOperations.pushAll() }
     @objc func updateProject(_ sender: Any?) { workspaceOperations.updateAll() }
     @objc func fetchChanges(_ sender: Any?) { workspaceOperations.fetchAll() }
+
+    /// Git > 管理仓库：查看、加入、移除本项目中的仓库。
+    @objc func manageRepositories(_ sender: Any?) {
+        RepositoriesDialog(workspace: workspace).begin(for: window)
+    }
 
     /// 把选择的目录作为仓库加入本项目（Git > 加入仓库）。
     @objc func addRepository(_ sender: Any?) {

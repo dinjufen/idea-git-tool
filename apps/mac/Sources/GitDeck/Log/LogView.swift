@@ -8,6 +8,26 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
     weak var operations: GitOperations?
     /// 打开历史提交中某个文件的 Diff：提交哈希、第一个父提交、文件。
     var onShowCommitDiff: ((String, String?, ChangedFile) -> Void)?
+    /// 多仓库：打开某个仓库中提交的文件 Diff（未设置时使用 `onShowCommitDiff`）。
+    var onShowRepositoryCommitDiff: ((ProjectModel, String, String?, ChangedFile) -> Void)?
+    /// 多仓库：取得某个仓库的操作对象（右键菜单作用于提交所在的仓库）。
+    var operationsFor: ((ProjectModel) -> GitOperations)?
+
+    /// 多仓库项目：Log 可以显示全部仓库（按时间合并、行首色条标识仓库）或只显示其中一个。
+    var workspace: Workspace? {
+        didSet {
+            if let workspaceObserver { oldValue?.removeObserver(workspaceObserver) }
+            workspaceObserver = workspace?.observe { [weak self] in self?.workspaceChanged() }
+            workspaceChanged()
+        }
+    }
+
+    private var workspaceObserver: UUID?
+    private let repositoryPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    /// 显示全部仓库的提交。
+    private var showsAll = false
+    /// 与 `commits` 一一对应的所属仓库。
+    private var owners: [ProjectModel] = []
     var onShowHistory: ((String) -> Void)? {
         didSet { details.onShowHistory = onShowHistory }
     }
@@ -27,7 +47,8 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
 
     private static let pageSize: UInt32 = 2000
 
-    private let model: ProjectModel
+    /// 当前显示的仓库（显示全部仓库时为主仓库，用于分支筛选等）。
+    private var model: ProjectModel
     private let search = NSSearchField()
     private let branchPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let userPopup = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -56,10 +77,16 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
         buildLayout()
         details.onOpenFile = { [weak self] path in
             guard let self else { return }
-            self.onOpenFile?(self.model.rootURL.appendingPathComponent(path))
+            self.onOpenFile?(self.selectedOwner.rootURL.appendingPathComponent(path))
         }
         details.onShowDiff = { [weak self] commit, file in
-            self?.onShowCommitDiff?(commit.hash, commit.parents.first, file)
+            guard let self else { return }
+            let owner = self.selectedOwner
+            if let open = self.onShowRepositoryCommitDiff, owner !== self.workspace?.primary {
+                open(owner, commit.hash, commit.parents.first, file)
+            } else {
+                self.onShowCommitDiff?(commit.hash, commit.parents.first, file)
+            }
         }
         observer = model.observe { [weak self] in self?.modelChanged() }
         modelChanged()
@@ -93,7 +120,13 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
         refresh.target = self
         refresh.action = #selector(refreshClicked)
 
-        let filterBar = NSStackView(views: [search, branchPopup, userPopup, datePopup, refresh, NSView(), statusLabel])
+        repositoryPopup.bezelStyle = .inline
+        repositoryPopup.controlSize = .small
+        repositoryPopup.font = Theme.smallFont
+        repositoryPopup.target = self
+        repositoryPopup.action = #selector(repositoryChanged)
+        repositoryPopup.isHidden = true
+        let filterBar = NSStackView(views: [search, repositoryPopup, branchPopup, userPopup, datePopup, refresh, NSView(), statusLabel])
         filterBar.spacing = 6
         filterBar.translatesAutoresizingMaskIntoConstraints = false
 
@@ -252,8 +285,77 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
     }
 
     @objc private func refreshClicked() {
-        model.refresh()
+        if let workspace { workspace.refreshAll() } else { model.refresh() }
         reload()
+    }
+
+    // MARK: - 仓库
+
+    /// 仓库列表变化时重建仓库筛选；任一仓库的引用变化时重新加载。
+    private func workspaceChanged() {
+        guard let workspace else { return }
+        repositoryPopup.isHidden = !workspace.isMultiRoot
+        if workspace.isMultiRoot {
+            let titles = [tr("log.filter.repo.all")] + workspace.models.map { workspace.displayName(of: $0) }
+            if repositoryPopup.itemTitles != titles {
+                repositoryPopup.removeAllItems()
+                repositoryPopup.addItem(withTitle: titles[0])
+                repositoryPopup.menu?.addItem(.separator())
+                for repository in workspace.models {
+                    let item = NSMenuItem(title: workspace.displayName(of: repository), action: nil, keyEquivalent: "")
+                    item.image = RepositoryBranchesPopover.chip(workspace.color(for: repository))
+                    repositoryPopup.menu?.addItem(item)
+                }
+                selectRepositoryItem()
+            }
+        } else if showsAll {
+            showsAll = false
+            model = workspace.primary
+        }
+        modelChanged()
+    }
+
+    private func selectRepositoryItem() {
+        guard let workspace else { return }
+        if showsAll {
+            repositoryPopup.selectItem(at: 0)
+        } else if let index = workspace.models.firstIndex(where: { $0 === model }) {
+            repositoryPopup.selectItem(at: index + 2)
+        }
+    }
+
+    @objc private func repositoryChanged() {
+        guard let workspace else { return }
+        let index = repositoryPopup.indexOfSelectedItem
+        showsAll = index == 0
+        if index >= 2, workspace.models.indices.contains(index - 2) {
+            model = workspace.models[index - 2]
+        } else {
+            model = workspace.primary
+        }
+        lastSignature = nil
+        maxCount = Self.pageSize
+        modelChanged()
+    }
+
+    #if DEBUG
+    func debugShowAll() {
+        repositoryPopup.selectItem(at: 0)
+        repositoryChanged()
+    }
+    #endif
+
+    /// 显示全部仓库（多仓库项目中选择 “所有仓库”）。
+    private var isCombined: Bool { showsAll && (workspace?.isMultiRoot ?? false) }
+
+    /// 某行提交所属的仓库。
+    private func owner(_ row: Int) -> ProjectModel {
+        owners.indices.contains(row) ? owners[row] : model
+    }
+
+    /// 提交所在仓库的操作对象。
+    private func operations(for repository: ProjectModel) -> GitOperations? {
+        operationsFor?(repository) ?? operations
     }
 
     func controlTextDidChange(_ obj: Notification) {
@@ -269,8 +371,9 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
     // MARK: - 加载
 
     private func modelChanged() {
-        guard !model.isRefreshing else { return }
-        let signature = model.refsSignature
+        let repositories = isCombined ? workspace?.models ?? [model] : [model]
+        guard !repositories.contains(where: \.isRefreshing) else { return }
+        let signature = (isCombined ? "all\n" : "") + repositories.map(\.refsSignature).joined(separator: "\u{1e}")
         guard signature != lastSignature else { return }
         lastSignature = signature
         rebuildBranchPopup()
@@ -282,19 +385,29 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
         let generation = loadGeneration
         let filter = currentFilter
         let filtered = isFiltered
-        let repository = model.repository
+        let sources: [ProjectModel] = isCombined ? workspace?.models ?? [model] : [model]
+        let repositories = sources.map(\.repository)
+        let combined = isCombined
         isLoading = true
         statusLabel.stringValue = tr("log.loading")
         Task {
-            let result = await Task.detached(priority: .userInitiated) {
-                Result { try repository.log(filter: filter) }
+            let result = await Task.detached(priority: .userInitiated) { () -> Result<[(Int, LogPage)], any Error> in
+                if !combined {
+                    return Result { [(0, try repositories[0].log(filter: filter))] }
+                }
+                // 合并显示：分支筛选只对含有该分支的仓库生效，其他仓库跳过。
+                let pages = repositories.enumerated().compactMap { index, repository in
+                    (try? repository.log(filter: filter)).map { (index, $0) }
+                }
+                return .success(pages)
             }.value
             guard generation == self.loadGeneration else { return }
             self.isLoading = false
-            switch result {
+            switch result.map({ pages in self.merge(pages, sources: sources, limit: Int(filter.maxCount)) }) {
             case let .success(page):
                 let selectedHash = self.selectedCommit?.hash
                 self.commits = page.commits
+                self.owners = page.owners
                 self.hasMore = page.hasMore
                 if !filtered { self.collectAuthors() }
                 self.table.reloadData()
@@ -313,10 +426,30 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
                     : tr("log.count", "\(page.commits.count)")
             case let .failure(error):
                 self.commits = []
+                self.owners = []
                 self.table.reloadData()
                 self.statusLabel.stringValue = errorMessage(error)
             }
         }
+    }
+
+    /// 合并各仓库的日志：按提交时间从新到旧排列，提交图改为单个节点（不同仓库的分支线无法画在同一张图中）。
+    private func merge(_ pages: [(Int, LogPage)], sources: [ProjectModel], limit: Int) -> (commits: [LogCommit], owners: [ProjectModel], hasMore: Bool) {
+        guard isCombined else {
+            let page = pages.first?.1
+            return (page?.commits ?? [], Array(repeating: model, count: page?.commits.count ?? 0), page?.hasMore ?? false)
+        }
+        var rows: [(LogCommit, ProjectModel)] = []
+        for (index, page) in pages {
+            for var commit in page.commits {
+                commit.graph = GraphRow(lane: 0, color: 0, edges: [], width: 1)
+                rows.append((commit, sources[index]))
+            }
+        }
+        rows.sort { $0.0.committerTime > $1.0.committerTime }
+        let hasMore = pages.contains { $0.1.hasMore } || rows.count > limit
+        rows = Array(rows.prefix(limit))
+        return (rows.map(\.0), rows.map(\.1), hasMore)
     }
 
     /// 从未筛选的结果中收集作者，按提交数排序，供 User 筛选使用。
@@ -338,6 +471,9 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
         commits.indices.contains(table.selectedRow) ? commits[table.selectedRow] : nil
     }
 
+    /// 选中提交所在的仓库。
+    private var selectedOwner: ProjectModel { owner(table.selectedRow) }
+
     private func loadDetails() {
         detailsGeneration += 1
         let generation = detailsGeneration
@@ -345,7 +481,7 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
             details.show(nil)
             return
         }
-        let repository = model.repository
+        let repository = selectedOwner.repository
         Task {
             let result = await Task.detached { Result { try repository.commitDetails(hash: hash) } }.value
             guard generation == self.detailsGeneration, case let .success(commit) = result else { return }
@@ -387,9 +523,25 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
         return targets.count == 1 ? targets[0] : nil
     }
 
-    /// 提交是否在当前分支上（只有这些提交可以改写信息、删除或从此处交互式变基）。
+    /// 右键菜单作用的提交所在的仓库；跨多个仓库时为 `nil`（只允许复制哈希）。
+    private var targetOwner: ProjectModel? {
+        let clicked = table.clickedRow
+        let rows = clicked >= 0 && !table.selectedRowIndexes.contains(clicked)
+            ? IndexSet(integer: clicked)
+            : table.selectedRowIndexes
+        let repositories = rows.map(owner)
+        guard let first = repositories.first else { return model }
+        return repositories.allSatisfy { $0 === first } ? first : nil
+    }
+
+    /// 目标提交所在仓库的操作对象。
+    private var targetOperations: GitOperations? {
+        targetOwner.flatMap(operations(for:))
+    }
+
+    /// 提交是否在所在仓库的当前分支上（只有这些提交可以改写信息、删除或从此处交互式变基）。
     private func isOnCurrentBranch(_ commit: LogCommit) -> Bool {
-        model.repository.isAncestor(ancestor: commit.hash, descendant: "HEAD")
+        (targetOwner ?? model).repository.isAncestor(ancestor: commit.hash, descendant: "HEAD")
     }
 
     @objc private func copyHash() {
@@ -401,82 +553,85 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
 
     @objc private func checkoutRevision() {
         guard let commit = targetCommit else { return }
-        operations?.checkout(.revision(commit.hash))
+        targetOperations?.checkout(.revision(commit.hash))
     }
 
     @objc private func newBranchHere() {
         guard let commit = targetCommit else { return }
-        operations?.newBranch(from: commit.hash)
+        targetOperations?.newBranch(from: commit.hash)
     }
 
     @objc private func newTagHere() {
         guard let commit = targetCommit else { return }
-        operations?.newTag(at: commit.hash)
+        targetOperations?.newTag(at: commit.hash)
     }
 
     /// 补丁按从旧到新排列。
     @objc private func createPatchSelected() {
-        operations?.createPatch(commits: targetCommits.reversed().map(\.hash))
+        targetOperations?.createPatch(commits: targetCommits.reversed().map(\.hash))
     }
 
     /// AI 评审选中的提交（按从旧到新传入）。
     @objc private func aiReviewSelected() {
         let targets = targetCommits
         guard !targets.isEmpty else { return }
-        operations?.aiReview?.reviewCommits(targets.reversed().map(\.hash), subject: targets.count == 1 ? targets[0].subject : nil)
+        targetOperations?.aiReview?.reviewCommits(targets.reversed().map(\.hash), subject: targets.count == 1 ? targets[0].subject : nil, in: targetOwner)
     }
 
     /// 拣选按从旧到新应用。
     @objc private func cherryPickSelected() {
-        operations?.cherryPick(targetCommits.reversed().map(\.hash))
+        targetOperations?.cherryPick(targetCommits.reversed().map(\.hash))
     }
 
     /// 还原按从新到旧进行，与 IDEA 一致。
     @objc private func revertSelected() {
-        operations?.revert(targetCommits.map(\.hash))
+        targetOperations?.revert(targetCommits.map(\.hash))
     }
 
     @objc private func resetHere() {
         guard let commit = targetCommit else { return }
-        operations?.resetDialog(to: commit.hash, subject: commit.subject)
+        targetOperations?.resetDialog(to: commit.hash, subject: commit.subject)
     }
 
     @objc private func undoCommit() {
         guard let commit = targetCommit else { return }
-        operations?.undoCommit(commit.hash)
+        targetOperations?.undoCommit(commit.hash)
     }
 
     @objc private func editMessage() {
-        guard let commit = targetCommit else { return }
-        let repository = model.repository
+        guard let commit = targetCommit, let owner = targetOwner else { return }
+        let repository = owner.repository
+        let ops = operations(for: owner)
         Task {
             let message = await Task.detached { (try? repository.commitDetails(hash: commit.hash))?.message }.value
-            operations?.editMessage(commit.hash, current: message ?? commit.subject)
+            ops?.editMessage(commit.hash, current: message ?? commit.subject)
         }
     }
 
     @objc private func dropSelected() {
-        operations?.dropCommits(targetCommits.map(\.hash))
+        targetOperations?.dropCommits(targetCommits.map(\.hash))
     }
 
     @objc private func interactiveRebaseHere() {
         guard let commit = targetCommit else { return }
-        operations?.interactiveRebase(from: commit.hash)
+        targetOperations?.interactiveRebase(from: commit.hash)
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         let targets = targetCommits
-        guard operations?.isRunning != true || menuItem.action == #selector(copyHash) else { return false }
+        if menuItem.action == #selector(copyHash) { return !targets.isEmpty }
+        // 选中的提交跨多个仓库时只能复制哈希。
+        guard let ops = targetOperations, !ops.isRunning else { return false }
         switch menuItem.action {
         case #selector(copyHash), #selector(cherryPickSelected), #selector(revertSelected), #selector(createPatchSelected):
             return !targets.isEmpty
         case #selector(aiReviewSelected):
-            return !targets.isEmpty && operations?.aiReview?.isRunning == false
+            return !targets.isEmpty && ops.aiReview?.isRunning == false
         case #selector(checkoutRevision), #selector(newBranchHere), #selector(newTagHere), #selector(resetHere):
             return targets.count == 1
         case #selector(undoCommit):
             // 与 IDEA 一致：只能撤销当前分支的最新提交。
-            return targetCommit?.hash == model.status.branch.oid
+            return targetCommit?.hash == (targetOwner ?? model).status.branch.oid
         case #selector(editMessage), #selector(interactiveRebaseHere):
             return targetCommit.map(isOnCurrentBranch) ?? false
         case #selector(dropSelected):
@@ -505,8 +660,14 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
                 v.identifier = id
                 return v
             }()
-            cell.isHead = commit.hash == model.status.branch.oid
+            let repository = owner(row)
+            cell.isHead = commit.hash == repository.status.branch.oid
+            cell.stripeColor = isCombined ? workspace?.color(for: repository) : nil
             cell.commit = commit
+            if isCombined, let workspace {
+                cell.toolTip = "\(workspace.displayName(of: repository)) — \(commit.subject)"
+                return cell
+            }
             cell.toolTip = commit.subject
             return cell
         case .author:

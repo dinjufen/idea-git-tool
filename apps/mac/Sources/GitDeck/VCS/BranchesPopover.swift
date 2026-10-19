@@ -192,7 +192,7 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
         add(tr("branches.menu.compare", current), enabled: !isCurrent) { ops.compareWithCurrent(name) }
         add(tr("branches.menu.showDiff")) { ops.showDiffWithWorkingTree(name) }
         add(tr("branches.menu.aiReview", current, name), enabled: !isCurrent && ops.aiReview != nil) {
-            ops.aiReview?.reviewBranch(against: name)
+            ops.aiReview?.reviewBranch(against: name, in: ops.model)
         }
         menu.addItem(.separator())
         add(tr("branches.menu.rebaseOnto", current, name), enabled: !isCurrent) { ops.rebase(onto: name) }

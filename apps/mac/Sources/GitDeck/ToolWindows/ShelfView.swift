@@ -4,7 +4,7 @@ import GitDeckCore
 /// 提交工具窗口的 “搁置” 标签（IDEA 的 Shelf）：搁置的改动列表，展开为文件；可取回全部或选中的文件。
 final class ShelfView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// 双击文件查看搁置的改动。
-    var onShowFileDiff: ((ShelfEntry, String) -> Void)?
+    var onShowFileDiff: ((ProjectModel, ShelfEntry, String) -> Void)?
     final class EntryItem {
         let entry: ShelfEntry
         private(set) var files: [FileItem] = []
@@ -23,8 +23,10 @@ final class ShelfView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
-    private let model: ProjectModel
-    private let operations: GitOperations
+    private var model: ProjectModel
+    private var operations: GitOperations
+    /// 多仓库项目中选择显示哪个仓库。
+    private let repositoryPopup = RepositoryPopup()
     private let outline = NSOutlineView()
     private let emptyLabel = NSTextField.label(tr("shelf.empty"), color: Theme.secondaryText)
     private var items: [EntryItem] = []
@@ -39,6 +41,21 @@ final class ShelfView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         buildLayout()
         observer = model.observe { [weak self] in
             guard let self, !self.model.isRefreshing, !self.isHidden else { return }
+            self.reload()
+        }
+    }
+
+    /// 多仓库项目：在工具栏显示仓库选择，切换后显示所选仓库的内容。
+    func attach(workspace: Workspace, operationsFor: @escaping (ProjectModel) -> GitOperations) {
+        repositoryPopup.configure(workspace: workspace, selected: model) { [weak self] repository in
+            guard let self else { return }
+            if let observer = self.observer { self.model.removeObserver(observer) }
+            self.model = repository
+            self.operations = operationsFor(repository)
+            self.observer = repository.observe { [weak self] in
+                guard let self, !self.model.isRefreshing, !self.isHidden else { return }
+                self.reload()
+            }
             self.reload()
         }
     }
@@ -62,6 +79,7 @@ final class ShelfView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             button("arrow.clockwise", tr("git.action.refresh"), #selector(reload), needsSelection: false),
             button("tray.and.arrow.up", tr("shelf.action.unshelve"), #selector(unshelveSelected)),
             button("trash", tr("shelf.action.delete"), #selector(deleteSelected)),
+            repositoryPopup,
         ])
         toolbar.spacing = 0
         toolbar.translatesAutoresizingMaskIntoConstraints = false
@@ -139,7 +157,7 @@ final class ShelfView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
         // `-debug.shelfDiff YES`：同时打开第一个文件的 Diff。
         if UserDefaults.standard.bool(forKey: "debug.shelfDiff"), let file = first.files.first {
-            onShowFileDiff?(first.entry, file.file.path)
+            onShowFileDiff?(model, first.entry, file.file.path)
         }
     }
     #endif
@@ -179,7 +197,7 @@ final class ShelfView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     @objc private func doubleClicked() {
         switch outline.item(atRow: outline.clickedRow) {
         case let file as FileItem:
-            onShowFileDiff?(file.parent.entry, file.file.path)
+            onShowFileDiff?(model, file.parent.entry, file.file.path)
         case let entry as EntryItem:
             outline.isItemExpanded(entry) ? outline.collapseItem(entry) : outline.expandItem(entry)
         default:
