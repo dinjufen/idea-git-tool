@@ -2534,6 +2534,23 @@
         }
       }
     },
+    "commit.done.repositories": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ files committed to %2$@ repositories: %3$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已向 %2$@ 个仓库提交 %1$@ 个文件：%3$@"
+          }
+        }
+      }
+    },
     "commit.failed": {
       "extractionState": "manual",
       "localizations": {

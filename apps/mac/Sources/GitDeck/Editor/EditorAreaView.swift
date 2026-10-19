@@ -18,8 +18,10 @@ final class EditorAreaView: NSView {
     @MainActor
     final class Document: EditorTabContent {
         let url: URL
-        /// 相对仓库根目录的路径；仓库外的文件为 `nil`（不显示变更标记）。
-        let relativePath: String?
+        /// 相对所属仓库根目录的路径；仓库外的文件为 `nil`（不显示变更标记）。
+        var relativePath: String?
+        /// 文件所属的仓库（多仓库项目中可能是嵌套仓库）。
+        var owner: ProjectModel?
         let editor: CodeEditorView
         var isModified = false
         /// blame 对应的文件内容；编辑后据此把注释映射到当前行。
@@ -31,8 +33,9 @@ final class EditorAreaView: NSView {
         var base: String?
         var lineStatusTask: Task<Void, Never>?
 
-        init(url: URL, relativePath: String?, text: String) {
+        init(url: URL, owner: ProjectModel?, relativePath: String?, text: String) {
             self.url = url
+            self.owner = owner
             self.relativePath = relativePath
             editor = CodeEditorView(text: text, language: languageForPath(path: url.lastPathComponent))
         }
@@ -69,7 +72,19 @@ final class EditorAreaView: NSView {
     /// 在 Git 日志中定位某个提交（点击 Annotate 注释时）。
     var onShowCommit: ((String) -> Void)?
     /// 显示某个文件（相对路径）的历史。
-    var onShowHistory: ((String) -> Void)?
+    var onShowHistory: ((ProjectModel, String) -> Void)?
+
+    /// 多仓库项目：按文件所在的仓库读取 HEAD 版本、blame 与历史。
+    var workspace: Workspace? {
+        didSet {
+            if let workspaceObserver { oldValue?.removeObserver(workspaceObserver) }
+            workspaceObserver = workspace?.observe { [weak self] in self?.workspaceChanged() }
+        }
+    }
+
+    private var workspaceObserver: UUID?
+    /// 各仓库上次的 HEAD，变化时重新读取其中文件的基准版本。
+    private var lastHeads: [ObjectIdentifier: String] = [:]
     /// 点击编辑器中的 AI 评审标记（参数为发现的下标）。
     var onReviewMarkerClick: ((Int) -> Void)?
 
@@ -163,7 +178,7 @@ final class EditorAreaView: NSView {
 
     private func loadBlame(_ doc: Document) {
         guard let path = doc.relativePath else { return }
-        let repository = model.repository
+        let repository = (doc.owner ?? model).repository
         let fileURL = doc.url
         Task {
             let result = await Task.detached {
@@ -197,8 +212,8 @@ final class EditorAreaView: NSView {
 
         let history = NSMenuItem(title: tr("git.action.showHistory"), action: #selector(MenuAction.invoke), keyEquivalent: "")
         let historyAction = MenuAction { [weak self, weak doc] in
-            guard let path = doc?.relativePath else { return }
-            self?.onShowHistory?(path)
+            guard let self, let doc, let path = doc.relativePath else { return }
+            self.onShowHistory?(doc.owner ?? self.model, path)
         }
         history.target = historyAction
         history.representedObject = historyAction
@@ -249,7 +264,8 @@ final class EditorAreaView: NSView {
             NSSound.beep()
             return
         }
-        let document = Document(url: url, relativePath: relativePath(of: url), text: text)
+        let (owner, relative) = location(of: url)
+        let document = Document(url: url, owner: owner, relativePath: relative, text: text)
         document.editor.onTextChange = { [weak self, weak document] in
             guard let self, let document else { return }
             if !document.isModified, !document.isReloading {
@@ -320,7 +336,8 @@ final class EditorAreaView: NSView {
     }
 
     private func updateReviewMarkers(_ document: Document) {
-        guard let path = document.relativePath, let aiReview else {
+        // AI 评审结果针对主仓库。
+        guard let path = document.relativePath, let aiReview, document.owner == nil || document.owner === model else {
             document.editor.reviewMarkers = []
             return
         }
@@ -345,17 +362,52 @@ final class EditorAreaView: NSView {
 
     // MARK: - 变更标记（line status）
 
-    private func relativePath(of url: URL) -> String? {
-        let root = model.rootURL.standardizedFileURL.path
+    /// 文件所属的仓库与相对该仓库根目录的路径；不在任何仓库中时路径为 `nil`。
+    private func location(of url: URL) -> (ProjectModel, String?) {
+        let owner = workspace?.model(containing: url) ?? model
+        let root = owner.rootURL.standardizedFileURL.path
         let path = url.standardizedFileURL.path
-        guard path.hasPrefix(root + "/") else { return nil }
-        return String(path.dropFirst(root.count + 1))
+        guard path.hasPrefix(root + "/") else { return (owner, nil) }
+        return (owner, String(path.dropFirst(root.count + 1)))
+    }
+
+    /// 当前文件所属的仓库与相对路径（File History 等使用）。
+    var activeFileLocation: (model: ProjectModel, path: String)? {
+        guard let doc = active as? Document, let path = doc.relativePath else { return nil }
+        return (doc.owner ?? model, path)
+    }
+
+    /// 加入或移除仓库后重新确定文件所属；任一仓库的 HEAD 变化后重新读取其中文件的基准版本。
+    private func workspaceChanged() {
+        guard let workspace, !workspace.isRefreshing else { return }
+        for doc in documents {
+            let (owner, relative) = location(of: doc.url)
+            if owner !== doc.owner || relative != doc.relativePath {
+                doc.owner = owner
+                doc.relativePath = relative
+                loadBase(doc)
+                if doc.editor.annotations != nil { loadBlame(doc) }
+            }
+        }
+        for repository in workspace.models {
+            let key = ObjectIdentifier(repository)
+            let head = repository.status.branch.oid ?? ""
+            guard lastHeads[key] != head else { continue }
+            let firstSeen = lastHeads[key] == nil
+            lastHeads[key] = head
+            guard !firstSeen else { continue }
+            let owned = documents.filter { $0.owner === repository }
+            owned.forEach(loadBase)
+            // 提交、签出后注释可能已过期。
+            owned.filter { $0.editor.annotations != nil }.forEach(loadBlame)
+        }
+        updateReviewMarkers()
     }
 
     /// 读取 HEAD 版本作为对比基准，然后计算变更标记。
     private func loadBase(_ doc: Document) {
         guard let path = doc.relativePath else { return }
-        let repository = model.repository
+        let repository = (doc.owner ?? model).repository
         Task {
             let base = await Task.detached { try? repository.fileAtRevision(revision: "HEAD", path: path) }.value
             doc.base = base ?? nil
@@ -426,6 +478,8 @@ final class EditorAreaView: NSView {
 
     /// 提交、检出等操作改变 HEAD 后，重新读取所有打开文件的基准版本。
     private func modelChanged() {
+        // 多仓库时由 workspaceChanged 统一处理。
+        guard workspace == nil else { return }
         guard !model.isRefreshing, model.status.branch.oid != lastHead else { return }
         lastHead = model.status.branch.oid
         documents.forEach(loadBase)

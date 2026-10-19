@@ -10,7 +10,8 @@ struct DiffOpener {
     var lineSelections: LineSelectionStore?
 
     /// 本地变更：HEAD 与工作区文件比较（Commit 工具窗口中的 Show Diff）。
-    func showLocalChange(_ change: FileChange) {
+    /// `selectionKey` 为部分提交选择使用的键（多仓库项目中带仓库前缀），默认为文件路径。
+    func showLocalChange(_ change: FileChange, selectionKey: String? = nil) {
         let repository = model.repository
         let root = model.rootURL
         let basePath = change.origPath ?? change.path
@@ -22,7 +23,7 @@ struct DiffOpener {
                 return (base ?? nil, text)
             }.value
             editor.openDiff(
-                key: "local:" + change.path,
+                key: "local:" + (selectionKey ?? change.path),
                 title: change.fileName,
                 tooltip: tr("diff.tooltip.local", change.path)
             ) {
@@ -30,7 +31,7 @@ struct DiffOpener {
                     left: DiffSide(title: headTitle, text: base),
                     right: DiffSide(title: tr("diff.title.local"), text: text),
                     path: change.path,
-                    inclusion: change.conflict == nil ? lineSelections.map { DiffInclusion(store: $0, path: change.path) } : nil
+                    inclusion: change.conflict == nil ? lineSelections.map { DiffInclusion(store: $0, path: selectionKey ?? change.path) } : nil
                 )
             }
         }

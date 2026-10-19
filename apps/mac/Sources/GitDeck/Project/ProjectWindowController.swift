@@ -26,6 +26,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     }
     /// 非主仓库的操作对象（按仓库缓存）。
     private var extraOperations: [ObjectIdentifier: GitOperations] = [:]
+    private var extraResolvers: [ObjectIdentifier: ConflictResolver] = [:]
     private var workspaceObserver: UUID?
     private let verticalSplit = NSSplitView()
     private let horizontalSplit = NSSplitView()
@@ -39,7 +40,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     private lazy var conflictResolver = ConflictResolver(model: model)
 
     private lazy var projectToolWindow = ProjectToolWindow(model: model)
-    private lazy var commitToolWindow = CommitToolWindow(model: model)
+    private lazy var commitToolWindow = CommitToolWindow(workspace: workspace)
     private lazy var gitToolWindow = GitToolWindow(model: model)
     private lazy var aiReview = AIReviewController(model: model)
     private lazy var aiToolWindow = AIReviewToolWindow(controller: aiReview)
@@ -188,7 +189,6 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         operations.window = window
         gitToolWindow.operations = operations
         gitToolWindow.attachWorktrees(operations: operations)
-        commitToolWindow.onCreatePatch = { [weak self] paths in self?.operations.createPatch(paths: paths) }
         operations.onProgress = { [weak self] title in
             guard let self else { return }
             self.statusBar.setBusy(title != nil || self.model.isRefreshing)
@@ -206,8 +206,13 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             guard let self else { return }
             self.workspace.ignore(paths: self.workspace.candidates.map(\.path))
         }
-        commitToolWindow.onPushAfterCommit = { [weak self] in self?.operations.push() }
-        commitToolWindow.onRollback = { [weak self] paths in self?.operations.rollback(selected: paths) }
+        commitToolWindow.onPushAfterCommit = { [weak self] in self?.workspaceOperations.pushAll() }
+        commitToolWindow.onRollback = { [weak self] groups in
+            guard let self else { return }
+            // 未选中文件时回滚对话框列出主仓库的全部改动。
+            if groups.isEmpty { return self.operations.rollback(selected: []) }
+            for (repository, paths) in groups { self.operations(for: repository).rollback(selected: paths) }
+        }
         commitToolWindow.lineSelections = lineSelections
         operations.onRevealCommit = { [weak self] hash in
             self?.show(.git)
@@ -216,8 +221,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         operations.onShowRevisionFileDiff = { [weak self] revision, file in self?.diffOpener.showRevisionAgainstWorkingTree(revision: revision, file: file) }
         conflictResolver.window = window
         operations.onConflicts = { [weak self] in self?.conflictResolver.requestConflicts() }
-        commitToolWindow.onResolveConflict = { [weak self] change in self?.conflictResolver.openMerge(change) }
-        commitToolWindow.onShowConflicts = { [weak self] in self?.conflictResolver.showConflicts() }
+        commitToolWindow.onResolveConflict = { [weak self] repository, change in self?.conflictResolver(for: repository).openMerge(change) }
+        commitToolWindow.onShowConflicts = { [weak self] repository in self?.conflictResolver(for: repository).showConflicts() }
         let stashes = StashesView(model: model, operations: operations)
         #if DEBUG
         debugStashes = stashes
@@ -230,11 +235,32 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         #endif
         shelf.onShowFileDiff = { [weak self] entry, path in self?.diffOpener.showShelfFile(entry, path: path) }
         commitToolWindow.attachShelf(shelf)
-        commitToolWindow.onShelve = { [weak self] paths, name in self?.operations.shelve(paths: paths, defaultName: name) }
-        commitToolWindow.onStashPaths = { [weak self] paths in self?.operations.stashChanges(paths: paths) }
-        let showHistory: (String) -> Void = { [weak self] path in self?.showFileHistory(path) }
-        editor.onShowHistory = showHistory
-        commitToolWindow.onShowHistory = showHistory
+        commitToolWindow.onShelve = { [weak self] groups, name in
+            guard let self else { return }
+            for (repository, paths) in groups { self.operations(for: repository).shelve(paths: paths, defaultName: name) }
+        }
+        commitToolWindow.onStashPaths = { [weak self] groups in
+            guard let self else { return }
+            if groups.isEmpty { return self.operations.stashChanges(paths: []) }
+            for (repository, paths) in groups { self.operations(for: repository).stashChanges(paths: paths) }
+        }
+        commitToolWindow.onCreatePatch = { [weak self] groups in
+            guard let self else { return }
+            if groups.isEmpty { return self.operations.createPatch(paths: []) }
+            for (repository, paths) in groups { self.operations(for: repository).createPatch(paths: paths) }
+        }
+        // Project 树传入相对项目根目录的路径：按所在仓库换算后显示历史。
+        let showHistory: (String) -> Void = { [weak self] path in
+            guard let self else { return }
+            let url = self.model.rootURL.appendingPathComponent(path)
+            let owner = self.workspace.model(containing: url)
+            let root = owner.rootURL.standardizedFileURL.path
+            let full = url.standardizedFileURL.path
+            let relative = full.hasPrefix(root + "/") ? String(full.dropFirst(root.count + 1)) : path
+            self.showFileHistory(relative, in: owner)
+        }
+        editor.onShowHistory = { [weak self] repository, path in self?.showFileHistory(path, in: repository) }
+        commitToolWindow.onShowHistory = { [weak self] repository, path in self?.showFileHistory(path, in: repository) }
         projectToolWindow.onShowHistory = showHistory
         gitToolWindow.onShowHistory = showHistory
         editor.onShowCommit = { [weak self] hash in
@@ -246,7 +272,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         projectToolWindow.onOpenFile = openFile
         commitToolWindow.onOpenFile = openFile
         gitToolWindow.onOpenFile = openFile
-        commitToolWindow.onShowDiff = { [weak self] change in self?.diffOpener.showLocalChange(change) }
+        commitToolWindow.onShowDiff = { [weak self] repository, change, key in
+            guard let self else { return }
+            self.diffOpener(for: repository).showLocalChange(change, selectionKey: key)
+        }
         gitToolWindow.onShowCommitDiff = { [weak self] hash, parent, file in
             self?.diffOpener.showCommitFile(hash: hash, parent: parent, file: file)
         }
@@ -629,6 +658,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         ops.onProgress = operations.onProgress
         ops.onRevealCommit = operations.onRevealCommit
         ops.peers = { [weak self] in self?.allOperations ?? [] }
+        ops.onConflicts = { [weak self, weak repositoryModel] in
+            guard let self, let repositoryModel else { return }
+            self.conflictResolver(for: repositoryModel).requestConflicts()
+        }
         extraOperations[key] = ops
         return ops
     }
@@ -637,6 +670,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
 
     /// 仓库列表或任一仓库状态变化：更新分支组件与提示条。
     private func workspaceChanged() {
+        if editor.workspace == nil { editor.workspace = workspace }
         toolbar.vcsWidget.title = workspace.branchWidgetTitle
         statusBar.setBusy(workspace.isRefreshing || operations.isRunning || workspaceOperations.isRunning)
         banner.show(workspace.candidates)
@@ -684,14 +718,38 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     }
 
     @objc func showHistoryForCurrentFile(_ sender: Any?) {
-        guard let path = editor.activeRelativePath else { return }
-        showFileHistory(path)
+        guard let location = editor.activeFileLocation else { return }
+        showFileHistory(location.path, in: location.model)
     }
 
-    /// 在底部 Git 工具窗口中打开文件历史标签页。
-    func showFileHistory(_ path: String) {
+    /// 在底部 Git 工具窗口中打开文件历史标签页；`repository` 为文件所属的仓库（默认为主仓库）。
+    func showFileHistory(_ path: String, in repository: ProjectModel? = nil) {
         show(.git)
-        gitToolWindow.showHistory(path: path)
+        let owner = repository ?? model
+        if owner === model {
+            gitToolWindow.showHistory(path: path)
+        } else {
+            let opener = diffOpener(for: owner)
+            gitToolWindow.showHistory(path: path, in: owner) { hash, parent, file in
+                opener.showCommitFile(hash: hash, parent: parent, file: file)
+            }
+        }
+    }
+
+    /// 某个仓库的 Diff 打开器（读取该仓库中的版本）。
+    private func diffOpener(for repository: ProjectModel) -> DiffOpener {
+        repository === model ? diffOpener : DiffOpener(model: repository, editor: editor, lineSelections: lineSelections)
+    }
+
+    /// 某个仓库的冲突处理（Conflicts 对话框与三栏合并）。
+    private func conflictResolver(for repository: ProjectModel) -> ConflictResolver {
+        if repository === model { return conflictResolver }
+        let key = ObjectIdentifier(repository)
+        if let existing = extraResolvers[key] { return existing }
+        let resolver = ConflictResolver(model: repository)
+        resolver.window = window
+        extraResolvers[key] = resolver
+        return resolver
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {

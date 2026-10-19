@@ -130,10 +130,12 @@ final class GitToolWindow: NSView {
     }
 
     /// 打开（或替换）文件历史标签页。
-    func showHistory(path: String) {
+    /// 显示文件历史；`repository` 为文件所属的仓库（多仓库项目中可能不是主仓库），
+    /// 此时 `onOpenDiff` 打开该仓库中的提交 Diff。
+    func showHistory(path: String, in repository: ProjectModel? = nil, onOpenDiff: ((String, String?, ChangedFile) -> Void)? = nil) {
         historyView?.removeFromSuperview()
-        let view = FileHistoryView(model: model, path: path)
-        view.onOpenDiff = onShowCommitDiff
+        let view = FileHistoryView(model: repository ?? model, path: path)
+        view.onOpenDiff = onOpenDiff ?? onShowCommitDiff
         view.translatesAutoresizingMaskIntoConstraints = false
         addSubview(view)
         NSLayoutConstraint.activate([

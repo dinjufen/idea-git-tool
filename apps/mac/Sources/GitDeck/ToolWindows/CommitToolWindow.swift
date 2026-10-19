@@ -5,24 +5,31 @@ import GitDeckCore
 private let DEFAULT_CHANGELIST = defaultChangelistName()
 
 /// Commit 工具窗口（IDEA 非模态提交界面）：变更树 + 提交信息 + 提交按钮。
+///
+/// 多仓库项目中显示所有仓库的改动：每个 Changelist 下按仓库分组，提交时每个仓库各提交一次（同一提交信息）。
+/// 条目以 “相对项目根目录的路径” 作为键（嵌套仓库中的文件带仓库路径前缀），在窗口内唯一。
 final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
+    /// 按仓库分组的文件（仓库内的相对路径）。
+    typealias RepositoryPaths = [(model: ProjectModel, paths: [String])]
+
     var onOpenFile: ((URL) -> Void)?
-    var onShowDiff: ((FileChange) -> Void)?
+    /// 打开本地改动的 Diff；第三个参数为部分提交选择使用的键。
+    var onShowDiff: ((ProjectModel, FileChange, String) -> Void)?
     /// “提交并推送” 成功提交后打开 Push 对话框。
     var onPushAfterCommit: (() -> Void)?
     /// 打开冲突文件的三栏合并。
-    var onResolveConflict: ((FileChange) -> Void)?
-    /// 打开 Conflicts 对话框。
-    var onShowConflicts: (() -> Void)?
-    var onShowHistory: ((String) -> Void)?
+    var onResolveConflict: ((ProjectModel, FileChange) -> Void)?
+    /// 打开某个仓库的 Conflicts 对话框。
+    var onShowConflicts: ((ProjectModel) -> Void)?
+    var onShowHistory: ((ProjectModel, String) -> Void)?
     /// 储藏选中的文件（打开 Stash Changes 对话框）。
-    var onStashPaths: (([String]) -> Void)?
+    var onStashPaths: ((RepositoryPaths) -> Void)?
     /// 把选中的改动保存为补丁。
-    var onCreatePatch: (([String]) -> Void)?
-    /// Rollback：参数为选中的文件（为空时由对话框全选）。
-    var onRollback: (([String]) -> Void)?
-    /// 搁置：参数为文件与默认名称。
-    var onShelve: (([String], String) -> Void)?
+    var onCreatePatch: ((RepositoryPaths) -> Void)?
+    /// Rollback：选中的文件（为空时由对话框全选主仓库的改动）。
+    var onRollback: ((RepositoryPaths) -> Void)?
+    /// 搁置：文件与默认名称。
+    var onShelve: ((RepositoryPaths, String) -> Void)?
     /// AI 评审：评审勾选的改动、生成提交信息、提交前检查。
     weak var aiReview: AIReviewController?
 
@@ -44,18 +51,27 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     private var commitContent: [NSView] = []
     private var stashesView: StashesView?
     private var shelfView: ShelfView?
-    /// 当前的 Changelist（从核心加载并与工作区同步）。
-    private var changelists: Changelists?
+    /// 各仓库的 Changelist（从核心加载并与工作区同步）；多仓库时以主仓库的列表为准统一显示。
+    private var changelistsByRepo: [ObjectIdentifier: Changelists] = [:]
     private var changelistTask: Task<Void, Never>?
     /// 最近一次从 Changelist 说明自动填入的提交信息。
     private var autoMessage: String?
     private var contentTop: NSLayoutYAxisAnchor?
 
+    /// 一个改动：所属仓库、该仓库中的变更，以及在窗口内唯一的键。
+    struct Entry {
+        let model: ProjectModel
+        let change: FileChange
+        let key: String
+    }
+
     /// 变更树的分组节点，顺序与 IDEA 一致。
     final class Group {
         enum Kind { case conflicts, changes, unversioned }
         let kind: Kind
-        var files: [FileChange] = []
+        var files: [Entry] = []
+        /// 多仓库时按仓库分出的子分组。
+        var repositories: [RepositoryGroup] = []
         /// Changes 分组对应的 Changelist（每个列表一个分组）。
         var changelist: Changelist?
         var isActive = false
@@ -74,13 +90,23 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         }
     }
 
-    /// 文件节点。用类包装以便 NSOutlineView 按引用识别条目。
-    final class FileItem {
-        let change: FileChange
-        init(_ change: FileChange) { self.change = change }
+    /// 分组下按仓库的子分组（多仓库项目）。
+    final class RepositoryGroup {
+        let model: ProjectModel
+        var files: [Entry] = []
+        init(_ model: ProjectModel) { self.model = model }
     }
 
+    /// 文件节点。用类包装以便 NSOutlineView 按引用识别条目。
+    final class FileItem {
+        let entry: Entry
+        var change: FileChange { entry.change }
+        init(_ entry: Entry) { self.entry = entry }
+    }
+
+    /// 主仓库。
     private let model: ProjectModel
+    private let workspace: Workspace
     private let outline = NSOutlineView()
     private let messageView = PlaceholderTextView()
     private let amendCheckbox = NSButton(checkboxWithTitle: tr("commit.amend"), target: nil, action: nil)
@@ -93,7 +119,9 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
 
     private var groups: [Group] = []
     private var items: [String: FileItem] = [:]
-    /// 勾选要提交的文件路径。
+    /// 当前所有改动（键 → 条目）。
+    private var entries: [String: Entry] = [:]
+    /// 勾选要提交的文件的键。
     private var included: Set<String> = []
     /// 已见过的路径；新出现的已跟踪变更默认勾选，未跟踪文件默认不勾选（与 IDEA 一致）。
     private var known: Set<String> = []
@@ -107,11 +135,12 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     /// 勾选 Amend 时自动填入的上一次提交信息；取消勾选时若未被修改则清空。
     private var amendPrefill: String?
 
-    init(model: ProjectModel) {
-        self.model = model
+    init(workspace: Workspace) {
+        self.workspace = workspace
+        model = workspace.primary
         super.init(frame: .zero)
         buildLayout()
-        observer = model.observe { [weak self] in self?.statusChanged() }
+        observer = workspace.observe { [weak self] in self?.statusChanged() }
         statusChanged()
     }
 
@@ -328,86 +357,151 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
 
     // MARK: - 数据
 
+    /// 条目的键：主仓库中为相对路径，其他仓库为 “仓库路径/文件路径”。
+    private func key(_ model: ProjectModel, _ path: String) -> String {
+        model === self.model ? path : workspace.displayName(of: model) + "/" + path
+    }
+
+    /// 主仓库中属于其他已加入仓库的未跟踪目录（嵌套仓库本身），不作为主仓库的改动显示。
+    private func isNestedRepositoryPath(_ change: FileChange) -> Bool {
+        guard change.isUntracked, workspace.isMultiRoot else { return false }
+        let path = change.path.hasSuffix("/") ? String(change.path.dropLast()) : change.path
+        return workspace.models.dropFirst().contains { other in
+            let relative = workspace.displayName(of: other)
+            return path == relative || relative.hasPrefix(path + "/") || path.hasPrefix(relative + "/")
+        }
+    }
+
     private func statusChanged() {
-        guard !model.isRefreshing else { return }
+        guard !workspace.isRefreshing else { return }
         prefillMergeMessage()
+        var all: [Entry] = []
+        for repository in workspace.models {
+            for change in repository.status.changes where !change.isIgnored {
+                if repository === model, isNestedRepositoryPath(change) { continue }
+                all.append(Entry(model: repository, change: change, key: key(repository, change.path)))
+            }
+        }
+        entries = Dictionary(all.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
         // 与 IDEA 一致：新出现的已跟踪改动只在活动 Changelist 中默认勾选。
-        let current = Set(model.status.changes.map(\.path))
-        let tracked = model.status.changes.filter { !$0.isIgnored && !$0.isUntracked && $0.conflict == nil }
-        let newPaths = Set(tracked.map(\.path)).subtracting(known)
-        let inactive = Set((changelists?.lists ?? []).filter { $0.name != changelists?.active }.flatMap(\.paths))
-        included.formUnion(newPaths.subtracting(inactive))
+        let current = Set(entries.keys)
+        let newKeys = Set(all.filter { !$0.change.isUntracked && $0.change.conflict == nil }.map(\.key)).subtracting(known)
+        let inactive = Set(all.filter { changelistName(of: $0) != activeChangelist }.map(\.key))
+        included.formUnion(newKeys.subtracting(inactive))
         included.formIntersection(current)
         known = current
-        items = Dictionary(model.status.changes.map { ($0.path, FileItem($0)) }, uniquingKeysWith: { a, _ in a })
+        // 复用未变化的节点，使 NSOutlineView 保持选中状态。
+        items = Dictionary(all.map { entry in
+            (entry.key, items[entry.key].flatMap { $0.change == entry.change && $0.entry.model === entry.model ? $0 : nil } ?? FileItem(entry))
+        }, uniquingKeysWith: { a, _ in a })
         rebuildGroups()
         loadChangelists()
     }
 
-    /// 按 Changelist 分组：冲突、各 Changelist（活动列表中的新改动）、未跟踪文件。
+    // MARK: - Changelist（每个仓库各自保存，界面上统一显示）
+
+    /// 统一显示的 Changelist：主仓库的列表顺序在前，其他仓库独有的列表追加在后。
+    private var displayedChangelists: [Changelist] {
+        var lists = changelistsByRepo[ObjectIdentifier(model)]?.lists ?? []
+        for repository in workspace.models.dropFirst() {
+            for list in changelistsByRepo[ObjectIdentifier(repository)]?.lists ?? [] where !lists.contains(where: { $0.name == list.name }) {
+                lists.append(list)
+            }
+        }
+        return lists.isEmpty ? [Changelist(name: DEFAULT_CHANGELIST, comment: "", paths: [])] : lists
+    }
+
+    private var activeChangelist: String {
+        changelistsByRepo[ObjectIdentifier(model)]?.active ?? DEFAULT_CHANGELIST
+    }
+
+    /// 条目所在的 Changelist（未记录时为该仓库的活动列表）。
+    private func changelistName(of entry: Entry) -> String {
+        guard let state = changelistsByRepo[ObjectIdentifier(entry.model)] else { return activeChangelist }
+        return state.lists.first { $0.paths.contains(entry.change.path) }?.name ?? state.active
+    }
+
+    /// 按 Changelist 分组：冲突、各 Changelist、未跟踪文件；多仓库时每组下再按仓库分组。
     private func rebuildGroups() {
         let expandedLists = Set(groups.filter { outline.isItemExpanded($0) }.compactMap { $0.changelist?.name })
         let firstBuild = groups.isEmpty
         let conflicts = Group(.conflicts)
         let unversioned = Group(.unversioned)
-        let state = changelists ?? Changelists(active: DEFAULT_CHANGELIST, lists: [Changelist(name: DEFAULT_CHANGELIST, comment: "", paths: [])])
-        let lists = state.lists.map { list -> Group in
+        let lists = displayedChangelists.map { list -> Group in
             let group = Group(.changes, changelist: list)
-            group.isActive = list.name == state.active
+            group.isActive = list.name == activeChangelist
             return group
         }
-        let owner = Dictionary(state.lists.flatMap { list in list.paths.map { ($0, list.name) } }, uniquingKeysWith: { a, _ in a })
-        for change in model.status.changes where !change.isIgnored {
-            if change.conflict != nil {
-                conflicts.files.append(change)
-            } else if change.isUntracked {
-                unversioned.files.append(change)
+        for entry in entries.values {
+            if entry.change.conflict != nil {
+                conflicts.files.append(entry)
+            } else if entry.change.isUntracked {
+                unversioned.files.append(entry)
             } else {
-                let name = owner[change.path] ?? state.active
-                (lists.first { $0.changelist?.name == name } ?? lists.first)?.files.append(change)
+                let name = changelistName(of: entry)
+                (lists.first { $0.changelist?.name == name } ?? lists.first)?.files.append(entry)
             }
         }
-        let sort: (FileChange, FileChange) -> Bool = { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
-        for group in [conflicts, unversioned] + lists { group.files.sort(by: sort) }
+        let order = { (entry: Entry) in self.workspace.models.firstIndex { $0 === entry.model } ?? 0 }
+        for group in [conflicts, unversioned] + lists {
+            group.files.sort { lhs, rhs in
+                order(lhs) != order(rhs) ? order(lhs) < order(rhs)
+                    : lhs.change.path.localizedStandardCompare(rhs.change.path) == .orderedAscending
+            }
+            if workspace.isMultiRoot {
+                group.repositories = workspace.models.compactMap { repository in
+                    let files = group.files.filter { $0.model === repository }
+                    guard !files.isEmpty else { return nil }
+                    let child = RepositoryGroup(repository)
+                    child.files = files
+                    return child
+                }
+            }
+        }
 
         // 冲突与未跟踪分组为空时隐藏；Changelist 分组始终显示。
         groups = ([conflicts] + lists + [unversioned]).filter { $0.kind == .changes || !$0.files.isEmpty }
         outline.reloadData()
         for group in groups where group.kind == .conflicts || (group.kind == .changes && (firstBuild || group.isActive || expandedLists.contains(group.changelist?.name ?? ""))) {
-            outline.expandItem(group)
+            outline.expandItem(group, expandChildren: true)
         }
         applyChangelistComment()
         updateCommitButtons()
     }
 
-    /// 从核心加载 Changelist（会与工作区同步并保存），完成后重新分组。
+    /// 从核心加载各仓库的 Changelist（会与工作区同步并保存），完成后重新分组。
     private func loadChangelists() {
-        let repository = model.repository
+        let repositories = workspace.models.map { ($0, $0.repository) }
         changelistTask?.cancel()
         changelistTask = Task {
-            let result = await Task.detached { try? repository.changelists() }.value
-            guard !Task.isCancelled, let result, result != changelists else { return }
-            changelists = result
+            var loaded: [ObjectIdentifier: Changelists] = [:]
+            for (owner, repository) in repositories {
+                if let state = await Task.detached(operation: { try? repository.changelists() }).value {
+                    loaded[ObjectIdentifier(owner)] = state
+                }
+            }
+            guard !Task.isCancelled, loaded != changelistsByRepo else { return }
+            changelistsByRepo = loaded
             rebuildGroups()
         }
     }
 
-    /// 执行 Changelist 操作并刷新分组。
-    private func changelistAction(_ work: @escaping @Sendable (Repository) throws -> Changelists) {
-        let repository = model.repository
+    /// 在每个仓库上执行 Changelist 操作（保持各仓库的列表一致），完成后重新分组。
+    private func changelistAction(in repositories: [ProjectModel]? = nil, _ work: @escaping @Sendable (Repository) throws -> Changelists) {
+        let targets = (repositories ?? workspace.models).map { ($0, $0.repository) }
         Task {
-            let result = await Task.detached { Result { try work(repository) } }.value
-            switch result {
-            case let .success(state):
-                changelists = state
-                rebuildGroups()
-            case let .failure(error):
-                model.post(errorMessage(error), isError: true)
+            for (owner, repository) in targets {
+                let result = await Task.detached { Result { try work(repository) } }.value
+                switch result {
+                case let .success(state): changelistsByRepo[ObjectIdentifier(owner)] = state
+                case let .failure(error): model.post(errorMessage(error), isError: true)
+                }
             }
+            rebuildGroups()
         }
     }
 
-    @objc private func refresh() { model.refresh() }
+    @objc private func refresh() { workspace.refreshAll() }
     @objc private func expandAll() { outline.expandItem(nil, expandChildren: true) }
     @objc private func collapseAll() { outline.collapseItem(nil, collapseChildren: true) }
 
@@ -470,9 +564,25 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     @objc private func toggleHooks() { runHooks.toggle() }
     @objc private func toggleAIReview() { AISettings.reviewBeforeCommit.toggle() }
 
-    /// 勾选的、仍存在于当前变更中的文件。
+    /// 勾选的条目，按仓库顺序与路径排列。
+    private var includedEntries: [Entry] {
+        let order = { (entry: Entry) in self.workspace.models.firstIndex { $0 === entry.model } ?? 0 }
+        return entries.values.filter { included.contains($0.key) }.sorted { lhs, rhs in
+            order(lhs) != order(rhs) ? order(lhs) < order(rhs) : lhs.change.path < rhs.change.path
+        }
+    }
+
+    /// 主仓库中勾选的文件（AI 评审、生成提交信息使用）。
     var includedPaths: [String] {
-        model.status.changes.map(\.path).filter { included.contains($0) }
+        includedEntries.filter { $0.model === model }.map(\.change.path)
+    }
+
+    /// 按仓库分组。
+    private func grouped(_ list: [Entry]) -> RepositoryPaths {
+        workspace.models.compactMap { repository in
+            let paths = list.filter { $0.model === repository }.map(\.change.path)
+            return paths.isEmpty ? nil : (repository, paths)
+        }
     }
 
     @objc private func aiReviewSelected() {
@@ -520,115 +630,148 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         commit()
     }
 
+    private func finishCommitting() {
+        isCommitting = false
+        spinner.stopAnimation(nil)
+        spinner.isHidden = true
+        updateCommitButtons()
+    }
+
+    /// 一个仓库要提交的内容：勾选的文件与部分提交的内容。
+    private struct RepositoryCommit {
+        let model: ProjectModel
+        var options: CommitOptions
+    }
+
+    /// 提交勾选的文件：每个仓库各提交一次，使用同一提交信息。
     @objc private func commit() {
         guard commitButton.isEnabled else { return }
         let pushAfter = pushAfterCommit
         pushAfterCommit = false
-        // 只提交仍存在于当前变更中的勾选文件。
-        let paths = includedPaths
-        let selections = paths.compactMap { path in lineSelections?.selection(for: path).map { (path, $0) } }
-        var options = CommitOptions(
-            message: messageView.string,
-            paths: paths,
-            amend: amendCheckbox.state == .on,
-            signOff: signOff,
-            skipHooks: !runHooks,
-            author: nil,
-            partial: []
-        )
+        let chosen = includedEntries
+        let message = messageView.string
+        let amend = amendCheckbox.state == .on
+        var commits: [RepositoryCommit] = grouped(chosen).map { repository, paths in
+            RepositoryCommit(model: repository, options: CommitOptions(
+                message: message, paths: paths, amend: amend, signOff: signOff,
+                skipHooks: !runHooks, author: nil, partial: []
+            ))
+        }
+        // 只勾选 Amend、没有文件时只修改主仓库的上一次提交信息。
+        if commits.isEmpty, amend {
+            commits = [RepositoryCommit(model: model, options: CommitOptions(
+                message: message, paths: [], amend: true, signOff: signOff, skipHooks: !runHooks, author: nil, partial: []
+            ))]
+        }
+        let selections = chosen.compactMap { entry in lineSelections?.selection(for: entry.key).map { (entry, $0) } }
         isCommitting = true
         spinner.isHidden = false
         spinner.startAnimation(nil)
         updateCommitButtons()
-        let repository = model.repository
-        let reviewFirst = AISettings.reviewBeforeCommit && !paths.isEmpty ? aiReview : nil
+        let primaryPaths = includedPaths
+        let reviewFirst = AISettings.reviewBeforeCommit && !primaryPaths.isEmpty ? aiReview : nil
         Task {
-            // 提交前检查：AI 评审勾选的改动，发现问题时由用户决定是否继续。
-            if let reviewFirst, await !reviewFirst.reviewBeforeCommit(paths: paths) {
-                self.isCommitting = false
-                self.spinner.stopAnimation(nil)
-                self.spinner.isHidden = true
-                self.updateCommitButtons()
+            // 提交前检查：AI 评审主仓库中勾选的改动，发现问题时由用户决定是否继续。
+            if let reviewFirst, await !reviewFirst.reviewBeforeCommit(paths: primaryPaths) {
+                self.finishCommitting()
                 return
             }
             // 部分提交：确认选择之后文件没有变化，再计算要提交的内容。
             if !selections.isEmpty {
-                let root = self.model.rootURL
                 let check = await Task.detached(priority: .userInitiated) {
-                    selections.map { path, selection -> (String, Bool) in
-                        let text = (try? Data(contentsOf: root.appendingPathComponent(path))).flatMap { String(data: $0, encoding: .utf8) } ?? ""
-                        let base = ((try? repository.fileAtRevision(revision: "HEAD", path: path)) ?? nil) ?? ""
-                        return (path, text == selection.text && base == selection.base)
+                    selections.map { entry, selection -> (String, Bool) in
+                        let url = entry.model.rootURL.appendingPathComponent(entry.change.path)
+                        let text = (try? Data(contentsOf: url)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                        let base = ((try? entry.model.repository.fileAtRevision(revision: "HEAD", path: entry.change.path)) ?? nil) ?? ""
+                        return (entry.key, text == selection.text && base == selection.base)
                     }
                 }.value
                 let stale = check.filter { !$0.1 }.map(\.0)
                 guard stale.isEmpty else {
                     self.lineSelections?.remove(stale)
-                    self.isCommitting = false
-                    self.spinner.stopAnimation(nil)
-                    self.spinner.isHidden = true
-                    self.updateCommitButtons()
+                    self.finishCommitting()
                     let alert = NSAlert()
                     alert.messageText = tr("commit.partial.stale")
                     alert.informativeText = tr("commit.partial.stale.message", stale.joined(separator: "\n"))
                     if let window = self.window { alert.beginSheetModal(for: window, completionHandler: nil) } else { alert.runModal() }
                     return
                 }
-                for (path, selection) in selections {
+                for (entry, selection) in selections {
+                    guard let index = commits.firstIndex(where: { $0.model === entry.model }) else { continue }
                     let content = selection.content
                     if content == selection.base {
                         // 文件的改动全部不提交。
-                        options.paths.removeAll { $0 == path }
+                        commits[index].options.paths.removeAll { $0 == entry.change.path }
                     } else {
-                        options.partial.append(PartialFile(path: path, content: content))
+                        commits[index].options.partial.append(PartialFile(path: entry.change.path, content: content))
                     }
                 }
-                if options.paths.isEmpty, !options.amend {
-                    self.isCommitting = false
-                    self.spinner.stopAnimation(nil)
-                    self.spinner.isHidden = true
-                    self.updateCommitButtons()
+                commits.removeAll { $0.options.paths.isEmpty && !$0.options.amend }
+                guard !commits.isEmpty else {
+                    self.finishCommitting()
                     self.model.post(tr("commit.partial.nothing"), isError: true)
                     return
                 }
             }
-            let finalOptions = options
-            let result = await Task.detached(priority: .userInitiated) {
-                Result { try repository.commit(options: finalOptions) }
-            }.value
-            self.isCommitting = false
-            self.spinner.stopAnimation(nil)
-            self.spinner.isHidden = true
-            switch result {
-            case let .success(commit):
-                self.lineSelections?.remove(paths)
-                self.messageView.string = ""
-                self.messageView.didChangeText()
-                self.amendCheckbox.state = .off
-                self.amendPrefill = nil
-                self.autoMessage = nil
-                let text = commit.fileCount == 1
-                    ? tr("commit.done.one", commit.subject)
-                    : tr("commit.done.many", "\(commit.fileCount)", commit.subject)
+
+            var committed: [(ProjectModel, CommitResult)] = []
+            var failure: (ProjectModel, any Error)?
+            for item in commits {
+                let repository = item.model.repository
+                let options = item.options
+                let result = await Task.detached(priority: .userInitiated) {
+                    Result { try repository.commit(options: options) }
+                }.value
+                switch result {
+                case let .success(commit): committed.append((item.model, commit))
+                case let .failure(error): failure = (item.model, error)
+                }
+                if failure != nil { break }
+            }
+            self.finishCommitting()
+            if !committed.isEmpty {
+                let done = Set(committed.map { ObjectIdentifier($0.0) })
+                self.lineSelections?.remove(chosen.filter { done.contains(ObjectIdentifier($0.model)) }.map(\.key))
+                if failure == nil {
+                    self.messageView.string = ""
+                    self.messageView.didChangeText()
+                    self.amendCheckbox.state = .off
+                    self.amendPrefill = nil
+                    self.autoMessage = nil
+                }
+                let files = committed.reduce(0) { $0 + Int($1.1.fileCount) }
+                let subject = committed[0].1.subject
+                let text: String
+                if committed.count > 1 {
+                    text = tr("commit.done.repositories", "\(files)", "\(committed.count)", subject)
+                } else {
+                    text = files == 1 ? tr("commit.done.one", subject) : tr("commit.done.many", "\(files)", subject)
+                }
                 self.model.post(text)
-                if pushAfter { self.onPushAfterCommit?() }
-            case let .failure(error):
+            }
+            if let (repository, error) = failure {
                 // 钩子输出等错误信息较长，用对话框完整展示。
                 let alert = NSAlert()
                 alert.alertStyle = .warning
-                alert.messageText = tr("commit.failed")
+                alert.messageText = self.workspace.isMultiRoot
+                    ? tr("workspace.failedIn", tr("commit.failed"), self.workspace.displayName(of: repository))
+                    : tr("commit.failed")
                 alert.informativeText = errorMessage(error)
                 if let window = self.window {
                     alert.beginSheetModal(for: window, completionHandler: nil)
                 } else {
                     alert.runModal()
                 }
-                self.model.post(tr("commit.failed"), isError: true)
+                self.model.post(alert.messageText, isError: true)
+            } else if pushAfter {
+                self.onPushAfterCommit?()
             }
-            self.model.refresh()
+            self.workspace.refreshAll()
             self.updateCommitButtons()
         }
     }
+
+    // MARK: - 右键菜单
 
     /// 右键菜单随点击的行变化：文件行可移到其他 Changelist，Changelist 行可编辑、设为活动或删除。
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -643,7 +786,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
             add(tr("changelist.new"), #selector(newChangelist))
             add(tr("changelist.edit"), #selector(editChangelist(_:)), object: list.name)
             add(tr("changelist.setActive"), #selector(setActiveChangelist(_:)), enabled: !group.isActive, object: list.name)
-            add(tr("changelist.delete"), #selector(deleteChangelist(_:)), enabled: (changelists?.lists.count ?? 1) > 1, object: list.name)
+            add(tr("changelist.delete"), #selector(deleteChangelist(_:)), enabled: displayedChangelists.count > 1, object: list.name)
             menu.addItem(.separator())
             add(tr("commit.action.rollback"), #selector(rollbackSelected), enabled: !group.files.isEmpty)
             add(tr("commit.action.shelve"), #selector(shelveSelected), enabled: !group.files.isEmpty)
@@ -654,8 +797,8 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         }
         if let file = clicked as? FileItem, !file.change.isUntracked, file.change.conflict == nil {
             let move = NSMenu()
-            let current = changelists?.lists.first { $0.paths.contains(file.change.path) }?.name ?? changelists?.active
-            for list in changelists?.lists ?? [] where list.name != current {
+            let current = changelistName(of: file.entry)
+            for list in displayedChangelists where list.name != current {
                 let entry = move.addItem(withTitle: list.name == DEFAULT_CHANGELIST ? tr("commit.group.changes") : list.name, action: #selector(moveToChangelist(_:)), keyEquivalent: "")
                 entry.target = self
                 entry.representedObject = list.name
@@ -684,21 +827,45 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         return menu
     }
 
+    // MARK: - 选择与动作
+
     /// 右键时作用于点击的行，否则作用于选中行。
     private var targetItem: FileItem? {
         let row = outline.clickedRow >= 0 ? outline.clickedRow : outline.selectedRow
         return outline.item(atRow: row) as? FileItem
     }
 
+    /// 右键点击的行不在选中范围内时只作用于该行，否则作用于所有选中行。
+    private var targetRows: IndexSet {
+        outline.selectedRowIndexes.contains(outline.clickedRow) || outline.clickedRow < 0
+            ? outline.selectedRowIndexes
+            : IndexSet(integer: outline.clickedRow)
+    }
+
+    /// 选中的条目（选中分组或仓库子分组时为其全部文件）。
+    private var selectedEntries: [Entry] {
+        var list: [Entry] = []
+        for row in targetRows {
+            switch outline.item(atRow: row) {
+            case let item as FileItem: list.append(item.entry)
+            case let group as Group: list += group.files
+            case let repository as RepositoryGroup: list += repository.files
+            default: break
+            }
+        }
+        var seen = Set<String>()
+        return list.filter { seen.insert($0.key).inserted }
+    }
+
     @objc private func showDiffForClicked() {
         switch outline.item(atRow: outline.clickedRow) {
         case let item as FileItem where item.change.conflict != nil:
             // 冲突文件双击打开合并工具（IDEA 同样如此）。
-            onResolveConflict?(item.change)
+            onResolveConflict?(item.entry.model, item.change)
         case let item as FileItem:
-            onShowDiff?(item.change)
+            onShowDiff?(item.entry.model, item.change, item.entry.key)
         case let group as Group where group.kind == .conflicts:
-            onShowConflicts?()
+            onShowConflicts?(group.files.first?.model ?? model)
         default:
             break
         }
@@ -706,63 +873,36 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
 
     @objc private func resolveConflicts() {
         if let item = targetItem, item.change.conflict != nil {
-            onResolveConflict?(item.change)
+            onResolveConflict?(item.entry.model, item.change)
         } else {
-            onShowConflicts?()
+            onShowConflicts?(targetItem?.entry.model ?? model)
         }
     }
 
     @objc func showDiffForSelection() {
         guard let item = targetItem else { return }
-        onShowDiff?(item.change)
+        onShowDiff?(item.entry.model, item.change, item.entry.key)
     }
 
     /// 回滚选中的文件（选中分组时为该组全部文件）；未选中时对话框中全选。
     @objc func rollbackSelected() {
-        let rows = outline.selectedRowIndexes.contains(outline.clickedRow) || outline.clickedRow < 0
-            ? outline.selectedRowIndexes
-            : IndexSet(integer: outline.clickedRow)
-        var paths: [String] = []
-        for row in rows {
-            switch outline.item(atRow: row) {
-            case let item as FileItem: paths.append(item.change.path)
-            case let group as Group: paths += group.files.map(\.path)
-            default: break
-            }
-        }
-        onRollback?(paths)
-    }
-
-    /// 选中的文件（选中分组时为该组全部文件）。
-    private var selectedPaths: [String] {
-        let rows = outline.selectedRowIndexes.contains(outline.clickedRow) || outline.clickedRow < 0
-            ? outline.selectedRowIndexes
-            : IndexSet(integer: outline.clickedRow)
-        var paths: [String] = []
-        for row in rows {
-            switch outline.item(atRow: row) {
-            case let item as FileItem: paths.append(item.change.path)
-            case let group as Group: paths += group.files.map(\.path)
-            default: break
-            }
-        }
-        return paths
+        onRollback?(grouped(selectedEntries))
     }
 
     /// 搁置选中的文件（选中 Changelist 时以列表名为默认名称）；未选中时搁置勾选的文件。
     @objc func shelveSelected() {
-        var paths = selectedPaths.filter { path in items[path]?.change.conflict == nil }
-        if paths.isEmpty { paths = includedPaths }
-        guard !paths.isEmpty else { return NSSound.beep() }
+        var list = selectedEntries.filter { $0.change.conflict == nil }
+        if list.isEmpty { list = includedEntries }
+        guard !list.isEmpty else { return NSSound.beep() }
         let row = outline.clickedRow >= 0 ? outline.clickedRow : outline.selectedRow
-        let list = (outline.item(atRow: row) as? Group)?.changelist?.name
-        let name = list.map { $0 == DEFAULT_CHANGELIST ? tr("shelf.defaultName") : $0 } ?? tr("shelf.defaultName")
-        onShelve?(paths, name)
+        let changelist = (outline.item(atRow: row) as? Group)?.changelist?.name
+        let name = changelist.map { $0 == DEFAULT_CHANGELIST ? tr("shelf.defaultName") : $0 } ?? tr("shelf.defaultName")
+        onShelve?(grouped(list), name)
     }
 
-    // MARK: - Changelist
+    // MARK: - Changelist 操作
 
-    private var changelistNames: Set<String> { Set(changelists?.lists.map(\.name) ?? []) }
+    private var changelistNames: Set<String> { Set(displayedChangelists.map(\.name)) }
 
     @objc private func newChangelist() {
         ChangelistDialog(title: tr("changelist.new.title"), confirmTitle: tr("changelist.new.confirm"), name: "", comment: "", existing: changelistNames)
@@ -771,20 +911,29 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
             }
     }
 
+    /// 把选中的文件移到列表中；某个仓库还没有该列表时先创建。
+    private func move(_ list: [Entry], to name: String, comment: String = "") {
+        for (repository, paths) in grouped(list) {
+            changelistAction(in: [repository]) { repo in
+                if !(try repo.changelists()).lists.contains(where: { $0.name == name }) {
+                    _ = try repo.addChangelist(name: name, comment: comment, makeActive: false)
+                }
+                return try repo.moveToChangelist(paths: paths, name: name)
+            }
+        }
+    }
+
     @objc private func moveToNewChangelist() {
-        let paths = selectedPaths
+        let list = selectedEntries
         ChangelistDialog(title: tr("changelist.new.title"), confirmTitle: tr("changelist.new.confirm"), name: "", comment: "", existing: changelistNames)
             .begin(for: window) { [weak self] name, comment in
-                self?.changelistAction { repo in
-                    _ = try repo.addChangelist(name: name, comment: comment, makeActive: false)
-                    return try repo.moveToChangelist(paths: paths, name: name)
-                }
+                self?.move(list, to: name, comment: comment)
             }
     }
 
     @objc private func editChangelist(_ sender: NSMenuItem) {
         guard let name = sender.representedObject as? String,
-              let list = changelists?.lists.first(where: { $0.name == name }) else { return }
+              let list = displayedChangelists.first(where: { $0.name == name }) else { return }
         let display = name == DEFAULT_CHANGELIST ? tr("commit.group.changes") : name
         ChangelistDialog(
             title: tr("changelist.edit.title"), confirmTitle: tr("changelist.edit.confirm"),
@@ -792,17 +941,20 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         ).begin(for: window) { [weak self] newName, comment in
             // 默认列表保持存储名称不变，只更新说明（除非用户真的改了显示名称）。
             let stored = name == DEFAULT_CHANGELIST && newName == display ? name : newName
-            self?.changelistAction { repo in try repo.editChangelist(name: name, newName: stored, comment: comment) }
+            self?.changelistAction { repo in
+                guard (try repo.changelists()).lists.contains(where: { $0.name == name }) else { return try repo.changelists() }
+                return try repo.editChangelist(name: name, newName: stored, comment: comment)
+            }
         }
     }
 
     /// IDEA 用 Changelist 的说明作为提交信息：勾选的文件都属于同一个有说明的列表、且提交信息为空
     /// （或仍是上次自动填入的说明）时，自动填入该说明。
     private func applyChangelistComment() {
-        let paths = Set(includedPaths)
-        guard !paths.isEmpty, let lists = changelists?.lists else { return }
-        let owners = Set(lists.filter { !Set($0.paths).isDisjoint(with: paths) }.map(\.name))
-        let comment = owners.count == 1 ? lists.first { owners.contains($0.name) }?.comment ?? "" : ""
+        let chosen = includedEntries
+        guard !chosen.isEmpty else { return }
+        let owners = Set(chosen.map(changelistName(of:)))
+        let comment = owners.count == 1 ? displayedChangelists.first { owners.contains($0.name) }?.comment ?? "" : ""
         let current = messageView.string
         guard current.isEmpty || current == autoMessage else { return }
         guard comment != current else { return }
@@ -813,50 +965,46 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
 
     @objc private func setActiveChangelist(_ sender: NSMenuItem) {
         guard let name = sender.representedObject as? String else { return }
-        changelistAction { repo in try repo.setActiveChangelist(name: name) }
+        changelistAction { repo in
+            if !(try repo.changelists()).lists.contains(where: { $0.name == name }) {
+                _ = try repo.addChangelist(name: name, comment: "", makeActive: false)
+            }
+            return try repo.setActiveChangelist(name: name)
+        }
     }
 
     @objc private func deleteChangelist(_ sender: NSMenuItem) {
         guard let name = sender.representedObject as? String else { return }
-        changelistAction { repo in try repo.removeChangelist(name: name) }
+        changelistAction { repo in
+            let state = try repo.changelists()
+            guard state.lists.contains(where: { $0.name == name }), state.lists.count > 1 else { return state }
+            return try repo.removeChangelist(name: name)
+        }
     }
 
     @objc private func moveToChangelist(_ sender: NSMenuItem) {
         guard let name = sender.representedObject as? String else { return }
-        let paths = selectedPaths
-        changelistAction { repo in try repo.moveToChangelist(paths: paths, name: name) }
+        move(selectedEntries, to: name)
     }
 
     /// 储藏选中的已跟踪文件；没有选中文件时储藏全部。
     @objc private func stashSelected() {
-        let rows = outline.selectedRowIndexes.contains(outline.clickedRow) || outline.clickedRow < 0
-            ? outline.selectedRowIndexes
-            : IndexSet(integer: outline.clickedRow)
-        let paths = rows.compactMap { (outline.item(atRow: $0) as? FileItem)?.change }
-            .filter { !$0.isUntracked && $0.conflict == nil }
-            .map(\.path)
-        onStashPaths?(paths)
+        onStashPaths?(grouped(selectedEntries.filter { !$0.change.isUntracked && $0.change.conflict == nil }))
     }
 
     /// 把选中的改动（含未跟踪文件）保存为补丁；未选中时保存全部改动。
     @objc private func createPatchSelected() {
-        let rows = outline.selectedRowIndexes.contains(outline.clickedRow) || outline.clickedRow < 0
-            ? outline.selectedRowIndexes
-            : IndexSet(integer: outline.clickedRow)
-        let paths = rows.compactMap { (outline.item(atRow: $0) as? FileItem)?.change }
-            .filter { $0.conflict == nil }
-            .map(\.path)
-        onCreatePatch?(paths)
+        onCreatePatch?(grouped(selectedEntries.filter { $0.change.conflict == nil }))
     }
 
     @objc private func showHistory() {
         guard let item = targetItem, !item.change.isUntracked else { return NSSound.beep() }
-        onShowHistory?(item.change.path)
+        onShowHistory?(item.entry.model, item.change.path)
     }
 
     @objc private func jumpToSource() {
         guard let item = targetItem, !item.change.isDeleted else { return }
-        onOpenFile?(model.rootURL.appendingPathComponent(item.change.path))
+        onOpenFile?(item.entry.model.rootURL.appendingPathComponent(item.change.path))
     }
 
     @objc private func checkboxToggled(_ sender: NSButton) {
@@ -866,18 +1014,22 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         switch outline.item(atRow: row) {
         case let group as Group:
             for file in group.files {
-                if on { included.insert(file.path) } else { included.remove(file.path) }
+                if on { included.insert(file.key) } else { included.remove(file.key) }
+            }
+        case let repository as RepositoryGroup:
+            for file in repository.files {
+                if on { included.insert(file.key) } else { included.remove(file.key) }
             }
         case let item as FileItem:
-            let path = item.change.path
-            if lineSelections?.isPartial(path) == true, included.contains(path) {
+            let key = item.entry.key
+            if lineSelections?.isPartial(key) == true, included.contains(key) {
                 // 半选的文件再次点击：改为提交整个文件。
-                lineSelections?.remove([path])
-                included.insert(path)
+                lineSelections?.remove([key])
+                included.insert(key)
             } else if on || sender.state == .mixed {
-                included.insert(path)
+                included.insert(key)
             } else {
-                included.remove(path)
+                included.remove(key)
             }
         default:
             break
@@ -892,37 +1044,49 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
         switch item {
         case nil: groups.count
-        case let group as Group: group.files.count
+        case let group as Group: workspace.isMultiRoot ? group.repositories.count : group.files.count
+        case let repository as RepositoryGroup: repository.files.count
         default: 0
         }
     }
 
     func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
-        if let group = item as? Group {
-            let path = group.files[index].path
-            return items[path] ?? FileItem(group.files[index])
+        switch item {
+        case let group as Group:
+            if workspace.isMultiRoot { return group.repositories[index] }
+            let entry = group.files[index]
+            return items[entry.key] ?? FileItem(entry)
+        case let repository as RepositoryGroup:
+            let entry = repository.files[index]
+            return items[entry.key] ?? FileItem(entry)
+        default:
+            return groups[index]
         }
-        return groups[index]
     }
 
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-        item is Group
+        item is Group || item is RepositoryGroup
     }
 
     // MARK: - NSOutlineViewDelegate
+
+    private func checkState(_ files: [Entry]) -> NSControl.StateValue {
+        let selected = files.filter { included.contains($0.key) }.count
+        return selected == 0 ? .off : (selected == files.count ? .on : .mixed)
+    }
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         let id = NSUserInterfaceItemIdentifier("ChangeCell")
         let cell = outlineView.makeView(withIdentifier: id, owner: nil) as? ChangeCellView ?? ChangeCellView(identifier: id)
         cell.checkbox.target = self
         cell.checkbox.action = #selector(checkboxToggled(_:))
+        cell.toolTip = nil
 
         switch item {
         case let group as Group:
             let count = group.files.count
-            let selected = group.files.filter { included.contains($0.path) }.count
             cell.checkbox.allowsMixedState = true
-            cell.checkbox.state = selected == 0 ? .off : (selected == count ? .on : .mixed)
+            cell.checkbox.state = checkState(group.files)
             cell.checkbox.isEnabled = count > 0 && group.kind != .conflicts
             cell.file.configure(
                 icon: nil,
@@ -932,11 +1096,23 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
                 bold: group.kind != .changes || group.isActive
             )
             cell.toolTip = group.isActive ? tr("changelist.active.tooltip") : nil
+        case let repository as RepositoryGroup:
+            let count = repository.files.count
+            cell.checkbox.allowsMixedState = true
+            cell.checkbox.state = checkState(repository.files)
+            cell.checkbox.isEnabled = !repository.files.contains { $0.change.conflict != nil }
+            cell.file.configure(
+                icon: RepositoryBranchesPopover.chip(workspace.color(for: repository.model)),
+                name: workspace.displayName(of: repository.model),
+                detail: "\(repository.model.currentBranchTitle)  " + (count == 1 ? tr("commit.group.oneFile") : tr("commit.group.files", "\(count)")),
+                color: Theme.text
+            )
+            cell.toolTip = repository.model.rootURL.path
         case let item as FileItem:
             let change = item.change
-            let partial = lineSelections?.isPartial(change.path) ?? false
+            let partial = lineSelections?.isPartial(item.entry.key) ?? false
             cell.checkbox.allowsMixedState = partial
-            cell.checkbox.state = included.contains(change.path) ? (partial ? .mixed : .on) : .off
+            cell.checkbox.state = included.contains(item.entry.key) ? (partial ? .mixed : .on) : .off
             if partial { cell.toolTip = tr("commit.partial.tooltip") }
             cell.checkbox.isEnabled = change.conflict == nil
             var detail = change.directory
