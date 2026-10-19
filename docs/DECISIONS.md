@@ -71,11 +71,13 @@
 - 复用 Rust 核心，实现 WinUI 3 UI 层
 - 构建与验证环境待定：由用户提供 Windows 机器（SSH）或使用 GitHub Actions Windows runner
 - 2026-10-18：用户决定**暂缓 Windows**，先补齐并打磨 mac 端；开工前再确定构建与验证环境
+- 2026-10-19：mac 端功能开发基本完成（剩余事项见 [MAC-REMAINING.md](MAC-REMAINING.md)），**开始 Windows 端**，在用户的 Windows 机器上开发；交接说明见 [WINDOWS-HANDOFF.md](WINDOWS-HANDOFF.md)
 
 ### 五期（可选）：GitHub / GitLab PR 集成
 - PR 列表、在客户端内评审、评论、合并
 
 ## 待讨论（到对应阶段再定）
 
-- Windows 构建与验证环境（四期开工前）
+- Windows 构建与验证环境、C# 绑定生成方式、打包与 askpass（四期开工前，见 [WINDOWS-HANDOFF.md](WINDOWS-HANDOFF.md) 第 6 节）
+- UniFFI 及 C# 绑定生成器为 MPL-2.0 许可，与第 9 项“只用宽松许可”冲突，需确认是否接受（见 [MAC-REMAINING.md](MAC-REMAINING.md) 第 2 节）
 - 代码签名与公证：Apple Developer ID、Windows 代码签名证书（首次打包发布前）

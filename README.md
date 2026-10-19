@@ -1,6 +1,6 @@
 # GitDeck（代号）
 
-对齐 JetBrains IDEA Git 功能的跨平台原生 Git 客户端。架构与产品决策见 [docs/DECISIONS.md](docs/DECISIONS.md)。
+对齐 JetBrains IDEA Git 功能的跨平台原生 Git 客户端。架构与产品决策见 [docs/DECISIONS.md](docs/DECISIONS.md)；mac 端剩余事项见 [docs/MAC-REMAINING.md](docs/MAC-REMAINING.md)；Windows 端开发交接见 [docs/WINDOWS-HANDOFF.md](docs/WINDOWS-HANDOFF.md)。
 
 ## 目录结构
 
