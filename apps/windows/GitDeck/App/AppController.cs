@@ -21,6 +21,12 @@ public sealed class AppController
 
     public void Start()
     {
+        // git / ssh 需要凭据时调用 askpass 程序弹出输入框（见 docs/DECISIONS.md 第 15 项）；语言随主程序。
+        var askPass = Path.Combine(AppInfo.AppDirectory, "GitDeck.AskPass.exe");
+        CoreApi.SetAskpassProgram(File.Exists(askPass) ? askPass : null);
+        Environment.SetEnvironmentVariable("GITDECK_LANG", L10n.Language);
+        Vcs.GitSettings.Apply();
+
         // 与 IDEA 一致：启动时重新打开上次的项目，否则显示欢迎页。
         var debugOpen = DebugOptions.Get("debug.open");
         var last = RecentProjects.Paths.FirstOrDefault();

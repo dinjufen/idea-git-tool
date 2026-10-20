@@ -108,6 +108,36 @@ public static class MainMenu
     private static MenuFlyoutSubItem GitMenu(ProjectWindow window)
     {
         var menu = new MenuFlyoutSubItem { Text = L10n.Tr("menu.git") };
+        var ops = window.Operations;
+        menu.Items.Add(Item(L10n.Tr("git.action.commit"), window.ShowCommit, "Ctrl+K"));
+        menu.Items.Add(Item(L10n.Tr("git.action.push"), ops.Push, "Ctrl+Shift+K"));
+        menu.Items.Add(Item(L10n.Tr("git.action.update"), ops.UpdateProject, "Ctrl+T"));
+        menu.Items.Add(Item(L10n.Tr("git.action.fetch"), ops.Fetch));
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(Item(L10n.Tr("git.action.branches"), window.ShowBranches, "Ctrl+Shift+`"));
+        menu.Items.Add(Item(L10n.Tr("branches.action.new"), () => ops.NewBranch(), "Ctrl+Alt+N"));
+        menu.Items.Add(Item(L10n.Tr("branches.action.checkoutRevision"), ops.CheckoutRevisionDialog));
+        var state = window.Model.Status.State;
+        if (state != Core.RepositoryState.Normal) menu.Items.Add(new MenuFlyoutSeparator());
+        switch (state)
+        {
+            case Core.RepositoryState.Rebasing:
+                menu.Items.Add(Item(L10n.Tr("git.action.continueRebase"), ops.ContinueRebase));
+                menu.Items.Add(Item(L10n.Tr("git.action.abortRebase"), ops.AbortRebase));
+                break;
+            case Core.RepositoryState.Merging:
+                menu.Items.Add(Item(L10n.Tr("git.action.abortMerge"), ops.AbortMerge));
+                break;
+            case Core.RepositoryState.CherryPicking:
+                menu.Items.Add(Item(L10n.Tr("git.action.continueCherryPick"), ops.ContinueCherryPick));
+                menu.Items.Add(Item(L10n.Tr("git.action.abortCherryPick"), ops.AbortCherryPick));
+                break;
+            case Core.RepositoryState.Reverting:
+                menu.Items.Add(Item(L10n.Tr("git.action.continueRevert"), ops.ContinueRevert));
+                menu.Items.Add(Item(L10n.Tr("git.action.abortRevert"), ops.AbortRevert));
+                break;
+        }
+        menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(Item(L10n.Tr("git.action.refresh"), window.RefreshStatus, "Ctrl+Alt+R"));
         return menu;
     }

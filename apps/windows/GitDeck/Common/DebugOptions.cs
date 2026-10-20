@@ -7,6 +7,7 @@ namespace GitDeck.Common;
 /// - `-debug.action <名称>`：窗口就绪后执行的操作，例如 `clone`、`mainMenu`、`projectMenu`、`toolWindows`。
 /// - `-debug.snapshot <PNG 路径>`：约 2 秒后（或 `-debug.snapshotDelay <秒>`）把窗口内容渲染为 PNG。
 /// - `-debug.exit`：截图后退出。
+/// - `-debug.confirm`：推送对话框直接按默认选项确认（用于验证推送流程）。
 /// - `-debug.theme light|dark`、`-debug.lang en|zh-Hans`：临时覆盖主题与语言（不写入设置）。
 public static class DebugOptions
 {

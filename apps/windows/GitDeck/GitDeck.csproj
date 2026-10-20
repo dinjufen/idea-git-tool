@@ -28,6 +28,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../GitDeck.Core/GitDeck.Core.csproj" />
+    <!-- askpass 程序与主程序放在同一目录（核心通过 GIT_ASKPASS / SSH_ASKPASS 调用它）。 -->
+    <ProjectReference Include="../GitDeck.AskPass/GitDeck.AskPass.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -35,5 +37,12 @@
     <EmbeddedResource Include="../../mac/Sources/GitDeck/Resources/Localizable.xcstrings" LogicalName="Localizable.xcstrings" />
     <Content Include="Assets/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <Target Name="CopyAskPass" AfterTargets="Build">
+    <ItemGroup>
+      <AskPassFiles Include="../GitDeck.AskPass/bin/$(Configuration)/net10.0-windows/GitDeck.AskPass.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(AskPassFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

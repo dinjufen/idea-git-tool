@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    askpass 程序（见 docs/DECISIONS.md 第 15 项）：git / ssh 需要用户名、密码、口令或确认主机指纹时调用，
+    弹出输入框并把输入写到标准输出。GUI 子系统，不会弹出控制台窗口。随主程序一起放在同一目录。
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <ApplicationIcon>../GitDeck/Assets/GitDeck.ico</ApplicationIcon>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- Application.SetColorMode（跟随系统深色模式）在 .NET 中仍标记为实验性 API。 -->
+    <NoWarn>$(NoWarn);WFO5001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="../../mac/Sources/GitDeck/Resources/Localizable.xcstrings" LogicalName="Localizable.xcstrings" />
+  </ItemGroup>
+
+</Project>

@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GitDeck.CoreSmoke", "GitDec
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GitDeck", "GitDeck\GitDeck.csproj", "{8AEB61C4-DECF-413A-9CDB-C191092E5A08}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GitDeck.AskPass", "GitDeck.AskPass\GitDeck.AskPass.csproj", "{A8735E9D-A21A-4898-AAE1-0A6D7FF55070}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -55,6 +57,18 @@ Global
 		{8AEB61C4-DECF-413A-9CDB-C191092E5A08}.Release|x64.Build.0 = Release|x64
 		{8AEB61C4-DECF-413A-9CDB-C191092E5A08}.Release|x86.ActiveCfg = Release|x64
 		{8AEB61C4-DECF-413A-9CDB-C191092E5A08}.Release|x86.Build.0 = Release|x64
+		{A8735E9D-A21A-4898-AAE1-0A6D7FF55070}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A8735E9D-A21A-4898-AAE1-0A6D7FF55070}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A8735E9D-A21A-4898-AAE1-0A6D7FF55070}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{A8735E9D-A21A-4898-AAE1-0A6D7FF55070}.Debug|x64.Build.0 = Debug|Any CPU
+		{A8735E9D-A21A-4898-AAE1-0A6D7FF55070}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{A8735E9D-A21A-4898-AAE1-0A6D7FF55070}.Debug|x86.Build.0 = Debug|Any CPU
+		{A8735E9D-A21A-4898-AAE1-0A6D7FF55070}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A8735E9D-A21A-4898-AAE1-0A6D7FF55070}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A8735E9D-A21A-4898-AAE1-0A6D7FF55070}.Release|x64.ActiveCfg = Release|Any CPU
+		{A8735E9D-A21A-4898-AAE1-0A6D7FF55070}.Release|x64.Build.0 = Release|Any CPU
+		{A8735E9D-A21A-4898-AAE1-0A6D7FF55070}.Release|x86.ActiveCfg = Release|Any CPU
+		{A8735E9D-A21A-4898-AAE1-0A6D7FF55070}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

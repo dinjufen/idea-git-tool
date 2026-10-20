@@ -30,6 +30,16 @@ public sealed class ProjectModel
 
     public BranchRef[] Branches { get; private set; } = [];
 
+    public TagInfo[] Tags { get; private set; } = [];
+
+    public StashEntry[] Stashes { get; private set; } = [];
+
+    /// 引用或 HEAD 发生变化时改变，用于判断 Log 是否需要重新加载。
+    public string RefsSignature =>
+        string.Join("\n", new[] { Status.Branch.Oid ?? "", Status.Branch.Head ?? "" }
+            .Concat(Branches.Select(b => b.FullRef + "=" + b.Target))
+            .Concat(Tags.Select(t => "tag:" + t.Name + "=" + t.Target)));
+
     /// 相对路径 → 变更，供 Project 树着色。
     public IReadOnlyDictionary<string, FileChange> ChangesByPath { get; private set; } = new Dictionary<string, FileChange>();
 
@@ -80,7 +90,7 @@ public sealed class ProjectModel
         IsRefreshing = true;
         Changed?.Invoke();
         var repository = Repository;
-        Task.Run(() => (repository.Status(), repository.Branches())).ContinueWith(task =>
+        Task.Run(() => (repository.Status(), repository.Branches(), repository.Tags(), repository.Stashes())).ContinueWith(task =>
         {
             _dispatcher.TryEnqueue(() =>
             {
@@ -90,7 +100,7 @@ public sealed class ProjectModel
                 }
                 else
                 {
-                    (Status, Branches) = task.Result;
+                    (Status, Branches, Tags, Stashes) = task.Result;
                     ChangesByPath = Status.Changes.GroupBy(c => c.Path).ToDictionary(g => g.Key, g => g.First());
                     LastError = null;
                 }

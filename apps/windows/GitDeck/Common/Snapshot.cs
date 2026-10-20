@@ -44,17 +44,20 @@ public static class Snapshot
         // 对话框的弹出层包含半透明遮罩，截取其中的对话框本体；否则截取最上层的弹出内容（菜单等）。
         var popups = VisualTreeHelper.GetOpenPopupsForXamlRoot(content.XamlRoot).Where(p => p.Child is not null).ToList();
         var target = popups.Select(p => p.Child as FrameworkElement).OfType<FrameworkElement>().Select(FindDialog).OfType<FrameworkElement>().LastOrDefault()
-            ?? popups.LastOrDefault()?.Child
+            ?? popups.Select(p => p.Child as FrameworkElement).OfType<FrameworkElement>().OrderByDescending(e => e.ActualWidth * e.ActualHeight).FirstOrDefault(e => e.ActualWidth > 0)
             ?? content;
+        // Flyout 的外框带系统背景材质，截取其中的内容。
+        if (target is Microsoft.UI.Xaml.Controls.FlyoutPresenter { Content: UIElement inner }) target = inner;
 
+        var scale = content.XamlRoot.RasterizationScale;
         var bitmap = new RenderTargetBitmap();
         await bitmap.RenderAsync(target);
-        var pixels = await bitmap.GetPixelsAsync();
-        var scale = content.XamlRoot.RasterizationScale;
+        var (width, height, pixels) = ((uint)bitmap.PixelWidth, (uint)bitmap.PixelHeight, (await bitmap.GetPixelsAsync()).ToArray());
+        // 带系统背景材质（亚克力）的弹出层（Flyout）无法用 RenderTargetBitmap 渲染，此时改用外部截屏验证。
+        if (width == 0 || height == 0) throw new InvalidOperationException("the target cannot be rendered");
         using var stream = new InMemoryRandomAccessStream();
         var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
-        encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied,
-            (uint)bitmap.PixelWidth, (uint)bitmap.PixelHeight, 96 * scale, 96 * scale, pixels.ToArray());
+        encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, width, height, 96 * scale, 96 * scale, pixels);
         await encoder.FlushAsync();
         stream.Seek(0);
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);

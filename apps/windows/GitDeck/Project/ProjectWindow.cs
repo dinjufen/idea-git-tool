@@ -4,6 +4,8 @@ using GitDeck.Commit;
 using GitDeck.Core;
 using GitDeck.Diff;
 using GitDeck.Editor;
+using GitDeck.Git;
+using GitDeck.Vcs;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -58,6 +60,9 @@ public sealed class ProjectWindow : Window
     private readonly Dictionary<ToolWindowId, FrameworkElement> _toolWindows = [];
     private readonly LineSelectionStore _lineSelections = new();
     private readonly CommitToolWindow _commitWindow;
+    private readonly GitOperations _operations;
+    private readonly GitToolWindow _gitWindow;
+    private readonly BranchesPopup _branchesPopup;
 
     private readonly FileWatcher _fileWatcher;
     private readonly EditorArea _editor;
@@ -72,6 +77,9 @@ public sealed class ProjectWindow : Window
         _editor = new EditorArea(Model);
         _projectTree = new ProjectTree(Model);
         _commitWindow = new CommitToolWindow(Model, _lineSelections);
+        _operations = new GitOperations(Model, () => _root.XamlRoot);
+        _gitWindow = new GitToolWindow(Model, _operations);
+        _branchesPopup = new BranchesPopup(Model, _operations, ShowCommit);
         _projectWidget = new ToolbarWidget(_badge, L10n.Tr("toolbar.project.tooltip"));
         Title = $"{Model.ProjectName} – {Model.RootPath}";
         ExtendsContentIntoTitleBar = true;
@@ -89,6 +97,7 @@ public sealed class ProjectWindow : Window
         foreach (var id in Enum.GetValues<ToolWindowId>()) _toolWindows[id] = new ToolWindowPanel(id.Title());
         _toolWindows[ToolWindowId.Project] = _projectTree.View;
         _toolWindows[ToolWindowId.Commit] = _commitWindow;
+        _toolWindows[ToolWindowId.Git] = _gitWindow;
         ApplyToolWindowState();
         Model.Changed += ModelChanged;
         Model.Refresh();
@@ -222,16 +231,29 @@ public sealed class ProjectWindow : Window
         _rightStripe.Toggled += Toggle;
         _menuButton.Click += (_, _) => ShowMainMenu();
         _projectWidget.Click += (_, _) => ShowProjectMenu();
-        _vcsWidget.Click += (_, _) => NotImplemented(L10n.Tr("git.action.branches"));
+        _vcsWidget.Click += (_, _) => ShowBranches();
         _refreshButton.Click += (_, _) => Model.Refresh();
         _commitButton.Click += (_, _) => ShowCommit();
-        _updateButton.Click += (_, _) => NotImplemented(L10n.Tr("git.action.update"));
-        _pushButton.Click += (_, _) => NotImplemented(L10n.Tr("git.action.push"));
+        _updateButton.Click += (_, _) => _ = _operations.UpdateProject();
+        _pushButton.Click += (_, _) => _ = _operations.Push();
 
         _projectTree.OpenFile += path => _editor.Open(path);
         _commitWindow.OpenFile += path => _editor.Open(path);
         _commitWindow.ShowDiff += change => ShowLocalDiff(change);
-        _commitWindow.PushAfterCommit += () => NotImplemented(L10n.Tr("git.action.push"));
+        _commitWindow.PushAfterCommit += () => _ = _operations.Push();
+        _operations.Progress += title =>
+        {
+            _statusBar.SetBusy(title is not null || Model.IsRefreshing);
+            if (title is not null) _statusBar.SetMessage(title);
+        };
+        _operations.RevealCommit += hash =>
+        {
+            Show(ToolWindowId.Git);
+            _gitWindow.Reveal(hash);
+        };
+        _operations.ShowRevisionFileDiff += ShowRevisionAgainstWorkingTree;
+        _gitWindow.Log.OpenFile += path => _editor.Open(path);
+        _gitWindow.Log.ShowCommitDiff += ShowCommitFile;
         _editor.CaretInfoChanged += _statusBar.SetEditorInfo;
         _editor.Message += (text, isError) => _statusBar.SetMessage(text, isError);
 
@@ -249,8 +271,11 @@ public sealed class ProjectWindow : Window
         AddAccelerator(VirtualKey.K, VirtualKeyModifiers.Control, ShowCommit);
         AddAccelerator(VirtualKey.F7, VirtualKeyModifiers.None, NextDifference);
         AddAccelerator(VirtualKey.F7, VirtualKeyModifiers.Shift, PreviousDifference);
-        AddAccelerator(VirtualKey.K, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => NotImplemented(L10n.Tr("git.action.push")));
-        AddAccelerator(VirtualKey.T, VirtualKeyModifiers.Control, () => NotImplemented(L10n.Tr("git.action.update")));
+        AddAccelerator(VirtualKey.K, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => _ = _operations.Push());
+        AddAccelerator(VirtualKey.T, VirtualKeyModifiers.Control, () => _ = _operations.UpdateProject());
+        AddAccelerator(VirtualKey.N, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, () => _ = _operations.NewBranch());
+        // IDEA Windows 键位：Ctrl+Shift+` 打开分支弹窗。
+        AddAccelerator((VirtualKey)192, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, ShowBranches);
         AddAccelerator(VirtualKey.R, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, Model.Refresh);
         AddAccelerator(VirtualKey.W, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, Close);
         AddAccelerator(VirtualKey.S, VirtualKeyModifiers.Control, SaveActive);
@@ -415,6 +440,64 @@ public sealed class ProjectWindow : Window
     }
 
     /// 本地变更：HEAD 与工作区文件比较（提交工具窗口中的 Show Diff），可选择要提交的改动。
+    public GitOperations Operations => _operations;
+
+    public void ShowBranches() => _branchesPopup.ShowAt(_vcsWidget);
+
+    /// 历史提交中的文件：与第一个父提交比较（Log 详情中双击文件）。
+    public void ShowCommitFile(string hash, string? parent, ChangedFile file)
+    {
+        var repository = Model.Repository;
+        var basePath = file.OrigPath ?? file.Path;
+        Task.Run(() =>
+        {
+            var baseText = parent is null || file.Kind == ChangeKind.Added ? null : TryRead(() => repository.FileAtRevision(parent, basePath));
+            var text = file.Kind == ChangeKind.Deleted ? null : TryRead(() => repository.FileAtRevision(hash, file.Path));
+            return (baseText, text);
+        }).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
+        {
+            var (baseText, text) = task.Result;
+            var shortHash = hash[..Math.Min(8, hash.Length)];
+            _editor.OpenDiff($"commit:{hash}:{file.Path}", Path.GetFileName(file.Path), L10n.Tr("diff.tooltip.commit", file.Path, shortHash), () => new DiffView(
+                new DiffSide(parent is null ? L10n.Tr("diff.title.empty") : parent[..Math.Min(8, parent.Length)], baseText),
+                new DiffSide(shortHash, text),
+                file.Path));
+        }), TaskScheduler.Default);
+    }
+
+    /// 某个修订（分支）中的文件与工作区文件比较（分支菜单的 Show Diff with Working Tree）。
+    public void ShowRevisionAgainstWorkingTree(string revision, ChangedFile file)
+    {
+        var repository = Model.Repository;
+        var root = Model.RootPath;
+        var basePath = file.OrigPath ?? file.Path;
+        Task.Run(() =>
+        {
+            var baseText = file.Kind == ChangeKind.Added ? null : TryRead(() => repository.FileAtRevision(revision, basePath));
+            var text = file.Kind == ChangeKind.Deleted ? null : ReadWorkingFile(Path.Combine(root, file.Path));
+            return (baseText, text);
+        }).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
+        {
+            var (baseText, text) = task.Result;
+            _editor.OpenDiff($"revision:{revision}:{file.Path}", Path.GetFileName(file.Path), L10n.Tr("diff.tooltip.revision", file.Path, revision), () => new DiffView(
+                new DiffSide(revision, baseText),
+                new DiffSide(L10n.Tr("diff.title.local"), text),
+                file.Path));
+        }), TaskScheduler.Default);
+    }
+
+    private static string? TryRead(Func<string?> read)
+    {
+        try
+        {
+            return read();
+        }
+        catch (CoreException)
+        {
+            return null;
+        }
+    }
+
     public void ShowLocalDiff(FileChange change)
     {
         var repository = Model.Repository;
@@ -469,7 +552,7 @@ public sealed class ProjectWindow : Window
     private void ModelChanged()
     {
         _vcsWidget.Title = Model.BranchWidgetTitle;
-        _statusBar.SetBusy(Model.IsRefreshing);
+        _statusBar.SetBusy(Model.IsRefreshing || _operations.IsRunning);
         if (Model.LastError is { } error) _statusBar.SetMessage(error, isError: true);
         else if (Model.Notification is { } notification) _statusBar.SetMessage(notification.Text, notification.IsError);
     }
@@ -547,6 +630,11 @@ public sealed class ProjectWindow : Window
                         break;
                     case "editorFont": ShowEditorFontDialog(); break;
                     case "commit": ShowCommit(); break;
+                    case "log": Show(ToolWindowId.Git); break;
+                    case "branches": ShowBranches(); break;
+                    case "push": _ = _operations.Push(); break;
+                    case "update": _ = _operations.UpdateProject(); break;
+                    case "newBranch": _ = _operations.NewBranch(); break;
                     case "partialCommit" when DebugOptions.Get("debug.file") is { } partialPath
                                               && Model.ChangesByPath.TryGetValue(partialPath, out var partialChange):
                         // 打开 Diff（配合 -debug.excludeBlock 把某块移出提交），稍后以 -debug.message 提交。
