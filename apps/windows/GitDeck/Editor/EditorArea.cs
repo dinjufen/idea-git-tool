@@ -62,10 +62,10 @@ public sealed class EditorArea : Grid
         public string Path { get; }
 
         /// 文件所属的仓库（多仓库项目中为包含该文件的嵌套仓库）。
-        public ProjectModel Owner { get; }
+        public ProjectModel Owner { get; set; }
 
         /// 相对所属仓库根目录的路径（`/` 分隔）；仓库外的文件为 null（不显示变更标记）。
-        public string? RelativePath { get; }
+        public string? RelativePath { get; set; }
 
         public CodeEditor Editor { get; }
 
@@ -177,11 +177,25 @@ public sealed class EditorArea : Grid
         get => _workspace;
         set
         {
-            if (_workspace is not null) _workspace.Changed -= ModelChanged;
-            else _model.Changed -= ModelChanged;
+            if (_workspace is not null)
+            {
+                _workspace.Changed -= ModelChanged;
+                _workspace.Added -= Relocate;
+            }
+            else
+            {
+                _model.Changed -= ModelChanged;
+            }
             _workspace = value;
-            if (value is not null) value.Changed += ModelChanged;
-            else _model.Changed += ModelChanged;
+            if (value is not null)
+            {
+                value.Changed += ModelChanged;
+                value.Added += Relocate;
+            }
+            else
+            {
+                _model.Changed += ModelChanged;
+            }
         }
     }
 
@@ -326,6 +340,20 @@ public sealed class EditorArea : Grid
     private static void Write(Document document) =>
         File.WriteAllText(document.Path, document.Editor.Text, new UTF8Encoding(document.HasBom));
 
+    /// 加入仓库后（例如恢复标签时嵌套仓库尚未加载完），属于该仓库的已打开文件改用该仓库的基准版本与 Blame。
+    private void Relocate(ProjectModel added)
+    {
+        foreach (var document in Documents.ToList())
+        {
+            var (owner, relativePath) = Locate(document.Path);
+            if (owner == document.Owner) continue;
+            document.Owner = owner;
+            document.RelativePath = relativePath;
+            LoadBase(document);
+            if (document.Editor.Annotations is not null) LoadBlame(document);
+        }
+    }
+
     /// 文件所属的仓库与相对路径；不在任何仓库中时路径为 null。
     private (ProjectModel Owner, string? RelativePath) Locate(string path)
     {
@@ -430,12 +458,13 @@ public sealed class EditorArea : Grid
 
     private void UpdateReviewMarkers(Document document)
     {
-        if (document.RelativePath is not { } path || _aiReview is null || document.Owner != _model)
+        // AI 评审结果的路径相对被评审的仓库：只在属于该仓库的文件上显示标记。
+        if (document.RelativePath is not { } path || _aiReview is null)
         {
             document.Editor.ReviewMarkers = [];
             return;
         }
-        document.Editor.ReviewMarkers = [.. _aiReview.WorkingTreeFindings(path).Select(x => new CodeEditor.ReviewMarker(
+        document.Editor.ReviewMarkers = [.. _aiReview.WorkingTreeFindings(path, document.Owner).Select(x => new CodeEditor.ReviewMarker(
             x.Index, Math.Max(0, (int)x.Finding.Line - 1), x.Finding.Severity,
             $"{AI.AIReviewToolWindow.SeverityTitle(x.Finding.Severity)}: {x.Finding.Title}"))];
     }

@@ -125,10 +125,10 @@ public sealed class GitToolWindow : Grid
     }
 
     /// 在 Log 标签页中定位某个提交。
-    public void Reveal(string hash)
+    public void Reveal(string hash, ProjectModel? repository = null)
     {
         Select(0);
-        Log.Reveal(hash);
+        Log.Reveal(hash, repository);
     }
 
     private static Grid Placeholder() => new()

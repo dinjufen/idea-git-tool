@@ -43,6 +43,19 @@ public sealed class AIReviewController
         _root = root;
     }
 
+    /// 正在或最近一次评审的仓库（多仓库项目中可能是嵌套仓库）；发现中的路径相对该仓库。
+    private ProjectModel? _reviewedModel;
+
+    /// 正在评审的仓库（未开始过评审时为主仓库）。
+    public ProjectModel Target => _reviewedModel ?? _model;
+
+    /// 多仓库项目：评审标题中带上仓库名。
+    public Workspace? Workspace { get; set; }
+
+    /// 多仓库项目中评审时，标题前加上仓库名。
+    private string Titled(string title, ProjectModel repository) =>
+        Workspace is { IsMultiRoot: true } workspace ? $"{workspace.DisplayName(repository)}: {title}" : title;
+
     /// 状态变化（工具窗口与编辑器标记刷新）。
     public event Action? Changed;
 
@@ -74,16 +87,16 @@ public sealed class AIReviewController
     {
         if (Result is not { } result) return false;
         if (result.Revision is not { } revision) return true;
-        var head = _model.Status.Branch.Oid ?? "";
+        var head = Target.Status.Branch.Oid ?? "";
         var matchesHead = revision == "HEAD" || (head.Length > 0 && head.StartsWith(revision, StringComparison.Ordinal))
                           || (revision.Length > 0 && head.Length > 0 && revision.StartsWith(head, StringComparison.Ordinal));
-        return matchesHead && !_model.Status.Changes.Any(c => c.Path == path);
+        return matchesHead && !Target.Status.Changes.Any(c => c.Path == path);
     }
 
-    /// 工作区文件上未应用的发现（下标与发现），用于编辑器标记。
-    public List<(int Index, ReviewFinding Finding)> WorkingTreeFindings(string path)
+    /// 工作区文件上未应用的发现（下标与发现），用于编辑器标记；`repository` 为文件所属的仓库。
+    public List<(int Index, ReviewFinding Finding)> WorkingTreeFindings(string path, ProjectModel? repository = null)
     {
-        if (Result is not { } result || !IsWorkingTreeResult(path)) return [];
+        if ((repository ?? _model) != Target || Result is not { } result || !IsWorkingTreeResult(path)) return [];
         return [.. result.Findings.Select((f, i) => (i, f)).Where(x => x.f.File == path && !Applied.Contains(x.i))];
     }
 
@@ -129,30 +142,33 @@ public sealed class AIReviewController
 
     // MARK: - 评审
 
-    public Task ReviewLocalChanges(IReadOnlyList<string> paths)
+    public Task ReviewLocalChanges(IReadOnlyList<string> paths, ProjectModel? repository = null)
     {
-        var count = paths.Count == 0 ? _model.Status.Changes.Length : paths.Count;
-        return Start(new ReviewScope.LocalChanges([.. paths]), L10n.Tr("ai.scope.local", count));
+        var owner = repository ?? _model;
+        var count = paths.Count == 0 ? owner.Status.Changes.Length : paths.Count;
+        return Start(new ReviewScope.LocalChanges([.. paths]), Titled(L10n.Tr("ai.scope.local", count), owner), owner);
     }
 
-    public Task ReviewCommits(IReadOnlyList<string> hashes, string? subject)
+    public Task ReviewCommits(IReadOnlyList<string> hashes, string? subject, ProjectModel? repository = null)
     {
+        var owner = repository ?? _model;
         var title = hashes.Count == 1
             ? L10n.Tr("ai.scope.commit", hashes[0][..Math.Min(8, hashes[0].Length)], subject ?? "")
             : L10n.Tr("ai.scope.commits", hashes.Count);
-        return Start(new ReviewScope.Commits([.. hashes]), title);
+        return Start(new ReviewScope.Commits([.. hashes]), Titled(title, owner), owner);
     }
 
-    public Task ReviewBranch(string against)
+    public Task ReviewBranch(string against, ProjectModel? repository = null)
     {
-        var head = _model.Status.Branch.Head ?? "HEAD";
-        return Start(new ReviewScope.BranchCompare(against, "HEAD"), L10n.Tr("ai.scope.branch", head, against));
+        var owner = repository ?? _model;
+        var head = owner.Status.Branch.Head ?? "HEAD";
+        return Start(new ReviewScope.BranchCompare(against, "HEAD"), Titled(L10n.Tr("ai.scope.branch", head, against), owner), owner);
     }
 
-    public Task Rerun() => _scope is { } scope && !IsRunning ? Start(scope, Title) : Task.CompletedTask;
+    public Task Rerun() => _scope is { } scope && !IsRunning ? Start(scope, Title, Target) : Task.CompletedTask;
 
-    /// 开始评审；`completion` 在结束时调用（失败或取消时参数为 null）。
-    public async Task Start(ReviewScope scope, string title, bool allowSkip = false, Action<ReviewResult?>? completion = null)
+    /// 开始评审；`repository` 为被评审的仓库（默认主仓库）；`completion` 在结束时调用（失败或取消时参数为 null）。
+    public async Task Start(ReviewScope scope, string title, ProjectModel? repository = null, bool allowSkip = false, Action<ReviewResult?>? completion = null)
     {
         if (IsRunning)
         {
@@ -171,6 +187,7 @@ public sealed class AIReviewController
             return;
         }
         var current = ++_generation;
+        _reviewedModel = repository ?? _model;
         _scope = scope;
         Title = title;
         _completion = completion;
@@ -190,8 +207,8 @@ public sealed class AIReviewController
         var options = new ReviewOptions(AISettings.ReviewLanguage.PromptName(), [.. AISettings.SensitivePatterns], 0, 0);
         // 回调来自核心的后台线程：按顺序转到界面线程处理，丢弃旧评审的事件。
         var listener = new ListenerBridge(e => _dispatcher.TryEnqueue(() => Handle(e, current)));
-        var repository = _model.Repository;
-        _task = await Task.Run(() => repository.StartAiReview(config, apiKey, scope, options, listener));
+        var target = Target.Repository;
+        _task = await Task.Run(() => target.StartAiReview(config, apiKey, scope, options, listener));
     }
 
     public void Cancel()
@@ -312,7 +329,7 @@ public sealed class AIReviewController
     public async Task<bool> ReviewBeforeCommit(IReadOnlyList<string> paths)
     {
         var source = new TaskCompletionSource<ReviewResult?>();
-        await Start(new ReviewScope.LocalChanges([.. paths]), L10n.Tr("ai.scope.local", paths.Count), allowSkip: true, result => source.TrySetResult(result));
+        await Start(new ReviewScope.LocalChanges([.. paths]), L10n.Tr("ai.scope.local", paths.Count), allowSkip: true, completion: result => source.TrySetResult(result));
         var result = await source.Task;
         if (_root() is not { } root) return false;
         if (result is null)

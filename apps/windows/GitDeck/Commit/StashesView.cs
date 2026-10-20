@@ -12,8 +12,13 @@ namespace GitDeck.Commit;
 /// 提交工具窗口的 “储藏” 标签（IDEA New UI 的 Stash 标签，与 mac 端 StashesView 一致）：储藏列表，展开为改动的文件。
 public sealed class StashesView : Grid
 {
-    private readonly ProjectModel _model;
-    private readonly GitOperations _operations;
+    private ProjectModel _model;
+    private GitOperations _operations;
+    /// 多仓库项目中选择显示哪个仓库。
+    private readonly RepositoryPicker _repositories = new();
+
+    /// 调试：选择显示的仓库。
+    public void DebugSelect(ProjectModel repository) => _repositories.Select(repository);
     private readonly SimpleTree _tree = new(ListViewSelectionMode.Single, L10n.Tr("stash.empty"));
     private readonly List<IconButton> _actionButtons = [];
 
@@ -30,15 +35,27 @@ public sealed class StashesView : Grid
         _tree.Expanding += LoadFiles;
         _tree.Invoked += node =>
         {
-            if (node is { Tag: ChangedFile file, Parent.Tag: StashEntry stash }) ShowFileDiff?.Invoke(stash, file);
+            if (node is { Tag: ChangedFile file, Parent.Tag: StashEntry stash }) ShowFileDiff?.Invoke(_model, stash, file);
         };
         _tree.MenuRequested += (target, point) => ContextMenu().ShowAt(target, point);
         _model.Changed += Reload;
         Reload();
     }
 
-    /// 打开储藏中文件的 Diff。
-    public event Action<StashEntry, ChangedFile>? ShowFileDiff;
+    /// 打开储藏中文件的 Diff（参数含储藏所在的仓库）。
+    public event Action<ProjectModel, StashEntry, ChangedFile>? ShowFileDiff;
+
+    /// 多仓库项目：在工具栏显示仓库选择，切换后显示所选仓库的储藏。
+    public void Attach(Workspace workspace, Func<ProjectModel, GitOperations> operationsFor) =>
+        _repositories.Configure(workspace, _model, repository =>
+        {
+            _model.Changed -= Reload;
+            _model = repository;
+            _operations = operationsFor(repository);
+            _model.Changed += Reload;
+            _tree.SetRoots([], _ => "");
+            Reload();
+        });
 
     private FrameworkElement BuildToolbar()
     {
@@ -55,7 +72,8 @@ public sealed class StashesView : Grid
             Margin = new Thickness(6, 0, 0, 2),
             Children =
             {
-                Button(Icon.Refresh, "git.action.refresh", _model.Refresh, needsSelection: false),
+                _repositories,
+                Button(Icon.Refresh, "git.action.refresh", () => _model.Refresh(), needsSelection: false),
                 Button(Icon.Unstash, "stash.action.apply", () => WithSelected(s => _operations.ApplyStash(s, pop: false))),
                 Button(Icon.Pop, "stash.action.pop", () => WithSelected(s => _operations.ApplyStash(s, pop: true))),
                 Button(Icon.Branch, "stash.action.branch", () => WithSelected(_operations.UnstashAsBranch)),

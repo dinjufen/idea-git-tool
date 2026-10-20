@@ -13,7 +13,7 @@ using Microsoft.UI.Xaml.Shapes;
 namespace GitDeck.Git;
 
 /// Git 工具窗口的 Log 标签页：筛选栏 + 提交图列表 + 提交详情，布局对齐 IDEA（与 mac 端 LogView 一致）。
-/// 多仓库合并显示在 W8 中加入。
+/// 多仓库项目中可显示全部仓库（按时间合并、行首色条标识仓库）或只显示其中一个（与 mac 端一致）。
 public sealed class LogView : Grid
 {
     private const uint PageSize = 2000;
@@ -30,8 +30,17 @@ public sealed class LogView : Grid
         ("log.filter.date.year", 365 * 86_400),
     ];
 
-    private readonly ProjectModel _model;
+    /// 当前显示的仓库（显示全部仓库时为主仓库，用于分支筛选等）。
+    private ProjectModel _model;
+    private readonly ProjectModel _primary;
     private readonly GitOperations _operations;
+    private readonly ComboBox _repository = new() { MinWidth = 0, Visibility = Visibility.Collapsed };
+    private Workspace? _workspace;
+    /// 显示全部仓库的提交。
+    private bool _showsAll;
+    /// 提交所属的仓库（合并显示时使用）。
+    private Dictionary<LogCommit, ProjectModel> _owners = new(ReferenceEqualityComparer.Instance);
+    private bool _updatingRepositories;
     private readonly TextBox _search = new() { PlaceholderText = L10n.Tr("log.filter.search"), Width = 200 };
     private readonly ComboBox _branch = new() { MinWidth = 0 };
     private readonly ComboBox _user = new() { MinWidth = 0 };
@@ -56,18 +65,37 @@ public sealed class LogView : Grid
     public LogView(ProjectModel model, GitOperations operations)
     {
         _model = model;
+        _primary = model;
         _operations = operations;
         BuildLayout();
-        _details.OpenFile += path => OpenFile?.Invoke(System.IO.Path.Combine(_model.RootPath, path));
-        _details.ShowDiff += (commit, file) => ShowCommitDiff?.Invoke(commit.Hash, commit.Parents.FirstOrDefault(), file);
+        _details.OpenFile += path => OpenFile?.Invoke(System.IO.Path.Combine(SelectedOwner.RootPath, path));
+        _details.ShowDiff += (commit, file) => ShowCommitDiff?.Invoke(commit.Hash, commit.Parents.FirstOrDefault(), file, SelectedOwner);
         _model.Changed += ModelChanged;
         ModelChanged();
     }
 
     public event Action<string>? OpenFile;
 
-    /// 打开历史提交中某个文件的 Diff：提交哈希、第一个父提交、文件。
-    public event Action<string, string?, ChangedFile>? ShowCommitDiff;
+    /// 打开历史提交中某个文件的 Diff：提交哈希、第一个父提交、文件、提交所在的仓库。
+    public event Action<string, string?, ChangedFile, ProjectModel>? ShowCommitDiff;
+
+    /// 多仓库：取得某个仓库的操作对象（右键菜单作用于提交所在的仓库）。
+    public Func<ProjectModel, GitOperations>? OperationsFor { get; set; }
+
+    /// 多仓库项目：Log 可以显示全部仓库或只显示其中一个。
+    public Workspace? Workspace
+    {
+        get => _workspace;
+        set
+        {
+            if (_workspace is not null) _workspace.Changed -= WorkspaceChanged;
+            else _model.Changed -= ModelChanged;
+            _workspace = value;
+            if (value is not null) value.Changed += WorkspaceChanged;
+            else _model.Changed += ModelChanged;
+            WorkspaceChanged();
+        }
+    }
 
     // MARK: - 布局
 
@@ -81,6 +109,10 @@ public sealed class LogView : Grid
         _date.SelectedIndex = 0;
         RebuildBranchFilter();
         RebuildUserFilter();
+        _repository.SelectionChanged += (_, _) =>
+        {
+            if (!_updatingRepositories) RepositoryChanged();
+        };
         foreach (var combo in new[] { _branch, _user, _date })
         {
             combo.SelectionChanged += (_, _) =>
@@ -102,7 +134,8 @@ public sealed class LogView : Grid
         var refresh = new IconButton(Icon.Refresh, L10n.Tr("git.action.refresh"), 26, 13);
         refresh.Click += (_, _) =>
         {
-            _model.Refresh();
+            if (_workspace is not null) _workspace.RefreshAll();
+            else _model.Refresh();
             Reload();
         };
         _status.Style = (Style)Application.Current.Resources["SecondaryTextStyle"];
@@ -110,7 +143,7 @@ public sealed class LogView : Grid
         filterBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         filterBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         filterBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        filterBar.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { _search, _branch, _user, _date, refresh } });
+        filterBar.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { _search, _repository, _branch, _user, _date, refresh } });
         SetColumn(_status, 2);
         filterBar.Children.Add(_status);
         Children.Add(filterBar);
@@ -220,12 +253,89 @@ public sealed class LogView : Grid
         Reload();
     }
 
+    // MARK: - 仓库
+
+    /// 仓库列表变化时重建仓库筛选；任一仓库的引用变化时重新加载。
+    private void WorkspaceChanged()
+    {
+        if (_workspace is not { } workspace) return;
+        _repository.Visibility = workspace.IsMultiRoot ? Visibility.Visible : Visibility.Collapsed;
+        if (workspace.IsMultiRoot)
+        {
+            var names = workspace.Models.Select(workspace.DisplayName).ToList();
+            var current = _repository.Items.OfType<ComboBoxItem>().Skip(1).Select(i => i.Tag as string).ToList();
+            if (!names.SequenceEqual(current))
+            {
+                _updatingRepositories = true;
+                _repository.Items.Clear();
+                _repository.Items.Add(new ComboBoxItem { Content = L10n.Tr("log.filter.repo.all") });
+                var dark = ActualTheme == ElementTheme.Dark;
+                foreach (var repository in workspace.Models)
+                {
+                    _repository.Items.Add(new ComboBoxItem
+                    {
+                        Tag = workspace.DisplayName(repository),
+                        Content = new StackPanel
+                        {
+                            Orientation = Orientation.Horizontal,
+                            Spacing = 6,
+                            Children =
+                            {
+                                new Border { Width = 10, Height = 10, CornerRadius = new CornerRadius(2.5), VerticalAlignment = VerticalAlignment.Center, Background = new SolidColorBrush(workspace.Color(repository, dark)) },
+                                new TextBlock { Text = workspace.DisplayName(repository), VerticalAlignment = VerticalAlignment.Center },
+                            },
+                        },
+                    });
+                }
+                if (!workspace.Models.Contains(_model)) _model = workspace.Primary;
+                _repository.SelectedIndex = _showsAll ? 0 : workspace.Models.ToList().IndexOf(_model) + 1;
+                _updatingRepositories = false;
+            }
+        }
+        else if (_showsAll || _model != workspace.Primary)
+        {
+            _showsAll = false;
+            _model = workspace.Primary;
+        }
+        ModelChanged();
+    }
+
+    private void RepositoryChanged()
+    {
+        if (_workspace is not { } workspace) return;
+        var index = _repository.SelectedIndex;
+        _showsAll = index == 0;
+        _model = index >= 1 && index - 1 < workspace.Models.Count ? workspace.Models[index - 1] : workspace.Primary;
+        _lastSignature = null;
+        _maxCount = PageSize;
+        _hasLoaded = false;
+        ModelChanged();
+    }
+
+    /// 显示全部仓库（多仓库项目中选择 “所有仓库”）。
+    private bool IsCombined => _showsAll && _workspace is { IsMultiRoot: true };
+
+    /// 调试：切换到 “所有仓库”。
+    public void DebugShowAll()
+    {
+        if (_repository.Items.Count > 0) _repository.SelectedIndex = 0;
+    }
+
+    /// 提交所属的仓库。
+    private ProjectModel Owner(LogCommit commit) => _owners.TryGetValue(commit, out var owner) ? owner : _model;
+
+    /// 选中提交所在的仓库。
+    private ProjectModel SelectedOwner => _list.SelectedItem is LogCommit commit ? Owner(commit) : _model;
+
+    private GitOperations OperationsOf(ProjectModel repository) => OperationsFor?.Invoke(repository) ?? _operations;
+
     // MARK: - 加载
 
     private void ModelChanged()
     {
-        if (_model.IsRefreshing) return;
-        var signature = _model.RefsSignature;
+        var repositories = IsCombined ? _workspace!.Models.ToList() : [_model];
+        if (repositories.Any(r => r.IsRefreshing)) return;
+        var signature = (IsCombined ? "all\n" : "") + string.Join("\u001e", repositories.Select(r => r.RefsSignature));
         if (signature == _lastSignature) return;
         _lastSignature = signature;
         RebuildBranchFilter();
@@ -237,23 +347,43 @@ public sealed class LogView : Grid
         var generation = ++_loadGeneration;
         var filter = CurrentFilter;
         var filtered = IsFiltered;
-        var repository = _model.Repository;
+        var combined = IsCombined;
+        var sources = combined ? _workspace!.Models.ToList() : [_model];
+        var repositories = sources.Select(s => s.Repository).ToList();
         _isLoading = true;
         _status.Text = L10n.Tr("log.loading");
-        Task.Run(() => repository.Log(filter)).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
+        Task.Run(() =>
+        {
+            if (!combined) return new List<(int Index, LogPage Page)> { (0, repositories[0].Log(filter)) };
+            // 合并显示：分支筛选只对含有该分支的仓库生效，其他仓库跳过。
+            var pages = new List<(int Index, LogPage Page)>();
+            for (var i = 0; i < repositories.Count; i++)
+            {
+                try
+                {
+                    pages.Add((i, repositories[i].Log(filter)));
+                }
+                catch (CoreException)
+                {
+                }
+            }
+            return pages;
+        }).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
         {
             if (generation != _loadGeneration) return;
             _isLoading = false;
             if (task.Exception?.InnerException is { } error)
             {
                 _commits = [];
+                _owners.Clear();
                 _list.ItemsSource = null;
                 _status.Text = L10n.Message(error);
                 return;
             }
-            var page = task.Result;
+            var page = Merge(task.Result, sources, combined, (int)filter.MaxCount);
             var selectedHash = SelectedCommits.FirstOrDefault()?.Hash;
             _commits = page.Commits;
+            _owners = page.Owners;
             _hasMore = page.HasMore;
             if (!filtered) CollectAuthors();
             _list.ItemsSource = _commits;
@@ -273,6 +403,27 @@ public sealed class LogView : Grid
             }
             _status.Text = page.HasMore ? L10n.Tr("log.count.more", page.Commits.Length) : L10n.Tr("log.count", page.Commits.Length);
         }), TaskScheduler.Default);
+    }
+
+    /// 合并各仓库的日志：按提交时间从新到旧排列，提交图改为单个节点（不同仓库的分支线无法画在同一张图中）。
+    private static (LogCommit[] Commits, Dictionary<LogCommit, ProjectModel> Owners, bool HasMore) Merge(
+        List<(int Index, LogPage Page)> pages, List<ProjectModel> sources, bool combined, int limit)
+    {
+        var owners = new Dictionary<LogCommit, ProjectModel>(ReferenceEqualityComparer.Instance);
+        if (!combined)
+        {
+            var page = pages[0].Page;
+            foreach (var commit in page.Commits) owners[commit] = sources[0];
+            return (page.Commits, owners, page.HasMore);
+        }
+        var rows = pages
+            .SelectMany(p => p.Page.Commits.Select(c => (Commit: c with { Graph = new GraphRow(0, 0, [], 1) }, Owner: sources[p.Index])))
+            .OrderByDescending(r => r.Commit.CommitterTime)
+            .ToList();
+        var hasMore = pages.Any(p => p.Page.HasMore) || rows.Count > limit;
+        rows = [.. rows.Take(limit)];
+        foreach (var (commit, owner) in rows) owners[commit] = owner;
+        return ([.. rows.Select(r => r.Commit)], owners, hasMore);
     }
 
     /// 从未筛选的结果中收集作者，按提交数排序，供 User 筛选使用。
@@ -301,7 +452,7 @@ public sealed class LogView : Grid
             _details.Show(null);
             return;
         }
-        var repository = _model.Repository;
+        var repository = Owner(commit).Repository;
         var hash = commit.Hash;
         Task.Run(() => repository.CommitDetails(hash)).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
         {
@@ -317,9 +468,17 @@ public sealed class LogView : Grid
     }
 
     /// 选中并滚动到某个提交；当前筛选条件下不可见时清空筛选后重新加载。
-    public void Reveal(string hash)
+    /// 多仓库项目中 `repository` 为提交所在的仓库：当前显示的不是该仓库（也不是全部仓库）时切换过去。
+    public void Reveal(string hash, ProjectModel? repository = null)
     {
-        if (_commits.FirstOrDefault(c => c.Hash == hash) is { } commit)
+        if (repository is not null && _workspace is { IsMultiRoot: true } workspace && !_showsAll && repository != _model
+            && workspace.Models.Contains(repository))
+        {
+            _pendingReveal = hash;
+            _repository.SelectedIndex = workspace.Models.ToList().IndexOf(repository) + 1;
+            return;
+        }
+        if (_commits.FirstOrDefault(c => c.Hash == hash && (repository is null || Owner(c) == repository)) is { } commit)
         {
             _list.SelectedItem = commit;
             _list.ScrollIntoView(commit);
@@ -345,41 +504,48 @@ public sealed class LogView : Grid
         var targets = SelectedCommits.ToList();
         var single = targets.Count == 1 ? targets[0] : null;
         var menu = new MenuFlyout();
+        // 右键菜单作用于提交所在的仓库；选中的提交跨多个仓库时只能复制哈希。
+        var owners = targets.Select(Owner).Distinct().ToList();
+        var owner = owners.Count == 1 ? owners[0] : owners.Count == 0 ? _model : null;
+        var operations = owner is null ? null : OperationsOf(owner);
         void Add(string key, Action? action, bool enabled = true)
         {
-            var item = new MenuFlyoutItem { Text = L10n.Tr(key), IsEnabled = enabled && action is not null && !_operations.IsRunning };
+            var item = new MenuFlyoutItem { Text = L10n.Tr(key), IsEnabled = enabled && action is not null && operations is { IsRunning: false } };
             if (action is not null) item.Click += (_, _) => action();
             menu.Items.Add(item);
         }
-        Add("log.menu.copyHash", () =>
+        var copy = new MenuFlyoutItem { Text = L10n.Tr("log.menu.copyHash"), IsEnabled = targets.Count > 0 };
+        copy.Click += (_, _) =>
         {
             var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
             package.SetText(string.Join("\n", targets.Select(c => c.Hash)));
             Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
-        }, targets.Count > 0);
+        };
+        menu.Items.Add(copy);
         menu.Items.Add(new MenuFlyoutSeparator());
-        Add("log.menu.checkout", () => _ = _operations.Checkout(GitOperations.TargetKind.Revision, single!.Hash), single is not null);
-        Add("log.menu.newBranch", () => _ = _operations.NewBranch(single!.Hash), single is not null);
-        Add("log.menu.newTag", () => _ = _operations.NewTag(single!.Hash), single is not null);
+        Add("log.menu.checkout", () => _ = operations!.Checkout(GitOperations.TargetKind.Revision, single!.Hash), single is not null);
+        Add("log.menu.newBranch", () => _ = operations!.NewBranch(single!.Hash), single is not null);
+        Add("log.menu.newTag", () => _ = operations!.NewTag(single!.Hash), single is not null);
         menu.Items.Add(new MenuFlyoutSeparator());
         // 补丁按从旧到新排列。
-        Add("log.menu.createPatch", () => _ = _operations.CreatePatchFromCommits([.. Enumerable.Reverse(targets).Select(c => c.Hash)]), targets.Count > 0);
-        // AI 评审选中的提交（按从旧到新传入）。
-        Add("log.menu.aiReview", () => _ = AiReview?.ReviewCommits([.. Enumerable.Reverse(targets).Select(c => c.Hash)], single?.Subject),
+        Add("log.menu.createPatch", () => _ = operations!.CreatePatchFromCommits([.. Enumerable.Reverse(targets).Select(c => c.Hash)]), targets.Count > 0);
+        // AI 评审选中的提交（按从旧到新传入），评审提交所在的仓库。
+        Add("log.menu.aiReview", () => _ = AiReview?.ReviewCommits([.. Enumerable.Reverse(targets).Select(c => c.Hash)], single?.Subject, owner),
             targets.Count > 0 && AiReview is { IsRunning: false });
         menu.Items.Add(new MenuFlyoutSeparator());
         // 拣选按从旧到新应用；还原按从新到旧进行，与 IDEA 一致。
-        Add("log.menu.cherryPick", () => _ = _operations.CherryPick([.. Enumerable.Reverse(targets).Select(c => c.Hash)]), targets.Count > 0);
-        Add("log.menu.revert", () => _ = _operations.Revert([.. targets.Select(c => c.Hash)]), targets.Count > 0);
-        Add("log.menu.reset", () => _ = _operations.ResetDialog(single!.Hash, single.Subject), single is not null);
+        Add("log.menu.cherryPick", () => _ = operations!.CherryPick([.. Enumerable.Reverse(targets).Select(c => c.Hash)]), targets.Count > 0);
+        Add("log.menu.revert", () => _ = operations!.Revert([.. targets.Select(c => c.Hash)]), targets.Count > 0);
+        Add("log.menu.reset", () => _ = operations!.ResetDialog(single!.Hash, single.Subject), single is not null);
         menu.Items.Add(new MenuFlyoutSeparator());
-        // 与 IDEA 一致：只能撤销当前分支的最新提交；改写历史只适用于当前分支上的提交。
-        var head = _model.Status.Branch.Oid;
+        // 与 IDEA 一致：只能撤销当前分支的最新提交；改写历史只适用于所在仓库当前分支上的提交。
+        var head = owner?.Status.Branch.Oid;
         bool OnCurrentBranch(LogCommit commit)
         {
+            if (owner is null) return false;
             try
             {
-                return _model.Repository.IsAncestor(commit.Hash, "HEAD");
+                return owner.Repository.IsAncestor(commit.Hash, "HEAD");
             }
             catch (CoreException)
             {
@@ -387,16 +553,16 @@ public sealed class LogView : Grid
             }
         }
         var singleOnBranch = single is not null && OnCurrentBranch(single);
-        Add("log.menu.undoCommit", () => _ = _operations.UndoCommit(single!.Hash), single is not null && single.Hash == head);
-        Add("log.menu.editMessage", () => _ = EditMessage(single!), singleOnBranch);
-        Add("log.menu.drop", () => _ = _operations.DropCommits([.. targets.Select(c => c.Hash)]), targets.Count > 0 && targets.All(OnCurrentBranch));
-        Add("log.menu.interactiveRebase", () => _ = _operations.InteractiveRebase(single!.Hash), singleOnBranch);
+        Add("log.menu.undoCommit", () => _ = operations!.UndoCommit(single!.Hash), single is not null && single.Hash == head);
+        Add("log.menu.editMessage", () => _ = EditMessage(single!, owner!), singleOnBranch);
+        Add("log.menu.drop", () => _ = operations!.DropCommits([.. targets.Select(c => c.Hash)]), targets.Count > 0 && targets.All(OnCurrentBranch));
+        Add("log.menu.interactiveRebase", () => _ = operations!.InteractiveRebase(single!.Hash), singleOnBranch);
         return menu;
     }
 
-    private async Task EditMessage(LogCommit commit)
+    private async Task EditMessage(LogCommit commit, ProjectModel owner)
     {
-        var repository = _model.Repository;
+        var repository = owner.Repository;
         string? message = null;
         try
         {
@@ -405,7 +571,7 @@ public sealed class LogView : Grid
         catch (CoreException)
         {
         }
-        await _operations.EditMessage(commit.Hash, message ?? commit.Subject);
+        await OperationsOf(owner).EditMessage(commit.Hash, message ?? commit.Subject);
     }
 
     // MARK: - 行
@@ -414,7 +580,10 @@ public sealed class LogView : Grid
     {
         if (args.InRecycleQueue || args.ItemContainer.ContentTemplateRoot is not Grid root || args.Item is not LogCommit commit) return;
         if (root.Children.Count == 0) root.Children.Add(new LogRow());
-        ((LogRow)root.Children[0]).Bind(commit, commit.Hash == _model.Status.Branch.Oid);
+        // 合并显示时行首色条与节点使用所属仓库的标识色。
+        var owner = Owner(commit);
+        var stripe = IsCombined ? _workspace!.Color(owner, ActualTheme == ElementTheme.Dark) : (Windows.UI.Color?)null;
+        ((LogRow)root.Children[0]).Bind(commit, commit.Hash == owner.Status.Branch.Oid, stripe);
         LoadMoreIfNeeded(args.ItemIndex);
         args.Handled = true;
     }
@@ -432,6 +601,7 @@ public sealed class LogView : Grid
     private sealed class LogRow : Grid
     {
         private readonly Canvas _graph = new() { Height = RowHeight, VerticalAlignment = VerticalAlignment.Center };
+        private readonly Border _stripe = new() { Width = 3, HorizontalAlignment = HorizontalAlignment.Left, Visibility = Visibility.Collapsed };
         private readonly StackPanel _refs = new() { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
         private readonly TextBlock _subject = new() { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
         private readonly TextBlock _author = new() { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(6, 0, 6, 0) };
@@ -460,6 +630,7 @@ public sealed class LogView : Grid
             Children.Add(subject);
             Children.Add(_author);
             Children.Add(_date);
+            Children.Add(_stripe);
             ActualThemeChanged += (_, _) =>
             {
                 if (Commit is { } commit) BuildRefs(commit);
@@ -468,10 +639,12 @@ public sealed class LogView : Grid
 
         public LogCommit? Commit { get; private set; }
 
-        public void Bind(LogCommit commit, bool isHead)
+        public void Bind(LogCommit commit, bool isHead, Windows.UI.Color? stripe = null)
         {
             Commit = commit;
-            DrawGraph(commit.Graph);
+            _stripe.Visibility = stripe is null ? Visibility.Collapsed : Visibility.Visible;
+            if (stripe is { } color) _stripe.Background = new SolidColorBrush(color);
+            DrawGraph(commit.Graph, stripe);
             BuildRefs(commit);
             _subject.Text = commit.Subject;
             // 当前 HEAD 所在提交标题加粗，与 IDEA 一致。
@@ -483,7 +656,7 @@ public sealed class LogView : Grid
             ToolTipService.SetToolTip(_date, LogDates.Detailed(commit.AuthorTime));
         }
 
-        private void DrawGraph(GraphRow graph)
+        private void DrawGraph(GraphRow graph, Windows.UI.Color? stripe)
         {
             _graph.Children.Clear();
             _graph.Width = graph.Width * LaneWidth + 8;
@@ -510,7 +683,7 @@ public sealed class LogView : Grid
                 });
             }
             const double r = 3.5;
-            var node = new Ellipse { Width = r * 2, Height = r * 2, Fill = new SolidColorBrush(GraphPalette.Color(graph.Color)) };
+            var node = new Ellipse { Width = r * 2, Height = r * 2, Fill = new SolidColorBrush(stripe ?? GraphPalette.Color(graph.Color)) };
             Canvas.SetLeft(node, X(graph.Lane) - r);
             Canvas.SetTop(node, h / 2 - r);
             _graph.Children.Add(node);

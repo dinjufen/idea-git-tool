@@ -12,8 +12,13 @@ namespace GitDeck.Git;
 /// Git 工具窗口的 Worktrees 标签（与 mac 端 WorktreesView 一致）：列出工作树，可新建、在新窗口中打开、删除。
 public sealed class WorktreesView : Grid
 {
-    private readonly ProjectModel _model;
-    private readonly GitOperations _operations;
+    private ProjectModel _model;
+    private GitOperations _operations;
+    /// 多仓库项目中选择显示哪个仓库。
+    private readonly RepositoryPicker _repositories = new();
+
+    /// 调试：选择显示的仓库。
+    public void DebugSelect(ProjectModel repository) => _repositories.Select(repository);
     private readonly ListView _list = new() { SelectionMode = ListViewSelectionMode.Single };
     private readonly TextBlock _status = new() { VerticalAlignment = VerticalAlignment.Center };
     private readonly IconButton _open;
@@ -39,7 +44,7 @@ public sealed class WorktreesView : Grid
         var toolbar = new Grid { Margin = new Thickness(6, 2, 12, 2) };
         toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        toolbar.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Children = { refresh, add, _open, _remove } });
+        toolbar.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Children = { _repositories, refresh, add, _open, _remove } });
         SetColumn(_status, 1);
         toolbar.Children.Add(_status);
         Children.Add(toolbar);
@@ -56,16 +61,29 @@ public sealed class WorktreesView : Grid
         Children.Add(_list);
 
         // 分支或 HEAD 变化（例如新建了工作树）后刷新。
-        _model.Changed += () =>
-        {
-            if (!_model.IsRefreshing && Visibility == Visibility.Visible) Reload();
-        };
+        _model.Changed += ModelChanged;
         RegisterPropertyChangedCallback(VisibilityProperty, (_, _) =>
         {
             if (Visibility == Visibility.Visible) Reload();
         });
         UpdateButtons();
     }
+
+    private void ModelChanged()
+    {
+        if (!_model.IsRefreshing && Visibility == Visibility.Visible) Reload();
+    }
+
+    /// 多仓库项目：在工具栏显示仓库选择，切换后显示所选仓库的工作树。
+    public void Attach(Workspace workspace, Func<ProjectModel, GitOperations> operationsFor) =>
+        _repositories.Configure(workspace, _model, repository =>
+        {
+            _model.Changed -= ModelChanged;
+            _model = repository;
+            _operations = operationsFor(repository);
+            _model.Changed += ModelChanged;
+            Reload();
+        });
 
     public void Reload()
     {

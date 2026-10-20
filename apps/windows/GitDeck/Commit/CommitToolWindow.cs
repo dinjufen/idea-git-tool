@@ -320,7 +320,7 @@ public sealed class CommitToolWindow : Grid
                 Button(Icon.Diff, "commit.action.showDiff", () => Activate(SelectedRows.FirstOrDefault())),
                 // AI 评审（W7）在对应批次中启用。
                 Button(Icon.Shelve, "commit.action.shelve", ShelveSelected),
-                Button(Icon.Sparkles, "ai.action.reviewSelected", () => _ = AiReview?.ReviewLocalChanges(IncludedPaths)),
+                Button(Icon.Sparkles, "ai.action.reviewSelected", ReviewIncluded),
                 Button(Icon.ExpandAll, "tree.expandAll", () => { _collapsed.Clear(); Rebuild(); }),
                 Button(Icon.CollapseAll, "tree.collapseAll", () => { foreach (var g in _groups) _collapsed.Add(g.Key); Rebuild(); }),
             },
@@ -1017,6 +1017,33 @@ public sealed class CommitToolWindow : Grid
         ai.Click += (_, _) => AI.AISettings.ReviewBeforeCommit = !AI.AISettings.ReviewBeforeCommit;
         var menu = new MenuFlyout { Items = { signOff, hooks, new MenuFlyoutSeparator(), ai } };
         menu.ShowAt(_optionsButton, new FlyoutShowOptions { Placement = FlyoutPlacementMode.TopEdgeAlignedRight });
+    }
+
+    /// AI 评审勾选的改动：只涉及一个仓库时直接评审，涉及多个仓库时先选择仓库（与 mac 端一致）。
+    public void ReviewIncluded()
+    {
+        if (AiReview is not { } review) return;
+        var groups = Grouped(IncludedEntries);
+        if (groups.Count <= 1)
+        {
+            var (repository, paths) = groups.Count == 1 ? groups[0] : (_model, []);
+            _ = review.ReviewLocalChanges(paths, repository);
+            return;
+        }
+        var menu = new MenuFlyout();
+        menu.Items.Add(new MenuFlyoutItem { Text = L10n.Tr("ai.pickRepository"), IsEnabled = false });
+        var dark = ActualTheme == ElementTheme.Dark;
+        foreach (var (repository, paths) in groups)
+        {
+            var item = new MenuFlyoutItem
+            {
+                Text = $"{_workspace.DisplayName(repository)}  ({paths.Count})",
+                Icon = new FontIcon { Glyph = "\u25A0", FontFamily = new FontFamily("Segoe UI Symbol"), Foreground = new SolidColorBrush(_workspace.Color(repository, dark)) },
+            };
+            item.Click += (_, _) => _ = review.ReviewLocalChanges(paths, repository);
+            menu.Items.Add(item);
+        }
+        menu.ShowAt(this, new Windows.Foundation.Point(40, 60));
     }
 
     /// 根据勾选的文件生成提交信息；生成中再次点击取消。

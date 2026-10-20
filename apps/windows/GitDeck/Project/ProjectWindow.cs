@@ -134,6 +134,8 @@ public sealed class ProjectWindow : Window
             _aiWindow.Select(index);
         };
         _gitWindow.Log.AiReview = _aiReview;
+        _gitWindow.Log.Workspace = _workspace;
+        _gitWindow.Log.OperationsFor = OperationsFor;
         ApplyToolWindowState();
         Model.Changed += ModelChanged;
         Model.Refresh();
@@ -276,7 +278,8 @@ public sealed class ProjectWindow : Window
         _vcsWidget.Click += (_, _) => ShowBranches();
         _refreshButton.Click += (_, _) => _workspace.RefreshAll();
         // AI 评审分支（批次 C 中改为评审所选仓库）。
-        _branchesPopup.ReviewBranch = (_, name) => _aiReview.ReviewBranch(name);
+        _branchesPopup.ReviewBranch = (model, name) => _aiReview.ReviewBranch(name, model);
+        _aiReview.Workspace = _workspace;
         _banner.AddClicked += () => _workspace.Add([.. _workspace.Candidates.Select(c => c.Path)]);
         _banner.IgnoreClicked += () => _workspace.Ignore([.. _workspace.Candidates.Select(c => c.Path)]);
         _workspaceOperations.Progress += title =>
@@ -311,7 +314,7 @@ public sealed class ProjectWindow : Window
         };
         _operations.ShowRevisionFileDiff += ShowRevisionAgainstWorkingTree;
         _gitWindow.Log.OpenFile += path => _editor.Open(path);
-        _gitWindow.Log.ShowCommitDiff += ShowCommitFile;
+        _gitWindow.Log.ShowCommitDiff += (hash, parent, file, model) => ShowCommitFile(hash, parent, file, model);
         _editor.CaretInfoChanged += _statusBar.SetEditorInfo;
         _editor.ShowCommit += hash =>
         {
@@ -336,6 +339,9 @@ public sealed class ProjectWindow : Window
         };
         _stashes.ShowFileDiff += ShowStashFile;
         _shelf.ShowFileDiff += ShowShelfFile;
+        _stashes.Attach(_workspace, OperationsFor);
+        _shelf.Attach(_workspace, OperationsFor);
+        _gitWindow.Worktrees.Attach(_workspace, OperationsFor);
         _gitWindow.OpenHistoryDiff += (hash, parent, file, model) => ShowCommitFile(hash, parent, file, model);
         _editor.Message += (text, isError) => _statusBar.SetMessage(text, isError);
 
@@ -528,7 +534,7 @@ public sealed class ProjectWindow : Window
         operations.RevealCommit += hash =>
         {
             Show(ToolWindowId.Git);
-            _gitWindow.Reveal(hash);
+            _gitWindow.Reveal(hash, model);
         };
         operations.Conflicts += ConflictsFor(model).RequestConflicts;
         _extraOperations[model] = operations;
@@ -630,7 +636,7 @@ public sealed class ProjectWindow : Window
     public bool IsAiReviewRunning => _aiReview.IsRunning;
 
     /// AI 评审本地改动：Commit 工具窗口中勾选了文件时只评审勾选的文件。
-    public void ReviewLocalChanges() => _ = _aiReview.ReviewLocalChanges(_commitWindow.IncludedPaths);
+    public void ReviewLocalChanges() => _commitWindow.ReviewIncluded();
 
     /// 跳转到发现所在位置：工作区版本在编辑器中打开，历史版本打开该提交中文件的 Diff。
     private void OpenFinding(int index)
@@ -640,12 +646,12 @@ public sealed class ProjectWindow : Window
         var line = Math.Max(0, (int)finding.Line - 1);
         if (_aiReview.IsWorkingTreeResult(finding.File))
         {
-            var path = Path.Combine(Model.RootPath, finding.File);
+            var path = Path.Combine(_aiReview.Target.RootPath, finding.File);
             if (File.Exists(path)) _editor.Open(path, line);
         }
         else if (result.Revision is { } revision)
         {
-            ShowCommitFile(revision, revision + "^", new ChangedFile(finding.File, null, ChangeKind.Modified));
+            ShowCommitFile(revision, revision + "^", new ChangedFile(finding.File, null, ChangeKind.Modified), _aiReview.Target);
         }
     }
 
@@ -655,7 +661,7 @@ public sealed class ProjectWindow : Window
         if (_aiReview.Result is not { } result || index >= result.Findings.Length) return;
         var finding = result.Findings[index];
         if (finding.Suggestion is not { } suggestion || !_aiReview.IsWorkingTreeResult(finding.File)) return;
-        var path = Path.Combine(Model.RootPath, finding.File);
+        var path = Path.Combine(_aiReview.Target.RootPath, finding.File);
         var current = _editor.TextOf(path) ?? (File.Exists(path) ? await File.ReadAllTextAsync(path) : null);
         if (current is null) return;
         if (CoreApi.ApplyReviewSuggestion(current, finding.Line, suggestion.Original, suggestion.Replacement) is not { } updated)
@@ -679,7 +685,7 @@ public sealed class ProjectWindow : Window
         {
             _editor.ApplyEdit(path, text);
             _aiReview.MarkApplied(index);
-            Model.Refresh();
+            _aiReview.Target.Refresh();
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -701,13 +707,20 @@ public sealed class ProjectWindow : Window
 
     public void ManageRemotes() => Present(new RemotesDialog(Model, _operations));
 
+    /// Git > 管理仓库：查看、加入、移除本项目中的仓库。
+    public void ManageRepositories() => Present(new RepositoriesDialog(_workspace));
+
     public void ManageSubmodules() => Present(new SubmodulesDialog(Model, _operations));
+
+    /// 调试：`-debug.repo <仓库显示名>` 选择的仓库。
+    private ProjectModel? DebugRepository =>
+        DebugOptions.Get("debug.repo") is { } name ? _workspace.Models.FirstOrDefault(m => _workspace.DisplayName(m) == name) : null;
 
     private void Present(Window dialog)
     {
         dialog.Activate();
         // 调试截图：管理窗口是独立窗口，截取该窗口。
-        if (DebugOptions.Get("debug.action") is "remotes" or "submodules") Snapshot.Schedule(dialog);
+        if (DebugOptions.Get("debug.action") is "remotes" or "submodules" or "manageRepos") Snapshot.Schedule(dialog);
     }
 
     public void NewWorktree()
@@ -739,9 +752,9 @@ public sealed class ProjectWindow : Window
     }
 
     /// 储藏中的文件：已跟踪文件相对储藏时的 HEAD，未跟踪文件与空内容比较。
-    public void ShowStashFile(StashEntry stash, ChangedFile file)
+    public void ShowStashFile(ProjectModel model, StashEntry stash, ChangedFile file)
     {
-        var repository = Model.Repository;
+        var repository = model.Repository;
         var revisions = CoreApi.StashRevisions(stash.Index, file.Kind == ChangeKind.Untracked);
         var basePath = file.OrigPath ?? file.Path;
         Task.Run(() =>
@@ -760,9 +773,9 @@ public sealed class ProjectWindow : Window
     }
 
     /// 搁置中的文件：搁置时的基准内容与搁置的改动。
-    public void ShowShelfFile(ShelfEntry entry, string path)
+    public void ShowShelfFile(ProjectModel model, ShelfEntry entry, string path)
     {
-        var repository = Model.Repository;
+        var repository = model.Repository;
         Task.Run(() => repository.ShelfFileVersions(entry.Id, path)).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
         {
             if (task.IsFaulted) return;
@@ -993,6 +1006,27 @@ public sealed class ProjectWindow : Window
                         break;
                     case "push": PushAll(); break;
                     case "update": UpdateAll(); break;
+                    case "manageRepos":
+                        // 等加入的仓库加载后打开管理仓库对话框。
+                        var manageTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) };
+                        manageTimer.Tick += (_, _) =>
+                        {
+                            manageTimer.Stop();
+                            ManageRepositories();
+                        };
+                        manageTimer.Start();
+                        break;
+                    case "logAll":
+                        // 多仓库：Log 切换到 “所有仓库”。
+                        Show(ToolWindowId.Git);
+                        var logTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) };
+                        logTimer.Tick += (_, _) =>
+                        {
+                            logTimer.Stop();
+                            _gitWindow.Log.DebugShowAll();
+                        };
+                        logTimer.Start();
+                        break;
                     case "addRepos":
                         // 等检测完成后加入检测到的仓库，再展开 Project 工具窗口。
                         Show(ToolWindowId.Project);
@@ -1035,7 +1069,7 @@ public sealed class ProjectWindow : Window
                         // `-debug.aiStart`：评审本地改动，完成后跳转到第一个发现并应用其建议（配合 `-debug.aiApplyNow` 直接写入）。
                         if (DebugOptions.Has("debug.aiStart"))
                         {
-                            _ = _aiReview.Start(new ReviewScope.LocalChanges([]), L10n.Tr("ai.scope.local", Model.Status.Changes.Length), completion: result =>
+                            _ = _aiReview.Start(new ReviewScope.LocalChanges([]), L10n.Tr("ai.scope.local", Model.Status.Changes.Length), null, completion: result =>
                             {
                                 if (result is not { Findings.Length: > 0 }) return;
                                 var target = Math.Max(0, Array.FindIndex(result.Findings, f => f.Suggestion is not null));
@@ -1051,6 +1085,7 @@ public sealed class ProjectWindow : Window
                     case "worktrees":
                         Show(ToolWindowId.Git);
                         _gitWindow.ShowWorktrees();
+                        if (DebugRepository is { } worktreesRepository) _gitWindow.Worktrees.DebugSelect(worktreesRepository);
                         break;
                     case "newTag": NewTag(); break;
                     case "reset" when Model.Status.Branch.Oid is { } resetHead: _ = _operations.ResetDialog(resetHead, ""); break;
@@ -1061,10 +1096,18 @@ public sealed class ProjectWindow : Window
                     case "shelve": ShelveChanges(); break;
                     case "stashes":
                         UnstashChanges();
-                        _stashes.ExpandFirst();
+                        if (DebugRepository is { } stashRepository) _stashes.DebugSelect(stashRepository);
+                        var stashTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
+                        stashTimer.Tick += (_, _) =>
+                        {
+                            stashTimer.Stop();
+                            _stashes.ExpandFirst();
+                        };
+                        stashTimer.Start();
                         break;
                     case "shelf":
                         ShowShelf();
+                        if (DebugRepository is { } shelfRepository) _shelf.DebugSelect(shelfRepository);
                         var shelfTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
                         shelfTimer.Tick += (_, _) =>
                         {
@@ -1073,10 +1116,14 @@ public sealed class ProjectWindow : Window
                         };
                         shelfTimer.Start();
                         break;
-                    case "history" when DebugOptions.Get("debug.file") is { } historyPath: ShowFileHistory(historyPath); break;
+                    case "history" when DebugOptions.Get("debug.file") is { } historyPath:
+                        // 路径相对项目根目录；嵌套仓库中的文件显示该仓库中的历史。
+                        var (historyModel, historyRelative) = _workspace.Locate(Path.Combine(Model.RootPath, historyPath));
+                        ShowFileHistory(historyRelative, historyModel);
+                        break;
                     case "annotate" when DebugOptions.Get("debug.file") is { } annotatePath:
                         _editor.Open(Path.Combine(Model.RootPath, annotatePath));
-                        var annotateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+                        var annotateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
                         annotateTimer.Tick += (_, _) =>
                         {
                             annotateTimer.Stop();
@@ -1101,15 +1148,23 @@ public sealed class ProjectWindow : Window
                         commitTimer.Start();
                         break;
                     case "localDiff" when DebugOptions.Get("debug.file") is { } diffPath
-                                          && Model.ChangesByPath.TryGetValue(diffPath, out var diffChange):
+                                          && _workspace.Locate(Path.Combine(Model.RootPath, diffPath)) is var (diffModel, diffRelative)
+                                          && diffModel.ChangesByPath.TryGetValue(diffRelative, out var diffChange):
                         ShowCommit();
-                        ShowLocalDiff(diffChange);
+                        ShowLocalDiff(diffChange, diffModel, diffModel == Model ? null : diffPath.Replace('\\', '/'));
+                        break;
+                    case "aiReviewPick":
+                        // 多仓库：勾选的改动跨多个仓库时先选择仓库。
+                        ShowCommit();
+                        // `-debug.repo`：直接评审该仓库的本地改动（验证评审结果针对嵌套仓库）。
+                        if (DebugRepository is { } reviewRepository) _ = _aiReview.ReviewLocalChanges([], reviewRepository);
+                        else _commitWindow.ReviewIncluded();
                         break;
                 }
             };
             timer.Start();
         }
-        if (action is "remotes" or "submodules" or "settings") return;
+        if (action is "remotes" or "submodules" or "settings" or "manageRepos") return;
         if (action == "aiReview" && DebugOptions.Has("debug.aiApply") && !DebugOptions.Has("debug.aiApplyNow")) return;
         if (action == "merge")
         {

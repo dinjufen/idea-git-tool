@@ -126,6 +126,7 @@ public static class MainMenu
         menu.Items.Add(Item(L10n.Tr("patch.menu.apply"), window.ApplyPatch));
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(Item(L10n.Tr("workspace.menu.add"), window.AddRepository));
+        menu.Items.Add(Item(L10n.Tr("workspace.menu.manage"), window.ManageRepositories));
         menu.Items.Add(Item(L10n.Tr("remotes.menu"), window.ManageRemotes));
         menu.Items.Add(Item(L10n.Tr("submodules.menu"), window.ManageSubmodules));
         menu.Items.Add(Item(L10n.Tr("worktree.menu.new"), window.NewWorktree));

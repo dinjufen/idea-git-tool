@@ -12,8 +12,13 @@ namespace GitDeck.Commit;
 /// 提交工具窗口的 “搁置” 标签（IDEA 的 Shelf，与 mac 端 ShelfView 一致）：搁置的改动列表，展开为文件；可取回全部或选中的文件。
 public sealed class ShelfView : Grid
 {
-    private readonly ProjectModel _model;
-    private readonly GitOperations _operations;
+    private ProjectModel _model;
+    private GitOperations _operations;
+    /// 多仓库项目中选择显示哪个仓库。
+    private readonly RepositoryPicker _repositories = new();
+
+    /// 调试：选择显示的仓库。
+    public void DebugSelect(ProjectModel repository) => _repositories.Select(repository);
     private readonly SimpleTree _tree = new(ListViewSelectionMode.Extended, L10n.Tr("shelf.empty"));
     private readonly List<IconButton> _actionButtons = [];
     private int _loadToken;
@@ -30,14 +35,11 @@ public sealed class ShelfView : Grid
         _tree.SelectionChanged += UpdateButtons;
         _tree.Invoked += node =>
         {
-            if (node is { Tag: PatchFile file, Parent.Tag: ShelfEntry entry }) ShowFileDiff?.Invoke(entry, file.Path);
+            if (node is { Tag: PatchFile file, Parent.Tag: ShelfEntry entry }) ShowFileDiff?.Invoke(_model, entry, file.Path);
         };
         _tree.MenuRequested += (target, point) => ContextMenu().ShowAt(target, point);
         // 搁置记录不在仓库状态中：显示时及每次刷新后重新读取。
-        _model.Changed += () =>
-        {
-            if (!_model.IsRefreshing && Visibility == Visibility.Visible) Reload();
-        };
+        _model.Changed += ModelChanged;
         _operations.ShelfChanged += Reload;
         RegisterPropertyChangedCallback(VisibilityProperty, (_, _) =>
         {
@@ -46,8 +48,26 @@ public sealed class ShelfView : Grid
         UpdateButtons();
     }
 
-    /// 双击文件查看搁置的改动。
-    public event Action<ShelfEntry, string>? ShowFileDiff;
+    /// 双击文件查看搁置的改动（参数含搁置所在的仓库）。
+    public event Action<ProjectModel, ShelfEntry, string>? ShowFileDiff;
+
+    private void ModelChanged()
+    {
+        if (!_model.IsRefreshing && Visibility == Visibility.Visible) Reload();
+    }
+
+    /// 多仓库项目：在工具栏显示仓库选择，切换后显示所选仓库的搁置。
+    public void Attach(Workspace workspace, Func<ProjectModel, GitOperations> operationsFor) =>
+        _repositories.Configure(workspace, _model, repository =>
+        {
+            _model.Changed -= ModelChanged;
+            _operations.ShelfChanged -= Reload;
+            _model = repository;
+            _operations = operationsFor(repository);
+            _model.Changed += ModelChanged;
+            _operations.ShelfChanged += Reload;
+            Reload();
+        });
 
     private FrameworkElement BuildToolbar()
     {
@@ -64,6 +84,7 @@ public sealed class ShelfView : Grid
             Margin = new Thickness(6, 0, 0, 2),
             Children =
             {
+                _repositories,
                 Button(Icon.Refresh, "git.action.refresh", Reload, needsSelection: false),
                 Button(Icon.Unstash, "shelf.action.unshelve", () => WithTarget((entry, files) => _operations.Unshelve(entry, files, keep: false))),
                 Button(Icon.Trash, "shelf.action.delete", () => WithTarget((entry, _) => _operations.DeleteShelf(entry))),
