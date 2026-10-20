@@ -19,6 +19,9 @@ public sealed class SimpleTree : Grid
         public bool IsBold { get; init; }
         public bool Strikethrough { get; init; }
         public string? Tooltip { get; init; }
+
+        /// 图标颜色；为空时使用次要文字颜色。
+        public Windows.UI.Color? IconColor { get; init; }
         public Node? Parent { get; private set; }
 
         /// 子节点；null 表示尚未加载（首次展开时通过 Expanding 加载）。
@@ -100,6 +103,15 @@ public sealed class SimpleTree : Grid
         Refresh();
     }
 
+    /// 选中并滚动到某个可见节点。
+    public void SelectNode(Node node)
+    {
+        var index = _visible.IndexOf(node);
+        if (index < 0) return;
+        _list.SelectedIndex = index;
+        _list.ScrollIntoView(_list.Items[index]);
+    }
+
     public void Toggle(Node node)
     {
         node.IsExpanded = !node.IsExpanded;
@@ -155,7 +167,7 @@ public sealed class SimpleTree : Grid
             };
             row.Children.Add(area);
         }
-        var icon = Icons.Create(node.Icon, 14, Icons.ThemeBrush(this, "SecondaryTextBrush"));
+        var icon = Icons.Create(node.Icon, 14, node.IconColor is { } color ? new SolidColorBrush(color) : Icons.ThemeBrush(this, "SecondaryTextBrush"));
         icon.VerticalAlignment = VerticalAlignment.Center;
         SetColumn(icon, 1);
         row.Children.Add(icon);

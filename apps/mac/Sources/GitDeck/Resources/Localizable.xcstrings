@@ -10626,6 +10626,57 @@
         }
       }
     },
+    "settings.uiFont": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "UI font"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "界面字体"
+          }
+        }
+      }
+    },
+    "settings.uiFont.custom": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use custom font"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用自定义字体"
+          }
+        }
+      }
+    },
+    "settings.uiFont.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Applies to menus, tool windows, trees and dialogs. The editor font is set on the Editor page."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "作用于菜单、工具窗口、树和对话框；编辑器字体在“编辑器”页中设置。"
+          }
+        }
+      }
+    },
     "shelf.action.delete": {
       "extractionState": "manual",
       "localizations": {

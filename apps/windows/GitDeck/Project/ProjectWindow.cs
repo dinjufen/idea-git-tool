@@ -1,3 +1,4 @@
+using GitDeck.AI;
 using GitDeck.Common;
 using GitDeck.Controls;
 using GitDeck.Commit;
@@ -66,6 +67,8 @@ public sealed class ProjectWindow : Window
     private readonly BranchesPopup _branchesPopup;
     private readonly ConflictResolver _conflicts;
     private readonly StashesView _stashes;
+    private readonly AIReviewController _aiReview;
+    private readonly AIReviewToolWindow _aiWindow;
     private readonly ShelfView _shelf;
 
     private readonly FileWatcher _fileWatcher;
@@ -86,6 +89,8 @@ public sealed class ProjectWindow : Window
         _branchesPopup = new BranchesPopup(Model, _operations, ShowCommit);
         _conflicts = new ConflictResolver(Model, () => _root.XamlRoot);
         _stashes = new StashesView(Model, _operations);
+        _aiReview = new AIReviewController(Model, () => _root.XamlRoot);
+        _aiWindow = new AIReviewToolWindow(_aiReview);
         _shelf = new ShelfView(Model, _operations);
         _commitWindow.AttachStashAndShelf(_stashes, _shelf);
         _projectWidget = new ToolbarWidget(_badge, L10n.Tr("toolbar.project.tooltip"));
@@ -106,6 +111,19 @@ public sealed class ProjectWindow : Window
         _toolWindows[ToolWindowId.Project] = _projectTree.View;
         _toolWindows[ToolWindowId.Commit] = _commitWindow;
         _toolWindows[ToolWindowId.Git] = _gitWindow;
+        _toolWindows[ToolWindowId.AiReview] = _aiWindow;
+        _aiReview.Reveal += () => Show(ToolWindowId.AiReview);
+        _aiWindow.ReviewLocalChanges += ReviewLocalChanges;
+        _aiWindow.OpenFinding += OpenFinding;
+        _aiWindow.ApplySuggestion += ApplySuggestion;
+        _commitWindow.AiReview = _aiReview;
+        _editor.AiReview = _aiReview;
+        _editor.ShowFinding += index =>
+        {
+            Show(ToolWindowId.AiReview);
+            _aiWindow.Select(index);
+        };
+        _gitWindow.Log.AiReview = _aiReview;
         ApplyToolWindowState();
         Model.Changed += ModelChanged;
         Model.Refresh();
@@ -302,6 +320,7 @@ public sealed class ProjectWindow : Window
         AddAccelerator(VirtualKey.T, VirtualKeyModifiers.Control, () => _ = _operations.UpdateProject());
         AddAccelerator(VirtualKey.N, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, () => _ = _operations.NewBranch());
         AddAccelerator(VirtualKey.Z, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, RollbackChanges);
+        AddAccelerator(VirtualKey.S, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, () => SettingsWindow.Show());
         // IDEA Windows 键位：Ctrl+Shift+` 打开分支弹窗。
         AddAccelerator((VirtualKey)192, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, ShowBranches);
         AddAccelerator(VirtualKey.R, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, Model.Refresh);
@@ -494,6 +513,66 @@ public sealed class ProjectWindow : Window
     }
 
     public void StashChanges() => _ = _operations.StashChanges();
+
+    public bool IsAiReviewRunning => _aiReview.IsRunning;
+
+    /// AI 评审本地改动：Commit 工具窗口中勾选了文件时只评审勾选的文件。
+    public void ReviewLocalChanges() => _ = _aiReview.ReviewLocalChanges(_commitWindow.IncludedPaths);
+
+    /// 跳转到发现所在位置：工作区版本在编辑器中打开，历史版本打开该提交中文件的 Diff。
+    private void OpenFinding(int index)
+    {
+        if (_aiReview.Result is not { } result || index >= result.Findings.Length) return;
+        var finding = result.Findings[index];
+        var line = Math.Max(0, (int)finding.Line - 1);
+        if (_aiReview.IsWorkingTreeResult(finding.File))
+        {
+            var path = Path.Combine(Model.RootPath, finding.File);
+            if (File.Exists(path)) _editor.Open(path, line);
+        }
+        else if (result.Revision is { } revision)
+        {
+            ShowCommitFile(revision, revision + "^", new ChangedFile(finding.File, null, ChangeKind.Modified));
+        }
+    }
+
+    /// 预览并应用修改建议：在当前内容（含未保存的编辑）中定位原文，确认后写入。
+    private async void ApplySuggestion(int index)
+    {
+        if (_aiReview.Result is not { } result || index >= result.Findings.Length) return;
+        var finding = result.Findings[index];
+        if (finding.Suggestion is not { } suggestion || !_aiReview.IsWorkingTreeResult(finding.File)) return;
+        var path = Path.Combine(Model.RootPath, finding.File);
+        var current = _editor.TextOf(path) ?? (File.Exists(path) ? await File.ReadAllTextAsync(path) : null);
+        if (current is null) return;
+        if (CoreApi.ApplyReviewSuggestion(current, finding.Line, suggestion.Original, suggestion.Replacement) is not { } updated)
+        {
+            await Dialogs.ShowMessage(_root.XamlRoot, L10n.Tr("ai.apply.notFound"), L10n.Tr("ai.apply.notFound.message"));
+            return;
+        }
+        if (DebugOptions.Has("debug.aiApplyNow"))
+        {
+            WriteSuggestion(index, path, updated);
+            return;
+        }
+        var preview = SuggestionPreview.Present(finding.File, finding.Title, current, updated, () => WriteSuggestion(index, path, updated));
+        // 调试截图：截取预览窗口。
+        if (DebugOptions.Has("debug.aiApply")) Snapshot.Schedule(preview);
+    }
+
+    private void WriteSuggestion(int index, string path, string text)
+    {
+        try
+        {
+            _editor.ApplyEdit(path, text);
+            _aiReview.MarkApplied(index);
+            Model.Refresh();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _statusBar.SetMessage(e.Message, true);
+        }
+    }
 
     public void RollbackChanges()
     {
@@ -779,6 +858,31 @@ public sealed class ProjectWindow : Window
                     case "stash": StashChanges(); break;
                     case "remotes": ManageRemotes(); break;
                     case "submodules": ManageSubmodules(); break;
+                    case "settings":
+                        var settings = SettingsWindow.Show(Enum.TryParse<SettingsWindow.Page>(DebugOptions.Get("debug.page") ?? "", true, out var page) ? page : SettingsWindow.Page.General);
+                        // `-debug.uiFont <字体>` 与 `-debug.uiFontSize <字号>`：验证界面字体立即生效（`-debug.uiFont off` 恢复默认）。
+                        if (DebugOptions.Get("debug.uiFont") is { } uiFont)
+                        {
+                            UiFont.UseCustom = uiFont != "off";
+                            if (uiFont != "off") UiFont.Family = uiFont;
+                            if (DebugOptions.Get("debug.uiFontSize") is { } uiSize && double.TryParse(uiSize, out var uiValue)) UiFont.Size = uiValue;
+                        }
+                        Snapshot.Schedule(settings);
+                        break;
+                    case "aiReview":
+                        Show(ToolWindowId.AiReview);
+                        // `-debug.aiStart`：评审本地改动，完成后跳转到第一个发现并应用其建议（配合 `-debug.aiApplyNow` 直接写入）。
+                        if (DebugOptions.Has("debug.aiStart"))
+                        {
+                            _ = _aiReview.Start(new ReviewScope.LocalChanges([]), L10n.Tr("ai.scope.local", Model.Status.Changes.Length), completion: result =>
+                            {
+                                if (result is not { Findings.Length: > 0 }) return;
+                                var target = Math.Max(0, Array.FindIndex(result.Findings, f => f.Suggestion is not null));
+                                OpenFinding(target);
+                                if (DebugOptions.Has("debug.aiApply")) ApplySuggestion(target);
+                            });
+                        }
+                        break;
                     case "console":
                         ShowGitConsole();
                         _gitWindow.Console.ShowBackgroundCommands();
@@ -844,7 +948,8 @@ public sealed class ProjectWindow : Window
             };
             timer.Start();
         }
-        if (action is "remotes" or "submodules") return;
+        if (action is "remotes" or "submodules" or "settings") return;
+        if (action == "aiReview" && DebugOptions.Has("debug.aiApply") && !DebugOptions.Has("debug.aiApplyNow")) return;
         if (action == "merge")
         {
             // 合并窗口打开后截取该窗口。

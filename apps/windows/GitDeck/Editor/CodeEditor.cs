@@ -15,11 +15,15 @@ namespace GitDeck.Editor;
 /// Scintilla 内部以 UTF-8 字节编址，核心的高亮区间与 .NET 字符串以 UTF-16 编址，这里负责两者换算。
 public sealed class CodeEditor : Grid
 {
-    // 页边：0 Annotate 注释（默认隐藏），1 行号，2 变更标记，3 与正文之间的空隙。
+    // 页边：0 Annotate 注释（默认隐藏），1 AI 评审标记（有标记时显示），2 行号，3 变更标记，4 与正文之间的空隙。
     private const int AnnotationMargin = 0;
-    private const int NumberMargin = 1;
-    private const int ChangeMargin = 2;
-    private const int GapMargin = 3;
+    private const int ReviewMargin = 1;
+    private const int NumberMargin = 2;
+    private const int ChangeMargin = 3;
+    private const int GapMargin = 4;
+    private const double ReviewMarginWidth = 16;
+    // AI 评审标记：错误、警告、建议。
+    private const int ReviewMarkerBase = 14;
     private const double AnnotationWidth = 170;
 
     // 标记编号。
@@ -179,6 +183,9 @@ public sealed class CodeEditor : Grid
 
     /// 点击 Annotate 注释：该行最后修改所在的提交。
     public event Action<string>? AnnotationClicked;
+
+    /// 点击 AI 评审标记：该行最严重的发现在评审结果中的下标。
+    public event Action<int>? ReviewMarkerClicked;
 
     /// 在行号或注释列上右键：显示 gutter 菜单（Annotate、显示历史）的位置（相对本控件）。
     public event Action<Windows.Foundation.Point>? GutterContextRequested;
@@ -342,13 +349,26 @@ public sealed class CodeEditor : Grid
     /// 悬停在注释上时显示提交详情。
     private void ShowAnnotationTip(int x, int y)
     {
-        if (_blame is null) return;
+        if (_blame is null && _reviewMarkers.Count == 0) return;
         var editor = _control.Editor;
         var scale = XamlRoot?.RasterizationScale ?? 1;
-        if (x / scale > AnnotationWidth) return;
-        var line = (int)editor.LineFromPosition(editor.PositionFromPoint(editor.GetMarginWidthN(AnnotationMargin) + editor.GetMarginWidthN(NumberMargin) + 40, y));
-        if (AnnotationCommit(line) is not { IsUncommitted: false } commit) return;
+        var annotationWidth = editor.GetMarginWidthN(AnnotationMargin);
+        var reviewWidth = editor.GetMarginWidthN(ReviewMargin);
+        if (x > annotationWidth + reviewWidth) return;
+        var line = (int)editor.LineFromPosition(editor.PositionFromPoint(annotationWidth + reviewWidth + editor.GetMarginWidthN(NumberMargin) + 40, y));
         _annotationTip ??= new ToolTip { Placement = Microsoft.UI.Xaml.Controls.Primitives.PlacementMode.Right };
+        if (x >= annotationWidth)
+        {
+            // AI 评审标记的说明。
+            var markers = _reviewMarkers.Where(m => m.Line == line).ToList();
+            if (markers.Count == 0) return;
+            _annotationTip.Content = string.Join("\n", markers.Select(m => m.Tooltip));
+            _annotationTip.PlacementRect = new Windows.Foundation.Rect(x / scale, y / scale, 1, editor.TextHeight(line) / scale);
+            ToolTipService.SetToolTip(_control, _annotationTip);
+            _annotationTip.IsOpen = true;
+            return;
+        }
+        if (AnnotationCommit(line) is not { IsUncommitted: false } commit) return;
         _annotationTip.Content = $"{commit.Hash[..Math.Min(8, commit.Hash.Length)]}  {commit.AuthorName} <{commit.AuthorEmail}>\n"
             + $"{Git.LogDates.Detailed(commit.AuthorTime)}\n\n{commit.Summary}";
         _annotationTip.PlacementRect = new Windows.Foundation.Rect(x / scale, y / scale, 1, editor.TextHeight(line) / scale);
@@ -362,6 +382,39 @@ public sealed class CodeEditor : Grid
         _annotationTip.IsOpen = false;
         ToolTipService.SetToolTip(_control, null);
     }
+
+    /// AI 评审在编辑器中的标记（行从 0 开始）。
+    public readonly record struct ReviewMarker(int Index, int Line, ReviewSeverity Severity, string Tooltip);
+
+    private IReadOnlyList<ReviewMarker> _reviewMarkers = [];
+
+    public IReadOnlyList<ReviewMarker> ReviewMarkers
+    {
+        get => _reviewMarkers;
+        set
+        {
+            _reviewMarkers = value;
+            ApplyReviewMarkers();
+        }
+    }
+
+    private void ApplyReviewMarkers()
+    {
+        if (!_ready) return;
+        var editor = _control.Editor;
+        for (var i = 0; i < 3; i++) editor.MarkerDeleteAll(ReviewMarkerBase + i);
+        var scale = XamlRoot?.RasterizationScale ?? 1;
+        editor.SetMarginWidthN(ReviewMargin, _reviewMarkers.Count == 0 ? 0 : (int)Math.Round(ReviewMarginWidth * scale));
+        var lastLine = Math.Max(0, (int)editor.LineCount - 1);
+        // 同一行有多条发现时只显示最严重的。
+        foreach (var marker in _reviewMarkers.GroupBy(m => m.Line).Select(g => g.MinBy(m => (int)m.Severity)))
+        {
+            editor.MarkerAdd(Math.Min(marker.Line, lastLine), ReviewMarkerBase + (int)marker.Severity);
+        }
+    }
+
+    private ReviewMarker? ReviewMarkerAt(int line) =>
+        _reviewMarkers.Where(m => m.Line == line).OrderBy(m => (int)m.Severity).Cast<ReviewMarker?>().FirstOrDefault();
 
     private void ApplyDiffDecorations()
     {
@@ -473,6 +526,11 @@ public sealed class CodeEditor : Grid
         editor.SetMarginMaskN(AnnotationMargin, 0);
         editor.SetMarginWidthN(AnnotationMargin, 0);
         editor.SetMarginSensitiveN(AnnotationMargin, true);
+        editor.SetMarginTypeN(ReviewMargin, MarginType.Symbol);
+        editor.SetMarginMaskN(ReviewMargin, (1 << ReviewMarkerBase) | (1 << (ReviewMarkerBase + 1)) | (1 << (ReviewMarkerBase + 2)));
+        editor.SetMarginWidthN(ReviewMargin, 0);
+        editor.SetMarginSensitiveN(ReviewMargin, true);
+        for (var i = 0; i < 3; i++) editor.MarkerDefine(ReviewMarkerBase + i, MarkerSymbol.Circle);
         editor.SetMarginTypeN(NumberMargin, MarginType.Number);
         editor.SetMarginMaskN(NumberMargin, 0);
         editor.SetMarginTypeN(ChangeMargin, MarginType.Symbol);
@@ -505,6 +563,7 @@ public sealed class CodeEditor : Grid
             var line = (int)editor.LineFromPosition(args.Position);
             if (args.Margin == NumberMargin) LineNumberClicked?.Invoke(line);
             else if (args.Margin == AnnotationMargin && AnnotationCommit(line) is { IsUncommitted: false } commit) AnnotationClicked?.Invoke(commit.Hash);
+            else if (args.Margin == ReviewMargin && ReviewMarkerAt(line) is { } marker) ReviewMarkerClicked?.Invoke(marker.Index);
         };
         editor.MarginRightClick += (_, args) =>
         {
@@ -530,6 +589,7 @@ public sealed class CodeEditor : Grid
 
         ApplyAppearance();
         ApplyLineChanges();
+        ApplyReviewMarkers();
         ScheduleHighlight(TimeSpan.Zero);
         // 等首次排版完成后再通知，行位置才是准确的。
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => Initialized?.Invoke());
@@ -596,6 +656,12 @@ public sealed class CodeEditor : Grid
             editor.MarkerSetBack(DiffSeparatorMarkerBase + i, Bgr(DiffColors.Marker(kind, dark)));
             editor.IndicSetFore(InlineIndicatorBase + i, Bgr(DiffColors.Inline(kind, dark)));
             editor.IndicSetAlpha(InlineIndicatorBase + i, (Alpha)255);
+        }
+        foreach (var severity in Enum.GetValues<ReviewSeverity>())
+        {
+            var color = Bgr(AI.AIReviewToolWindow.SeverityColor(severity, dark));
+            editor.MarkerSetBack(ReviewMarkerBase + (int)severity, color);
+            editor.MarkerSetFore(ReviewMarkerBase + (int)severity, color);
         }
         editor.MarkerSetBack(ConflictMarker, Bgr(DiffColors.ConflictBlock(dark)));
         editor.MarkerSetBack(ConflictSeparatorMarker, Bgr(DiffColors.ConflictMarker(dark)));

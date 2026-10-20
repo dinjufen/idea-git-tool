@@ -335,6 +335,9 @@ public sealed class LogView : Grid
         FilterChanged();
     }
 
+    /// AI 评审（右键菜单中评审选中的提交）。
+    public AI.AIReviewController? AiReview { get; set; }
+
     // MARK: - 右键菜单
 
     private MenuFlyout ContextMenu()
@@ -361,8 +364,9 @@ public sealed class LogView : Grid
         menu.Items.Add(new MenuFlyoutSeparator());
         // 补丁按从旧到新排列。
         Add("log.menu.createPatch", () => _ = _operations.CreatePatchFromCommits([.. Enumerable.Reverse(targets).Select(c => c.Hash)]), targets.Count > 0);
-        // AI 评审在 W7 中启用。
-        Add("log.menu.aiReview", null);
+        // AI 评审选中的提交（按从旧到新传入）。
+        Add("log.menu.aiReview", () => _ = AiReview?.ReviewCommits([.. Enumerable.Reverse(targets).Select(c => c.Hash)], single?.Subject),
+            targets.Count > 0 && AiReview is { IsRunning: false });
         menu.Items.Add(new MenuFlyoutSeparator());
         // 拣选按从旧到新应用；还原按从新到旧进行，与 IDEA 一致。
         Add("log.menu.cherryPick", () => _ = _operations.CherryPick([.. Enumerable.Reverse(targets).Select(c => c.Hash)]), targets.Count > 0);

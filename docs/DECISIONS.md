@@ -42,7 +42,8 @@
 - **构建**：Rust 核心编译为静态库（mac：`aarch64-apple-darwin`；Win：`x86_64-pc-windows-msvc` 与 `aarch64-pc-windows-msvc`）。
 - **远程认证**：与 IDEA 内置 askpass 相同的思路——客户端把自身可执行文件设为 `GIT_ASKPASS` / `SSH_ASKPASS`（并设 `SSH_ASKPASS_REQUIRE=force`），被 git 调用时只弹出原生输入框并把输入写回 git，不保存凭据；系统已配置的 credential helper（如 macOS 钥匙串）仍优先生效。
 - **Windows 文案**：不另做 `.resw`，Windows 端直接把 mac 的 `Localizable.xcstrings` 作为嵌入资源读取（单一来源）；Windows 上说法不同的条目以 `<键名>.win` 加入同一文件，用 `scripts/l10n-add.py` 添加。语言切换重启生效。
-- **Windows 设置与数据**：`%LOCALAPPDATA%\GitDeck\settings.json`（调试版为 `GitDeck.debug`，与正式版隔离）。
+- **Windows 设置与数据**：`%LOCALAPPDATA%\GitDeck\settings.json`（调试版为 `GitDeck.debug`，与正式版隔离）。AI 服务的 API Key 存在 Windows 凭据管理器，目标名为 `GitDeck.ai/<服务>`（调试版为 `GitDeck.debug.ai/<服务>`）。
+- **界面字体**（待用户确认方案）：Windows 端已在 设置 > 通用 中实现 “使用自定义字体”（字体 + 字号，默认跟随系统，修改立即生效），作用于界面文字，编辑器字体单独设置；mac 端尚未实现，见 MAC-REMAINING.md。
 - **本机环境**：使用 `/Applications/Xcode-beta.app`，构建时通过 `DEVELOPER_DIR` 指定，不改动系统级 `xcode-select`。
 
 ## 分期

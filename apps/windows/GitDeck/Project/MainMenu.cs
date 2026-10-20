@@ -34,6 +34,9 @@ public static class MainMenu
         menu.Items.Add(Item(L10n.Tr("menu.file.closeTab"), window.CloseActiveTab, "Ctrl+F4"));
         menu.Items.Add(Item(L10n.Tr("menu.file.closeProject"), window.Close, "Ctrl+Shift+W"));
         menu.Items.Add(new MenuFlyoutSeparator());
+        // IDEA Windows 键位：Ctrl+Alt+S 打开设置。
+        menu.Items.Add(Item(L10n.Tr("menu.app.settings"), () => SettingsWindow.Show(), "Ctrl+Alt+S"));
+        menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(Item(L10n.Tr("menu.file.exit"), app.ExitApplication));
         return menu;
     }
@@ -133,6 +136,10 @@ public static class MainMenu
         menu.Items.Add(Item(L10n.Tr("stash.menu.unstash"), window.UnstashChanges));
         menu.Items.Add(Item(L10n.Tr("shelf.menu.shelve"), window.ShelveChanges));
         menu.Items.Add(Item(L10n.Tr("shelf.menu.show"), window.ShowShelf));
+        menu.Items.Add(new MenuFlyoutSeparator());
+        var review = Item(L10n.Tr("ai.menu.reviewLocal"), window.ReviewLocalChanges);
+        review.IsEnabled = !window.IsAiReviewRunning && window.Model.Status.Changes.Length > 0;
+        menu.Items.Add(review);
         menu.Items.Add(new MenuFlyoutSeparator());
         var annotate = Item(L10n.Tr(window.IsActiveAnnotated ? "git.action.closeAnnotations" : "git.action.annotate"), window.ToggleAnnotations);
         annotate.IsEnabled = window.HasActiveFile;

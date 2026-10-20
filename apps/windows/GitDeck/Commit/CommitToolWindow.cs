@@ -43,6 +43,8 @@ public sealed class CommitToolWindow : Grid
         MinWidth = 0,
     };
     private readonly IconButton _optionsButton = new(Icon.Gear, L10n.Tr("commit.options"), 26, 13);
+    private readonly IconButton _generateButton = new(Icon.Sparkles, L10n.Tr("ai.message.generate"), 24, 13);
+    private readonly ProgressRing _generateSpinner = new() { Width = 14, Height = 14, IsActive = false, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
     private readonly ProgressRing _spinner = new() { Width = 16, Height = 16, IsActive = false, Visibility = Visibility.Collapsed };
     private readonly Grid _commitContent = new();
     private readonly Grid _stashContent;
@@ -118,6 +120,12 @@ public sealed class CommitToolWindow : Grid
 
     /// 把选中的改动保存为补丁（为空时为全部改动）。
     public event Action<List<string>>? CreatePatchRequested;
+
+    /// AI 评审（评审勾选的改动、提交前检查、生成提交信息）。
+    public AI.AIReviewController? AiReview { get; set; }
+
+    /// 勾选要提交的文件（AI 评审与生成提交信息使用）。
+    public List<string> IncludedPaths => [.. _included.Order(StringComparer.Ordinal)];
 
     /// 解决冲突：打开该文件的三栏合并（参数为 null 时打开 Conflicts 对话框）。
     public event Action<FileChange?>? ResolveConflict;
@@ -242,6 +250,19 @@ public sealed class CommitToolWindow : Grid
         };
         SetRow(_message, 3);
         grid.Children.Add(_message);
+        // 提交信息框右上角：根据勾选的文件生成提交信息（生成中再次点击取消）。
+        var generate = new Grid
+        {
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 4, 8, 0),
+            Children = { _generateButton, _generateSpinner },
+        };
+        _generateSpinner.HorizontalAlignment = HorizontalAlignment.Center;
+        _generateSpinner.VerticalAlignment = VerticalAlignment.Center;
+        _generateButton.Click += (_, _) => _ = GenerateMessage();
+        SetRow(generate, 3);
+        grid.Children.Add(generate);
 
         _commitButton.Click += (_, _) => _ = Commit(pushAfter: false);
         ToolTipService.SetToolTip(_commitButton, L10n.Tr("commit.button.commit.tooltip"));
@@ -283,7 +304,7 @@ public sealed class CommitToolWindow : Grid
                 Button(Icon.Diff, "commit.action.showDiff", () => Activate(SelectedRows.FirstOrDefault())),
                 // AI 评审（W7）在对应批次中启用。
                 Button(Icon.Shelve, "commit.action.shelve", ShelveSelected),
-                Button(Icon.Sparkles, "ai.action.reviewSelected", null),
+                Button(Icon.Sparkles, "ai.action.reviewSelected", () => _ = AiReview?.ReviewLocalChanges(IncludedPaths)),
                 Button(Icon.ExpandAll, "tree.expandAll", () => { _collapsed.Clear(); Rebuild(); }),
                 Button(Icon.CollapseAll, "tree.collapseAll", () => { foreach (var g in _groups) _collapsed.Add(g.Key); Rebuild(); }),
             },
@@ -834,8 +855,31 @@ public sealed class CommitToolWindow : Grid
         signOff.Click += (_, _) => _signOff = !_signOff;
         var hooks = new ToggleMenuFlyoutItem { Text = L10n.Tr("commit.option.runHooks"), IsChecked = _runHooks };
         hooks.Click += (_, _) => _runHooks = !_runHooks;
-        var menu = new MenuFlyout { Items = { signOff, hooks } };
+        var ai = new ToggleMenuFlyoutItem { Text = L10n.Tr("commit.option.aiReview"), IsChecked = AI.AISettings.ReviewBeforeCommit };
+        ai.Click += (_, _) => AI.AISettings.ReviewBeforeCommit = !AI.AISettings.ReviewBeforeCommit;
+        var menu = new MenuFlyout { Items = { signOff, hooks, new MenuFlyoutSeparator(), ai } };
         menu.ShowAt(_optionsButton, new FlyoutShowOptions { Placement = FlyoutPlacementMode.TopEdgeAlignedRight });
+    }
+
+    /// 根据勾选的文件生成提交信息；生成中再次点击取消。
+    private async Task GenerateMessage()
+    {
+        if (AiReview is not { } review) return;
+        var paths = IncludedPaths;
+        if (paths.Count == 0 && !review.IsGeneratingMessage) return;
+        var wasGenerating = review.IsGeneratingMessage;
+        if (!wasGenerating) SetGenerating(true);
+        var message = await review.GenerateCommitMessage(paths);
+        if (wasGenerating) return;
+        SetGenerating(false);
+        if (message is not null) _message.Text = message;
+    }
+
+    private void SetGenerating(bool generating)
+    {
+        _generateSpinner.IsActive = generating;
+        _generateSpinner.Visibility = generating ? Visibility.Visible : Visibility.Collapsed;
+        _generateButton.Opacity = generating ? 0 : 1;
     }
 
     public void FocusMessage()
@@ -873,6 +917,8 @@ public sealed class CommitToolWindow : Grid
         SetCommitting(true);
         try
         {
+            // 提交前检查：AI 评审勾选的改动，发现问题时由用户决定是否继续。
+            if (AI.AISettings.ReviewBeforeCommit && paths.Count > 0 && AiReview is { } review && !await review.ReviewBeforeCommit(paths)) return;
             var partial = new List<PartialFile>();
             if (selections.Count > 0)
             {

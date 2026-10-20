@@ -137,6 +137,23 @@ public sealed class EditorArea : Grid
     /// 显示文件历史（相对仓库根目录的路径）。
     public event Action<string>? ShowHistory;
 
+    /// 点击编辑器中的 AI 评审标记（参数为发现下标）。
+    public event Action<int>? ShowFinding;
+
+    private AI.AIReviewController? _aiReview;
+
+    /// AI 评审：工作区文件上的发现在编辑器中标记。
+    public AI.AIReviewController? AiReview
+    {
+        get => _aiReview;
+        set
+        {
+            _aiReview = value;
+            if (value is not null) value.Changed += UpdateReviewMarkers;
+            UpdateReviewMarkers();
+        }
+    }
+
     private IEnumerable<Document> Documents => _tabs.OfType<Document>();
 
     public CodeEditor? ActiveEditor => (_active as Document)?.Editor;
@@ -191,6 +208,7 @@ public sealed class EditorArea : Grid
             UpdateAnnotationMap(document);
         };
         document.Editor.AnnotationClicked += hash => ShowCommit?.Invoke(hash);
+        document.Editor.ReviewMarkerClicked += index => ShowFinding?.Invoke(index);
         document.Editor.GutterContextRequested += point => ShowGutterMenu(document, point);
         document.Editor.CaretChanged += (line, column) =>
         {
@@ -199,6 +217,7 @@ public sealed class EditorArea : Grid
         _tabs.Add(document);
         Activate(document);
         LoadBase(document);
+        UpdateReviewMarkers(document);
     }
 
     /// 打开文件并把第 `line` 行（从 0 开始）滚动到视口中。
@@ -369,6 +388,48 @@ public sealed class EditorArea : Grid
             LoadBase(document);
             if (document.Editor.Annotations is not null) LoadBlame(document);
         }
+    }
+
+    // MARK: - AI 评审
+
+    private void UpdateReviewMarkers()
+    {
+        foreach (var document in Documents) UpdateReviewMarkers(document);
+    }
+
+    private void UpdateReviewMarkers(Document document)
+    {
+        if (document.RelativePath is not { } path || _aiReview is null)
+        {
+            document.Editor.ReviewMarkers = [];
+            return;
+        }
+        document.Editor.ReviewMarkers = [.. _aiReview.WorkingTreeFindings(path).Select(x => new CodeEditor.ReviewMarker(
+            x.Index, Math.Max(0, (int)x.Finding.Line - 1), x.Finding.Severity,
+            $"{AI.AIReviewToolWindow.SeverityTitle(x.Finding.Severity)}: {x.Finding.Title}"))];
+    }
+
+    /// 文件的当前内容：已打开时为编辑器中的内容（含未保存的编辑），否则为 null。
+    public string? TextOf(string path) =>
+        Documents.FirstOrDefault(d => RecentProjects.SamePath(d.Path, Path.GetFullPath(path)))?.Editor.Text;
+
+    /// 写入修改后的内容（应用 AI 建议）：已打开的文件在编辑器中替换（可撤销）并保存。
+    public void ApplyEdit(string path, string text)
+    {
+        var full = Path.GetFullPath(path);
+        if (Documents.FirstOrDefault(d => RecentProjects.SamePath(d.Path, full)) is { } document)
+        {
+            document.IsReloading = true;
+            document.Editor.ReplaceText(text);
+            document.IsReloading = false;
+            Write(document);
+            document.IsModified = false;
+            RebuildTabs();
+            UpdateLineStatus(document, TimeSpan.Zero);
+            return;
+        }
+        var hasBom = TryRead(full, out _, out var bom) && bom;
+        File.WriteAllText(full, text, new UTF8Encoding(hasBom));
     }
 
     // MARK: - Annotate

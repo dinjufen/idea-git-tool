@@ -41,6 +41,12 @@ public static class Appearance
     /// 登记窗口：应用当前主题，并在主题变化时同步标题栏按钮颜色。
     public static void Register(Window window)
     {
+        // 界面字体由包在窗口内容外层的 UserControl 继承给其中的文字与控件。
+        if (window.Content is UIElement content)
+        {
+            window.Content = null;
+            window.Content = UiFont.Host(content);
+        }
         Windows.Add(window);
         window.Closed += (_, _) => Windows.Remove(window);
         if (window.Content is FrameworkElement root)
@@ -48,6 +54,18 @@ public static class Appearance
             root.ActualThemeChanged += (_, _) => UpdateCaptionButtons(window);
         }
         Apply(window);
+    }
+
+    /// 重新应用主题：控件模板中的 ThemeResource 随之重新取值（界面字体修改后刷新已打开的窗口）。
+    public static void Refresh()
+    {
+        foreach (var window in Windows.ToList())
+        {
+            if (window.Content is not FrameworkElement root) continue;
+            var dark = root.ActualTheme == ElementTheme.Dark;
+            root.RequestedTheme = dark ? ElementTheme.Light : ElementTheme.Dark;
+            Apply(window);
+        }
     }
 
     private static void Apply(Window window)

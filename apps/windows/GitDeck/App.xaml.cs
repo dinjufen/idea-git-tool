@@ -16,5 +16,9 @@ public partial class App : Application
         UnhandledException += (_, e) => Log.Error("unhandled", e.Exception);
     }
 
-    protected override void OnLaunched(LaunchActivatedEventArgs args) => AppController.Shared.Start();
+    protected override void OnLaunched(LaunchActivatedEventArgs args)
+    {
+        UiFont.Initialize();
+        AppController.Shared.Start();
+    }
 }
