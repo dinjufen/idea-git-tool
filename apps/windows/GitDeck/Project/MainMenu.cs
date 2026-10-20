@@ -117,6 +117,19 @@ public static class MainMenu
         menu.Items.Add(Item(L10n.Tr("git.action.branches"), window.ShowBranches, "Ctrl+Shift+`"));
         menu.Items.Add(Item(L10n.Tr("branches.action.new"), () => ops.NewBranch(), "Ctrl+Alt+N"));
         menu.Items.Add(Item(L10n.Tr("branches.action.checkoutRevision"), ops.CheckoutRevisionDialog));
+        if (window.HasConflicts) menu.Items.Add(Item(L10n.Tr("git.action.resolveConflicts"), window.ResolveConflicts));
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(Item(L10n.Tr("stash.menu.stash"), window.StashChanges));
+        menu.Items.Add(Item(L10n.Tr("stash.menu.unstash"), window.UnstashChanges));
+        menu.Items.Add(Item(L10n.Tr("shelf.menu.shelve"), window.ShelveChanges));
+        menu.Items.Add(Item(L10n.Tr("shelf.menu.show"), window.ShowShelf));
+        menu.Items.Add(new MenuFlyoutSeparator());
+        var annotate = Item(L10n.Tr(window.IsActiveAnnotated ? "git.action.closeAnnotations" : "git.action.annotate"), window.ToggleAnnotations);
+        annotate.IsEnabled = window.HasActiveFile;
+        menu.Items.Add(annotate);
+        var history = Item(L10n.Tr("git.action.showHistoryCurrent"), window.ShowHistoryForCurrentFile);
+        history.IsEnabled = window.HasActiveFile;
+        menu.Items.Add(history);
         var state = window.Model.Status.State;
         if (state != Core.RepositoryState.Normal) menu.Items.Add(new MenuFlyoutSeparator());
         switch (state)

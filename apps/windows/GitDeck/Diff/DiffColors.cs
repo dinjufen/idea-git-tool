@@ -35,6 +35,11 @@ public static class DiffColors
         (byte)Math.Round(color.G * alpha + background.G * (1 - alpha)),
         (byte)Math.Round(color.B * alpha + background.B * (1 - alpha)));
 
+    /// 三栏合并中的冲突块（IDEA 的 Conflict 配色）。
+    public static Color ConflictBlock(bool dark) => SyntaxTheme.Rgb(dark ? 0x5C3535u : 0xFFDEDEu);
+
+    public static Color ConflictMarker(bool dark) => SyntaxTheme.Rgb(dark ? 0xB34A4Au : 0xE57373u);
+
     /// 强调色（复选框）。
     public static Color Accent => SyntaxTheme.Rgb(0x3574F0);
 }

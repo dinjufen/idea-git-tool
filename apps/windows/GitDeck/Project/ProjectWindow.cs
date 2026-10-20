@@ -5,6 +5,7 @@ using GitDeck.Core;
 using GitDeck.Diff;
 using GitDeck.Editor;
 using GitDeck.Git;
+using GitDeck.Merge;
 using GitDeck.Vcs;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
@@ -63,6 +64,9 @@ public sealed class ProjectWindow : Window
     private readonly GitOperations _operations;
     private readonly GitToolWindow _gitWindow;
     private readonly BranchesPopup _branchesPopup;
+    private readonly ConflictResolver _conflicts;
+    private readonly StashesView _stashes;
+    private readonly ShelfView _shelf;
 
     private readonly FileWatcher _fileWatcher;
     private readonly EditorArea _editor;
@@ -80,6 +84,10 @@ public sealed class ProjectWindow : Window
         _operations = new GitOperations(Model, () => _root.XamlRoot);
         _gitWindow = new GitToolWindow(Model, _operations);
         _branchesPopup = new BranchesPopup(Model, _operations, ShowCommit);
+        _conflicts = new ConflictResolver(Model, () => _root.XamlRoot);
+        _stashes = new StashesView(Model, _operations);
+        _shelf = new ShelfView(Model, _operations);
+        _commitWindow.AttachStashAndShelf(_stashes, _shelf);
         _projectWidget = new ToolbarWidget(_badge, L10n.Tr("toolbar.project.tooltip"));
         Title = $"{Model.ProjectName} – {Model.RootPath}";
         ExtendsContentIntoTitleBar = true;
@@ -241,6 +249,12 @@ public sealed class ProjectWindow : Window
         _commitWindow.OpenFile += path => _editor.Open(path);
         _commitWindow.ShowDiff += change => ShowLocalDiff(change);
         _commitWindow.PushAfterCommit += () => _ = _operations.Push();
+        _commitWindow.ResolveConflict += change =>
+        {
+            if (change is not null) _conflicts.OpenMerge(change);
+            else _ = _conflicts.ShowConflicts();
+        };
+        _operations.Conflicts += _conflicts.RequestConflicts;
         _operations.Progress += title =>
         {
             _statusBar.SetBusy(title is not null || Model.IsRefreshing);
@@ -255,6 +269,18 @@ public sealed class ProjectWindow : Window
         _gitWindow.Log.OpenFile += path => _editor.Open(path);
         _gitWindow.Log.ShowCommitDiff += ShowCommitFile;
         _editor.CaretInfoChanged += _statusBar.SetEditorInfo;
+        _editor.ShowCommit += hash =>
+        {
+            Show(ToolWindowId.Git);
+            _gitWindow.Reveal(hash);
+        };
+        _editor.ShowHistory += ShowFileHistory;
+        _commitWindow.ShowHistory += ShowFileHistory;
+        _commitWindow.ShelveRequested += (paths, name) => _ = _operations.Shelve(paths, name);
+        _commitWindow.StashRequested += paths => _ = _operations.StashChanges(paths);
+        _stashes.ShowFileDiff += ShowStashFile;
+        _shelf.ShowFileDiff += ShowShelfFile;
+        _gitWindow.OpenHistoryDiff += ShowCommitFile;
         _editor.Message += (text, isError) => _statusBar.SetMessage(text, isError);
 
         _leftSplitter.Dragged += delta => Resize(_mainRow.ColumnDefinitions[0], delta, 120);
@@ -443,6 +469,82 @@ public sealed class ProjectWindow : Window
     public GitOperations Operations => _operations;
 
     public void ShowBranches() => _branchesPopup.ShowAt(_vcsWidget);
+
+    public bool HasConflicts => _conflicts.HasConflicts;
+
+    public bool HasActiveFile => _editor.ActiveRelativePath is not null;
+
+    public bool IsActiveAnnotated => _editor.IsActiveAnnotated;
+
+    /// IDEA 的 “Annotate with Git Blame”：打开或关闭当前文件的注释列。
+    public void ToggleAnnotations() => _editor.ToggleAnnotations();
+
+    /// 在底部 Git 工具窗口中打开文件历史标签页。
+    public void ShowFileHistory(string path)
+    {
+        Show(ToolWindowId.Git);
+        _gitWindow.ShowHistory(path);
+    }
+
+    public void ShowHistoryForCurrentFile()
+    {
+        if (_editor.ActiveRelativePath is { } path) ShowFileHistory(path);
+    }
+
+    public void StashChanges() => _ = _operations.StashChanges();
+
+    /// IDEA 的 “Unstash Changes”：打开提交工具窗口的储藏标签。
+    public void UnstashChanges()
+    {
+        Show(ToolWindowId.Commit);
+        _commitWindow.ShowStashTab();
+    }
+
+    public void ShelveChanges() => _commitWindow.ShelveSelected();
+
+    public void ShowShelf()
+    {
+        Show(ToolWindowId.Commit);
+        _commitWindow.ShowShelfTab();
+    }
+
+    /// 储藏中的文件：已跟踪文件相对储藏时的 HEAD，未跟踪文件与空内容比较。
+    public void ShowStashFile(StashEntry stash, ChangedFile file)
+    {
+        var repository = Model.Repository;
+        var revisions = CoreApi.StashRevisions(stash.Index, file.Kind == ChangeKind.Untracked);
+        var basePath = file.OrigPath ?? file.Path;
+        Task.Run(() =>
+        {
+            var baseText = revisions.Base is { } baseRevision && file.Kind != ChangeKind.Added ? TryRead(() => repository.FileAtRevision(baseRevision, basePath)) : null;
+            var text = file.Kind == ChangeKind.Deleted ? null : TryRead(() => repository.FileAtRevision(revisions.Changed, file.Path));
+            return (baseText, text);
+        }).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
+        {
+            var (baseText, text) = task.Result;
+            _editor.OpenDiff($"stash:{stash.Hash}:{file.Path}", Path.GetFileName(file.Path), L10n.Tr("diff.tooltip.stash", file.Path, stash.Message), () => new DiffView(
+                new DiffSide(L10n.Tr("diff.title.stashBase"), baseText),
+                new DiffSide(L10n.Tr("diff.title.stash", stash.Message), text),
+                file.Path));
+        }), TaskScheduler.Default);
+    }
+
+    /// 搁置中的文件：搁置时的基准内容与搁置的改动。
+    public void ShowShelfFile(ShelfEntry entry, string path)
+    {
+        var repository = Model.Repository;
+        Task.Run(() => repository.ShelfFileVersions(entry.Id, path)).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (task.IsFaulted) return;
+            var versions = task.Result;
+            _editor.OpenDiff($"shelf:{entry.Id}:{path}", Path.GetFileName(path), L10n.Tr("diff.tooltip.shelf", path, entry.Name), () => new DiffView(
+                new DiffSide(L10n.Tr("diff.title.shelfBase"), versions.Base),
+                new DiffSide(L10n.Tr("diff.title.shelved", entry.Name), versions.Text),
+                path));
+        }), TaskScheduler.Default);
+    }
+
+    public void ResolveConflicts() => _ = _conflicts.ShowConflicts();
 
     /// 历史提交中的文件：与第一个父提交比较（Log 详情中双击文件）。
     public void ShowCommitFile(string hash, string? parent, ChangedFile file)
@@ -635,6 +737,37 @@ public sealed class ProjectWindow : Window
                     case "push": _ = _operations.Push(); break;
                     case "update": _ = _operations.UpdateProject(); break;
                     case "newBranch": _ = _operations.NewBranch(); break;
+                    case "conflicts": ResolveConflicts(); break;
+                    case "stash": StashChanges(); break;
+                    case "shelve": ShelveChanges(); break;
+                    case "stashes":
+                        UnstashChanges();
+                        _stashes.ExpandFirst();
+                        break;
+                    case "shelf":
+                        ShowShelf();
+                        var shelfTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
+                        shelfTimer.Tick += (_, _) =>
+                        {
+                            shelfTimer.Stop();
+                            _shelf.ExpandFirst();
+                        };
+                        shelfTimer.Start();
+                        break;
+                    case "history" when DebugOptions.Get("debug.file") is { } historyPath: ShowFileHistory(historyPath); break;
+                    case "annotate" when DebugOptions.Get("debug.file") is { } annotatePath:
+                        _editor.Open(Path.Combine(Model.RootPath, annotatePath));
+                        var annotateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+                        annotateTimer.Tick += (_, _) =>
+                        {
+                            annotateTimer.Stop();
+                            ToggleAnnotations();
+                        };
+                        annotateTimer.Start();
+                        break;
+                    case "merge" when Model.Status.Changes.FirstOrDefault(c => c.Conflict is not null) is { } conflict:
+                        _conflicts.OpenMerge(conflict);
+                        break;
                     case "partialCommit" when DebugOptions.Get("debug.file") is { } partialPath
                                               && Model.ChangesByPath.TryGetValue(partialPath, out var partialChange):
                         // 打开 Diff（配合 -debug.excludeBlock 把某块移出提交），稍后以 -debug.message 提交。
@@ -656,6 +789,26 @@ public sealed class ProjectWindow : Window
                 }
             };
             timer.Start();
+        }
+        if (action == "merge")
+        {
+            // 合并窗口打开后截取该窗口。
+            _conflicts.MergeOpened += window =>
+            {
+                window.Ready += () =>
+                {
+                    if (DebugOptions.Has("debug.mergeApplyNonConflicting"))
+                    {
+                        window.ApplyNonConflicting();
+                        // `-debug.mergeUndo`：随后撤销一次，验证被撤销的块恢复为可应用。
+                        if (DebugOptions.Has("debug.mergeUndo")) window.DebugUndo();
+                    }
+                    // `-debug.mergeResolve`：冲突块两侧都应用后写入结果，验证完整的解决流程。
+                    if (DebugOptions.Has("debug.mergeResolve")) window.DebugResolve();
+                };
+                Snapshot.Schedule(window);
+            };
+            return;
         }
         Snapshot.Schedule(this);
     }

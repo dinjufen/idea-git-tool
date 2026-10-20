@@ -78,6 +78,11 @@ public sealed class EditorArea : Grid
 
         public CancellationTokenSource? LineStatusCancel { get; set; }
 
+        /// blame 对应的文件内容；编辑后据此把注释映射到当前行。
+        public string? BlameText { get; set; }
+
+        public CancellationTokenSource? AnnotationCancel { get; set; }
+
         public string Title => System.IO.Path.GetFileName(Path);
 
         public string Tooltip => Path;
@@ -126,6 +131,12 @@ public sealed class EditorArea : Grid
 
     public event Action<string, bool>? Message;
 
+    /// 在 Git 日志中定位某个提交（点击 Annotate 注释时）。
+    public event Action<string>? ShowCommit;
+
+    /// 显示文件历史（相对仓库根目录的路径）。
+    public event Action<string>? ShowHistory;
+
     private IEnumerable<Document> Documents => _tabs.OfType<Document>();
 
     public CodeEditor? ActiveEditor => (_active as Document)?.Editor;
@@ -133,6 +144,11 @@ public sealed class EditorArea : Grid
     public DiffView? ActiveDiff => (_active as DiffTab)?.Diff;
 
     public bool HasModifiedDocuments => Documents.Any(d => d.IsModified);
+
+    /// 当前编辑的文件相对仓库根目录的路径（不在仓库中或不是文件时为 null）。
+    public string? ActiveRelativePath => (_active as Document)?.RelativePath;
+
+    public bool IsActiveAnnotated => (_active as Document)?.Editor.Annotations is not null;
 
     /// 打开 Diff 页；`key` 相同的 Diff 已打开时直接切换过去。
     public void OpenDiff(string key, string title, string tooltip, Func<DiffView> make)
@@ -172,7 +188,10 @@ public sealed class EditorArea : Grid
                 RebuildTabs();
             }
             UpdateLineStatus(document, TimeSpan.FromMilliseconds(250));
+            UpdateAnnotationMap(document);
         };
+        document.Editor.AnnotationClicked += hash => ShowCommit?.Invoke(hash);
+        document.Editor.GutterContextRequested += point => ShowGutterMenu(document, point);
         document.Editor.CaretChanged += (line, column) =>
         {
             if (document == _active) CaretInfoChanged?.Invoke($"{line}:{column}    {document.Editor.LineEnding}    UTF-8");
@@ -202,6 +221,8 @@ public sealed class EditorArea : Grid
             document.IsModified = false;
             RebuildTabs();
             _model.Refresh();
+            // 保存后重新 blame，使注释与文件内容对应。
+            if (document.Editor.Annotations is not null) LoadBlame(document);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -236,6 +257,7 @@ public sealed class EditorArea : Grid
             document.Editor.ReplaceText(text);
             document.IsReloading = false;
             UpdateLineStatus(document, TimeSpan.Zero);
+            if (document.Editor.Annotations is not null) LoadBlame(document);
         }
     }
 
@@ -342,7 +364,106 @@ public sealed class EditorArea : Grid
     {
         if (_model.IsRefreshing || _model.Status.Branch.Oid == _lastHead) return;
         _lastHead = _model.Status.Branch.Oid;
-        foreach (var document in Documents.ToList()) LoadBase(document);
+        foreach (var document in Documents.ToList())
+        {
+            LoadBase(document);
+            if (document.Editor.Annotations is not null) LoadBlame(document);
+        }
+    }
+
+    // MARK: - Annotate
+
+    /// 打开或关闭当前文件的 Annotate 列。
+    public void ToggleAnnotations()
+    {
+        if (_active is not Document document) return;
+        if (document.Editor.Annotations is not null) document.Editor.Annotations = null;
+        else LoadBlame(document);
+    }
+
+    private void LoadBlame(Document document)
+    {
+        if (document.RelativePath is not { } path) return;
+        var repository = _model.Repository;
+        var file = document.Path;
+        Task.Run(() =>
+        {
+            // blame 针对磁盘上的文件；同时读出该内容作为行号映射的基准。
+            var blame = repository.Blame(path, null);
+            return (blame, TryRead(file, out var text, out _) ? text : null);
+        }).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (task.IsFaulted)
+            {
+                Message?.Invoke(L10n.Tr("annotate.failed", document.Title), true);
+                return;
+            }
+            var (blame, text) = task.Result;
+            document.BlameText = text;
+            document.Editor.Annotations = blame;
+            UpdateAnnotationMap(document);
+        }), TaskScheduler.Default);
+    }
+
+    /// 文件被编辑后，把注释映射到当前行：未改动的行沿用原注释，新增与修改的行不显示注释。
+    private void UpdateAnnotationMap(Document document)
+    {
+        document.AnnotationCancel?.Cancel();
+        if (document.Editor.Annotations is null || document.BlameText is not { } baseText)
+        {
+            document.Editor.AnnotationLineMap = null;
+            return;
+        }
+        var text = document.Editor.Text;
+        if (text == baseText)
+        {
+            document.Editor.AnnotationLineMap = null;
+            return;
+        }
+        var cancel = document.AnnotationCancel = new CancellationTokenSource();
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(150, cancel.Token);
+            var changes = CoreApi.LineChanges(baseText, text);
+            var lineCount = text.Length == 0 ? 0 : text.Count(c => c == '\n') + 1;
+            var map = new int?[lineCount];
+            int old = 0, current = 0;
+            foreach (var change in changes)
+            {
+                while (current < change.Start && current < lineCount) map[current++] = old++;
+                current += (int)change.Count;
+                old += (int)change.BaseCount;
+            }
+            while (current < lineCount) map[current++] = old++;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!cancel.IsCancellationRequested) document.Editor.AnnotationLineMap = map;
+            });
+        }, cancel.Token);
+    }
+
+    /// 行号与注释列的右键菜单：Annotate / 关闭注释、显示历史（与 IDEA 的 gutter 菜单一致）。
+    private void ShowGutterMenu(Document document, Windows.Foundation.Point point)
+    {
+        var menu = new MenuFlyout();
+        var annotate = new MenuFlyoutItem
+        {
+            Text = document.Editor.Annotations is null ? L10n.Tr("git.action.annotate") : L10n.Tr("git.action.closeAnnotations"),
+            IsEnabled = document.RelativePath is not null,
+        };
+        annotate.Click += (_, _) =>
+        {
+            if (document.Editor.Annotations is not null) document.Editor.Annotations = null;
+            else LoadBlame(document);
+        };
+        var history = new MenuFlyoutItem { Text = L10n.Tr("git.action.showHistory"), IsEnabled = document.RelativePath is not null };
+        history.Click += (_, _) =>
+        {
+            if (document.RelativePath is { } path) ShowHistory?.Invoke(path);
+        };
+        menu.Items.Add(annotate);
+        menu.Items.Add(history);
+        menu.ShowAt(document.Editor, point);
     }
 
     // MARK: - 标签页
@@ -353,6 +474,7 @@ public sealed class EditorArea : Grid
         {
             if (!await ConfirmClose(document)) return;
             document.LineStatusCancel?.Cancel();
+            document.AnnotationCancel?.Cancel();
         }
         var index = _tabs.IndexOf(tab);
         _tabs.Remove(tab);

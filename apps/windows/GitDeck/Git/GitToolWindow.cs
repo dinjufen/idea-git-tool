@@ -1,4 +1,6 @@
 using GitDeck.Common;
+using GitDeck.Controls;
+using GitDeck.Core;
 using GitDeck.Project;
 using GitDeck.Vcs;
 using Microsoft.UI.Text;
@@ -8,22 +10,27 @@ using Microsoft.UI.Xaml.Media;
 
 namespace GitDeck.Git;
 
-/// 底部 Git 工具窗口：Log、Console、Worktrees 标签页（与 mac 端 GitToolWindow 一致）。
-/// Console 与 Worktrees 在 W6 中实现，文件历史标签在 W5 中加入。
+/// 底部 Git 工具窗口：Log、Console、Worktrees 标签页，以及按需打开的文件历史标签（与 mac 端 GitToolWindow 一致）。
+/// Console 与 Worktrees 在 W6 中实现。
 public sealed class GitToolWindow : Grid
 {
     private readonly List<Button> _tabButtons = [];
     private readonly List<FrameworkElement> _pages = [];
+    private readonly ProjectModel _model;
+    private readonly StackPanel _header;
     private int _selected;
+    private FileHistoryView? _history;
+    private StackPanel? _historyTab;
 
     public GitToolWindow(ProjectModel model, GitOperations operations)
     {
+        _model = model;
         Log = new LogView(model, operations);
         Themed.Background(this, "ToolWindowBackgroundBrush");
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(32) });
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-        var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        var header = _header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         header.Children.Add(Themed.Foreground(new TextBlock
         {
             Text = L10n.Tr("toolwindow.git"),
@@ -43,6 +50,47 @@ public sealed class GitToolWindow : Grid
 
     public LogView Log { get; }
 
+    /// 文件历史中双击修订：打开该修订的完整 Diff。
+    public event Action<string, string?, ChangedFile>? OpenHistoryDiff;
+
+    /// 打开（或替换）文件历史标签页。
+    public void ShowHistory(string path)
+    {
+        CloseHistory();
+        var view = new FileHistoryView(_model, path);
+        view.OpenDiff += (hash, parent, file) => OpenHistoryDiff?.Invoke(hash, parent, file);
+        SetRow(view, 1);
+        Children.Add(view);
+        _history = view;
+        var index = _tabButtons.Count;
+        var button = new Button
+        {
+            Content = L10n.Tr("git.tab.history", System.IO.Path.GetFileName(path)),
+            Style = (Style)Application.Current.Resources["FlatButtonStyle"],
+            Padding = new Thickness(8, 3, 4, 3),
+        };
+        button.Click += (_, _) => Select(index);
+        var close = new IconButton(Icon.Close, L10n.Tr("git.tab.closeHistory"), 20, 9);
+        close.Click += (_, _) => CloseHistory();
+        _historyTab = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 0, Children = { button, close } };
+        _header.Children.Add(_historyTab);
+        _tabButtons.Add(button);
+        _pages.Add(view);
+        Select(index);
+    }
+
+    private void CloseHistory()
+    {
+        if (_history is null) return;
+        Children.Remove(_history);
+        if (_historyTab is not null) _header.Children.Remove(_historyTab);
+        _pages.RemoveAt(_pages.Count - 1);
+        _tabButtons.RemoveAt(_tabButtons.Count - 1);
+        _history = null;
+        _historyTab = null;
+        Select(0);
+    }
+
     private void AddTab(StackPanel header, string key, FrameworkElement page)
     {
         var index = _tabButtons.Count;
@@ -57,7 +105,7 @@ public sealed class GitToolWindow : Grid
 
     private void Select(int index)
     {
-        _selected = index;
+        _selected = index = Math.Min(index, _pages.Count - 1);
         for (var i = 0; i < _pages.Count; i++)
         {
             _pages[i].Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;

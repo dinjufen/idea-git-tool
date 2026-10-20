@@ -85,6 +85,9 @@ public sealed class CommitToolWindow : Grid
             Children.Add(content);
         }
         SelectTab(0);
+        // 选中页签的背景取自主题资源，元素进入可视树或主题切换后重新取色。
+        Loaded += (_, _) => SelectTab(_selectedTab);
+        ActualThemeChanged += (_, _) => SelectTab(_selectedTab);
 
         _model.Changed += StatusChanged;
         _lineSelections.Changed += () =>
@@ -104,6 +107,18 @@ public sealed class CommitToolWindow : Grid
     /// “提交并推送” 成功提交后打开推送（W4 实现推送）。
     public event Action? PushAfterCommit;
 
+    /// 显示文件历史（相对仓库根目录的路径）。
+    public event Action<string>? ShowHistory;
+
+    /// 搁置：要搁置的文件与默认名称。
+    public event Action<List<string>, string>? ShelveRequested;
+
+    /// 储藏选中的文件（为空时储藏全部）。
+    public event Action<List<string>>? StashRequested;
+
+    /// 解决冲突：打开该文件的三栏合并（参数为 null 时打开 Conflicts 对话框）。
+    public event Action<FileChange?>? ResolveConflict;
+
     // MARK: - 布局
 
     private FrameworkElement BuildTabs()
@@ -121,8 +136,40 @@ public sealed class CommitToolWindow : Grid
         return stack;
     }
 
+    private int _selectedTab;
+
+    /// 加入 “储藏” 与 “搁置” 标签的内容（依赖 GitOperations，由项目窗口创建后传入）。
+    public void AttachStashAndShelf(FrameworkElement stashes, FrameworkElement shelf)
+    {
+        _stashContent.Children.Clear();
+        _stashContent.Children.Add(stashes);
+        _shelfContent.Children.Clear();
+        _shelfContent.Children.Add(shelf);
+        SelectTab(_selectedTab);
+    }
+
+    public void ShowStashTab() => SelectTab(1);
+
+    public void ShowShelfTab() => SelectTab(2);
+
+    /// 搁置选中的文件（选中 Changelist 时以列表名为默认名称）；未选中时搁置勾选的文件。
+    public void ShelveSelected()
+    {
+        var list = SelectedFiles().Where(c => c.Conflict is null).ToList();
+        if (list.Count == 0) list = [.. _model.Status.Changes.Where(c => _included.Contains(c.Path) && c.Conflict is null)];
+        if (list.Count == 0) return;
+        var changelist = SelectedRows.OfType<GroupRow>().FirstOrDefault()?.Changelist?.Name;
+        var name = changelist is null || changelist == DefaultChangelist ? L10n.Tr("shelf.defaultName") : changelist;
+        ShelveRequested?.Invoke([.. list.Select(c => c.Path)], name);
+    }
+
+    /// 储藏选中的已跟踪文件；没有选中文件时储藏全部。
+    private void StashSelected() =>
+        StashRequested?.Invoke([.. SelectedFiles().Where(c => !c.IsUntracked() && c.Conflict is null).Select(c => c.Path)]);
+
     private void SelectTab(int index)
     {
+        _selectedTab = index;
         _commitContent.Visibility = index == 0 ? Visibility.Visible : Visibility.Collapsed;
         _stashContent.Visibility = index == 1 ? Visibility.Visible : Visibility.Collapsed;
         _shelfContent.Visibility = index == 2 ? Visibility.Visible : Visibility.Collapsed;
@@ -133,7 +180,7 @@ public sealed class CommitToolWindow : Grid
         }
     }
 
-    /// 储藏与搁置在 W5 中实现。
+    /// 储藏与搁置的内容由项目窗口加入，之前显示占位。
     private static Grid Placeholder() => new()
     {
         Children =
@@ -231,8 +278,8 @@ public sealed class CommitToolWindow : Grid
                 Button(Icon.Refresh, "git.action.refresh", _model.Refresh),
                 Button(Icon.Rollback, "commit.action.rollback", () => _ = RollbackSelected()),
                 Button(Icon.Diff, "commit.action.showDiff", () => Activate(SelectedRows.FirstOrDefault())),
-                // 搁置（W5）与 AI 评审（W7）在对应批次中启用。
-                Button(Icon.Shelve, "commit.action.shelve", null),
+                // AI 评审（W7）在对应批次中启用。
+                Button(Icon.Shelve, "commit.action.shelve", ShelveSelected),
                 Button(Icon.Sparkles, "ai.action.reviewSelected", null),
                 Button(Icon.ExpandAll, "tree.expandAll", () => { _collapsed.Clear(); Rebuild(); }),
                 Button(Icon.CollapseAll, "tree.collapseAll", () => { foreach (var g in _groups) _collapsed.Add(g.Key); Rebuild(); }),
@@ -448,13 +495,13 @@ public sealed class CommitToolWindow : Grid
         Rebuild();
     }
 
-    /// 双击：文件打开 Diff（冲突文件在 W5 打开合并工具），分组展开 / 收起。
+    /// 双击：文件打开 Diff（冲突文件打开合并工具），分组展开 / 收起。
     private void Activate(Row? row)
     {
         switch (row)
         {
             case GroupRow group: ToggleCollapsed(group); break;
-            case FileRow { Change.Conflict: not null }: _model.Post(L10n.Tr("git.action.resolveConflicts").TrimEnd('…') + ": " + L10n.Tr("common.notImplemented")); break;
+            case FileRow { Change.Conflict: not null } conflict: ResolveConflict?.Invoke(conflict.Change); break;
             case FileRow file: ShowDiff?.Invoke(file.Change); break;
         }
     }
@@ -601,7 +648,7 @@ public sealed class CommitToolWindow : Grid
             Add(menu, L10n.Tr("changelist.delete"), () => DeleteChangelist(list.Name), enabled: DisplayedChangelists.Count > 1);
             menu.Items.Add(new MenuFlyoutSeparator());
             Add(menu, L10n.Tr("commit.action.rollback"), () => _ = RollbackSelected(), enabled: group.Files.Count > 0);
-            Add(menu, L10n.Tr("commit.action.shelve"), notImplemented("commit.action.shelve"), enabled: false);
+            Add(menu, L10n.Tr("commit.action.shelve"), ShelveSelected, enabled: group.Files.Count > 0);
         }
         else
         {
@@ -628,13 +675,17 @@ public sealed class CommitToolWindow : Grid
             }
             menu.Items.Add(new MenuFlyoutSeparator());
             // 以下操作在后续批次中启用：历史（W5）、搁置与储藏（W5）、补丁（W6）、冲突解决（W5）。
-            Add(menu, L10n.Tr("git.action.showHistory"), notImplemented("git.action.showHistory"), enabled: false);
+            var historyTarget = SelectedFiles().FirstOrDefault();
+            Add(menu, L10n.Tr("git.action.showHistory"), () => ShowHistory?.Invoke(historyTarget!.Path),
+                enabled: historyTarget is not null && !historyTarget.IsUntracked());
             Add(menu, L10n.Tr("commit.action.rollback"), () => _ = RollbackSelected());
-            Add(menu, L10n.Tr("commit.action.shelve"), notImplemented("commit.action.shelve"), enabled: false);
-            Add(menu, L10n.Tr("stash.action.stashSelected"), notImplemented("stash.action.stashSelected"), enabled: false);
+            Add(menu, L10n.Tr("commit.action.shelve"), ShelveSelected);
+            Add(menu, L10n.Tr("stash.action.stashSelected"), StashSelected);
             Add(menu, L10n.Tr("patch.menu.createSelected"), notImplemented("patch.menu.createSelected"), enabled: false);
             menu.Items.Add(new MenuFlyoutSeparator());
-            Add(menu, L10n.Tr("git.action.resolveConflicts"), notImplemented("git.action.resolveConflicts"), enabled: false);
+            var conflictTarget = SelectedFiles().FirstOrDefault(c => c.Conflict is not null);
+            Add(menu, L10n.Tr("git.action.resolveConflicts"), () => ResolveConflict?.Invoke(conflictTarget),
+                enabled: _model.Status.Changes.Any(c => c.Conflict is not null));
         }
         menu.ShowAt(_list, e.GetPosition(_list));
         e.Handled = true;

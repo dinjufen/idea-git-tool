@@ -31,6 +31,14 @@ public enum Icon
     Gear,
     ArrowUp,
     ArrowDown,
+    Wand,
+    ChevronsRight,
+    ChevronsLeft,
+    Tray,
+    Unstash,
+    Pop,
+    Trash,
+    ClearAll,
 }
 
 public static class Icons
@@ -58,6 +66,14 @@ public static class Icons
         Icon.Gear => "M8,5.5 A2.5,2.5 0 1 1 7.99,5.5 Z M8,1.5 L8,3.5 M8,12.5 L8,14.5 M1.5,8 L3.5,8 M12.5,8 L14.5,8 M3.4,3.4 L4.8,4.8 M11.2,11.2 L12.6,12.6 M3.4,12.6 L4.8,11.2 M11.2,4.8 L12.6,3.4",
         Icon.ArrowUp => "M8,13.5 L8,2.5 M3.5,7 L8,2.5 L12.5,7",
         Icon.ArrowDown => "M8,2.5 L8,13.5 M3.5,9 L8,13.5 L12.5,9",
+        Icon.Wand => "M2.5,13.5 L9.5,6.5 M11,1.5 L11.5,3 L13,3.5 L11.5,4 L11,5.5 L10.5,4 L9,3.5 L10.5,3 Z M13.5,7.5 L13.8,8.2 L14.5,8.5 L13.8,8.8 L13.5,9.5 L13.2,8.8 L12.5,8.5 L13.2,8.2 Z",
+        Icon.ChevronsRight => "M3.5,4 L7.5,8 L3.5,12 M8.5,4 L12.5,8 L8.5,12",
+        Icon.ChevronsLeft => "M12.5,4 L8.5,8 L12.5,12 M7.5,4 L3.5,8 L7.5,12",
+        Icon.Tray => "M2,9.5 L2,13.5 L14,13.5 L14,9.5 L10.5,9.5 L9.8,11 L6.2,11 L5.5,9.5 Z M2,9.5 L3.8,3 L12.2,3 L14,9.5",
+        Icon.Unstash => "M2,9.5 L2,13.5 L14,13.5 L14,9.5 M8,10.5 L8,2.5 M5,5.5 L8,2.5 L11,5.5",
+        Icon.Pop => "M3.5,1.5 L9.5,1.5 L12.5,4.5 L12.5,14.5 L3.5,14.5 Z M8,12 L8,6.5 M5.8,8.7 L8,6.5 L10.2,8.7",
+        Icon.Trash => "M2.5,4.5 L13.5,4.5 M6,4.5 L6,2.5 L10,2.5 L10,4.5 M4,4.5 L4.8,13.5 L11.2,13.5 L12,4.5",
+        Icon.ClearAll => "M2.5,4.5 L13.5,4.5 M6,4.5 L6,2.5 L10,2.5 L10,4.5 M4,4.5 L4.8,13.5 L11.2,13.5 L12,4.5 M6.5,7.5 L9.5,10.5 M9.5,7.5 L6.5,10.5",
         _ => "",
     };
 

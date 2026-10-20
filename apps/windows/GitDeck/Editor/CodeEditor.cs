@@ -15,10 +15,12 @@ namespace GitDeck.Editor;
 /// Scintilla 内部以 UTF-8 字节编址，核心的高亮区间与 .NET 字符串以 UTF-16 编址，这里负责两者换算。
 public sealed class CodeEditor : Grid
 {
-    // 页边：0 行号，1 变更标记，2 与正文之间的空隙。
-    private const int NumberMargin = 0;
-    private const int ChangeMargin = 1;
-    private const int GapMargin = 2;
+    // 页边：0 Annotate 注释（默认隐藏），1 行号，2 变更标记，3 与正文之间的空隙。
+    private const int AnnotationMargin = 0;
+    private const int NumberMargin = 1;
+    private const int ChangeMargin = 2;
+    private const int GapMargin = 3;
+    private const double AnnotationWidth = 170;
 
     // 标记编号。
     private const int AddedMarker = 0;
@@ -32,8 +34,15 @@ public sealed class CodeEditor : Grid
     private const int DiffExcludedMarkerBase = 6;
     private const int DiffSeparatorMarkerBase = 9;
     private const int InlineIndicatorBase = 9;
+    // 三栏合并中的冲突块（红色背景）与无对应行时的分隔线。
+    private const int ConflictMarker = 12;
+    private const int ConflictSeparatorMarker = 13;
     private const int StyleDefault = 32;
     private const int StyleLineNumber = 33;
+    // Annotate 注释的样式：按提交新旧分为若干档背景色（越新越深），最后一档为未提交的行。
+    private const int StyleAnnotationBase = 40;
+    private const int AnnotationAgeLevels = 8;
+    private const int StyleAnnotationPlain = StyleAnnotationBase + AnnotationAgeLevels;
 
     private readonly EditorBaseControl _control = new();
     private readonly FindBar _findBar = new();
@@ -168,6 +177,15 @@ public sealed class CodeEditor : Grid
     /// 编辑器组件加载完成（此后行位置等信息可用）。
     public event Action? Initialized;
 
+    /// 点击 Annotate 注释：该行最后修改所在的提交。
+    public event Action<string>? AnnotationClicked;
+
+    /// 在行号或注释列上右键：显示 gutter 菜单（Annotate、显示历史）的位置（相对本控件）。
+    public event Action<Windows.Foundation.Point>? GutterContextRequested;
+
+    /// 文本被修改（含程序修改与撤销 / 重做）：起始行与增加的行数（删除时为负）。三栏合并据此跟踪结果栏中块的位置。
+    public event Action<int, int>? LinesEdited;
+
     public int LineCount => _ready ? (int)_control.Editor.LineCount : _text.Count(c => c == '\n') + 1;
 
     /// 视口顶部的行（Diff 两侧同步滚动）。
@@ -216,7 +234,7 @@ public sealed class CodeEditor : Grid
     private int _lineNumberWidth;
 
     /// Diff 中一行的装饰：所在变更块的种类，是否不提交，或者是对侧有内容时画在该行下方的分隔线。
-    public readonly record struct DiffLine(int Line, LineChangeKind Kind, bool Excluded = false, bool Separator = false);
+    public readonly record struct DiffLine(int Line, LineChangeKind Kind, bool Excluded = false, bool Separator = false, bool Conflict = false);
 
     /// 单词级变化（UTF-16 偏移）。
     public readonly record struct DiffInline(uint Start, uint End, LineChangeKind Kind);
@@ -237,6 +255,114 @@ public sealed class CodeEditor : Grid
         ApplyLineNumbers();
     }
 
+    private BlameResult? _blame;
+    private IReadOnlyList<int?>? _annotationLineMap;
+    private long _oldest;
+    private long _newest;
+    private ToolTip? _annotationTip;
+
+    /// Annotate（git blame）结果；null 时隐藏注释列。
+    public BlameResult? Annotations
+    {
+        get => _blame;
+        set
+        {
+            _blame = value;
+            var times = value?.Commits.Where(c => !c.IsUncommitted).Select(c => c.AuthorTime).ToList() ?? [];
+            _oldest = times.Count > 0 ? times.Min() : 0;
+            _newest = times.Count > 0 ? times.Max() : 0;
+            ApplyAnnotations();
+        }
+    }
+
+    /// 编辑后的行号映射：当前行 → blame 时的行；null 元素表示新增或修改的行（不显示注释）。
+    /// 为 null 时按行号一一对应（文件未修改）。
+    public IReadOnlyList<int?>? AnnotationLineMap
+    {
+        get => _annotationLineMap;
+        set
+        {
+            _annotationLineMap = value;
+            ApplyAnnotations();
+        }
+    }
+
+    private BlameCommit? AnnotationCommit(int line)
+    {
+        if (_blame is not { } blame) return null;
+        int? mapped = _annotationLineMap is { } map ? (line < map.Count ? map[line] : null) : line;
+        if (mapped is not { } index || index < 0 || index >= blame.Lines.Length) return null;
+        var commit = (int)blame.Lines[index];
+        return commit < blame.Commits.Length ? blame.Commits[commit] : null;
+    }
+
+    /// 写入注释列：每行按提交新旧设置背景，同一提交的连续行只在第一行显示日期与作者（与 IDEA 一致）。
+    private void ApplyAnnotations()
+    {
+        if (!_ready) return;
+        var editor = _control.Editor;
+        editor.MarginTextClearAll();
+        if (_blame is null)
+        {
+            editor.SetMarginWidthN(AnnotationMargin, 0);
+            ApplyLineNumbers();
+            return;
+        }
+        var scale = XamlRoot?.RasterizationScale ?? 1;
+        editor.SetMarginWidthN(AnnotationMargin, (int)Math.Round(AnnotationWidth * scale));
+        var count = (int)editor.LineCount;
+        string? previous = null;
+        for (var line = 0; line < count; line++)
+        {
+            var commit = AnnotationCommit(line);
+            if (commit is null || commit.IsUncommitted)
+            {
+                previous = commit?.Hash;
+                editor.MarginSetText(line, " ");
+                editor.MarginSetStyle(line, StyleAnnotationPlain);
+                continue;
+            }
+            var text = commit.Hash == previous
+                ? " "
+                : $" {DateTimeOffset.FromUnixTimeSeconds(commit.AuthorTime).LocalDateTime:d}  {commit.AuthorName}";
+            previous = commit.Hash;
+            editor.MarginSetText(line, text);
+            editor.MarginSetStyle(line, StyleAnnotationBase + AgeLevel(commit.AuthorTime));
+        }
+        // 页边文本按行共享：注释列只用于普通编辑器，不与自定义行号（统一 Diff）同时出现。
+    }
+
+    private int AgeLevel(long time)
+    {
+        var span = Math.Max(_newest - _oldest, 1);
+        var recency = (double)(time - _oldest) / span;
+        return Math.Clamp((int)(recency * (AnnotationAgeLevels - 1) + 0.5), 0, AnnotationAgeLevels - 1);
+    }
+
+    /// 悬停在注释上时显示提交详情。
+    private void ShowAnnotationTip(int x, int y)
+    {
+        if (_blame is null) return;
+        var editor = _control.Editor;
+        var scale = XamlRoot?.RasterizationScale ?? 1;
+        if (x / scale > AnnotationWidth) return;
+        var line = (int)editor.LineFromPosition(editor.PositionFromPoint(editor.GetMarginWidthN(AnnotationMargin) + editor.GetMarginWidthN(NumberMargin) + 40, y));
+        if (AnnotationCommit(line) is not { IsUncommitted: false } commit) return;
+        _annotationTip ??= new ToolTip { Placement = Microsoft.UI.Xaml.Controls.Primitives.PlacementMode.Right };
+        _annotationTip.Content = $"{commit.Hash[..Math.Min(8, commit.Hash.Length)]}  {commit.AuthorName} <{commit.AuthorEmail}>\n"
+            + $"{Git.LogDates.Detailed(commit.AuthorTime)}\n\n{commit.Summary}";
+        _annotationTip.PlacementRect = new Windows.Foundation.Rect(x / scale, y / scale, 1, editor.TextHeight(line) / scale);
+        ToolTipService.SetToolTip(_control, _annotationTip);
+        _annotationTip.IsOpen = true;
+    }
+
+    private void HideAnnotationTip()
+    {
+        if (_annotationTip is null) return;
+        _annotationTip.IsOpen = false;
+        ToolTipService.SetToolTip(_control, null);
+    }
+
     private void ApplyDiffDecorations()
     {
         if (!_ready) return;
@@ -249,8 +375,15 @@ public sealed class CodeEditor : Grid
             editor.IndicatorCurrent = InlineIndicatorBase + i;
             editor.IndicatorClearRange(0, editor.Length);
         }
+        editor.MarkerDeleteAll(ConflictMarker);
+        editor.MarkerDeleteAll(ConflictSeparatorMarker);
         foreach (var line in _diffLines)
         {
+            if (line.Conflict)
+            {
+                editor.MarkerAdd(line.Line, line.Separator ? ConflictSeparatorMarker : ConflictMarker);
+                continue;
+            }
             var kind = (int)line.Kind;
             var marker = line.Separator ? DiffSeparatorMarkerBase + kind : (line.Excluded ? DiffExcludedMarkerBase : DiffLineMarkerBase) + kind;
             editor.MarkerAdd(line.Line, marker);
@@ -291,6 +424,21 @@ public sealed class CodeEditor : Grid
         editor.SetMarginWidthN(NumberMargin, editor.TextWidth(StyleLineNumber, new string('9', Math.Max(3, _lineNumberWidth))) + 12);
     }
 
+    /// 把第 `start` 行起的 `count` 行（含行尾）替换为 `text`，作为一次可撤销的编辑（三栏合并应用变更块）。
+    public void ReplaceLines(int start, int count, string text)
+    {
+        if (!_ready) return;
+        var editor = _control.Editor;
+        var lineCount = (int)editor.LineCount;
+        var from = start >= lineCount ? editor.Length : editor.PositionFromLine(start);
+        var to = start + count >= lineCount ? editor.Length : editor.PositionFromLine(start + count);
+        editor.SetTargetRange(from, to);
+        editor.ReplaceTarget(-1, text);
+    }
+
+    /// 光标所在行（从 0 开始）。
+    public int CaretLine => _ready ? (int)_control.Editor.LineFromPosition(_control.Editor.CurrentPos) : 0;
+
     public void Reveal(int line)
     {
         if (!_ready) return;
@@ -321,6 +469,10 @@ public sealed class CodeEditor : Grid
         editor.CaretLineVisibleAlways = true;
         editor.SelectionLayer = Layer.UnderText;
 
+        editor.SetMarginTypeN(AnnotationMargin, MarginType.Text);
+        editor.SetMarginMaskN(AnnotationMargin, 0);
+        editor.SetMarginWidthN(AnnotationMargin, 0);
+        editor.SetMarginSensitiveN(AnnotationMargin, true);
         editor.SetMarginTypeN(NumberMargin, MarginType.Number);
         editor.SetMarginMaskN(NumberMargin, 0);
         editor.SetMarginTypeN(ChangeMargin, MarginType.Symbol);
@@ -338,7 +490,9 @@ public sealed class CodeEditor : Grid
         editor.Modified += (_, args) =>
         {
             const int textChange = (int)(ModificationFlags.InsertText | ModificationFlags.DeleteText);
-            if ((args.ModificationType & textChange) != 0 && !_suppressChange) TextUpdated(raiseEvent: true);
+            if ((args.ModificationType & textChange) == 0) return;
+            if (!_suppressChange) TextUpdated(raiseEvent: true);
+            LinesEdited?.Invoke((int)editor.LineFromPosition(args.Position), args.LinesAdded);
         };
         editor.UpdateUI += (_, args) =>
         {
@@ -348,8 +502,20 @@ public sealed class CodeEditor : Grid
         editor.SetMarginSensitiveN(NumberMargin, true);
         editor.MarginClick += (_, args) =>
         {
-            if (args.Margin == NumberMargin) LineNumberClicked?.Invoke((int)editor.LineFromPosition(args.Position));
+            var line = (int)editor.LineFromPosition(args.Position);
+            if (args.Margin == NumberMargin) LineNumberClicked?.Invoke(line);
+            else if (args.Margin == AnnotationMargin && AnnotationCommit(line) is { IsUncommitted: false } commit) AnnotationClicked?.Invoke(commit.Hash);
         };
+        editor.MarginRightClick += (_, args) =>
+        {
+            if (args.Margin != NumberMargin && args.Margin != AnnotationMargin) return;
+            var scale = XamlRoot?.RasterizationScale ?? 1;
+            var y = editor.PointYFromPosition(args.Position) / scale + TextAreaTop;
+            GutterContextRequested?.Invoke(new Windows.Foundation.Point(4, y + 8));
+        };
+        editor.MouseDwellTime = 500;
+        editor.DwellStart += (_, args) => ShowAnnotationTip(args.X, args.Y);
+        editor.DwellEnd += (_, _) => HideAnnotationTip();
         editor.VScrollBar = _showVerticalScrollBar;
         for (var i = 0; i < 3; i++)
         {
@@ -359,6 +525,8 @@ public sealed class CodeEditor : Grid
             editor.IndicSetStyle(InlineIndicatorBase + i, IndicatorStyle.FullBox);
             editor.IndicSetUnder(InlineIndicatorBase + i, true);
         }
+        editor.MarkerDefine(ConflictMarker, MarkerSymbol.Background);
+        editor.MarkerDefine(ConflictSeparatorMarker, MarkerSymbol.Underline);
 
         ApplyAppearance();
         ApplyLineChanges();
@@ -385,6 +553,17 @@ public sealed class CodeEditor : Grid
         editor.StyleSetFore(StyleLineNumber, Bgr(SyntaxTheme.LineNumber(dark)));
         editor.StyleSetBack(StyleLineNumber, Bgr(SyntaxTheme.Background(dark)));
         editor.StyleSetSizeFractional(StyleLineNumber, Math.Max(700, points - 75));
+        var gutterBackground = SyntaxTheme.Background(dark);
+        for (var level = 0; level <= AnnotationAgeLevels; level++)
+        {
+            var style = StyleAnnotationBase + level;
+            editor.StyleSetFont(style, "Segoe UI");
+            editor.StyleSetSizeFractional(style, Math.Max(700, points - 150));
+            editor.StyleSetFore(style, Bgr(SyntaxTheme.LineNumber(dark)));
+            // 越新的提交背景越深（IDEA 按提交时间的热力着色）。
+            var alpha = level == AnnotationAgeLevels ? 0 : 0.04 + 0.22 * level / (AnnotationAgeLevels - 1);
+            editor.StyleSetBack(style, Bgr(DiffColors.Blend(DiffColors.Accent, gutterBackground, alpha)));
+        }
         foreach (var kind in Enum.GetValues<TokenKind>())
         {
             editor.StyleSetFore(TokenStyle(kind), Bgr(SyntaxTheme.Token(kind, dark)));
@@ -418,8 +597,10 @@ public sealed class CodeEditor : Grid
             editor.IndicSetFore(InlineIndicatorBase + i, Bgr(DiffColors.Inline(kind, dark)));
             editor.IndicSetAlpha(InlineIndicatorBase + i, (Alpha)255);
         }
+        editor.MarkerSetBack(ConflictMarker, Bgr(DiffColors.ConflictBlock(dark)));
+        editor.MarkerSetBack(ConflictSeparatorMarker, Bgr(DiffColors.ConflictMarker(dark)));
         UpdateNumberMarginWidth();
-        ApplyLineNumbers();
+        ApplyAnnotations();
         ApplyStyles(_spans);
         ApplyDiffDecorations();
     }

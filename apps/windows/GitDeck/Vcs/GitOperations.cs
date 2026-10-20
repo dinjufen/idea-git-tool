@@ -8,7 +8,7 @@ namespace GitDeck.Vcs;
 /// 分支与远程操作的交互流程：在后台执行 git，处理确认对话框、错误与结果通知（与 mac 端 GitOperations 一致）。
 ///
 /// 同一项目同一时间只运行一个操作，与 IDEA 的后台任务行为一致。
-public sealed class GitOperations
+public sealed partial class GitOperations
 {
     private readonly ProjectModel _model;
     private readonly Func<XamlRoot?> _root;

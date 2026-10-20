@@ -49,6 +49,8 @@ public static class NameDialog
     public static async Task<Result?> Show(XamlRoot root, string title, string? message, string initial, string confirm,
         Func<string, string?> validate, string? checkbox = null, bool isChecked = true)
     {
+        // 调试参数 -debug.confirm：不显示对话框，直接按初始值确认（用于自动验证流程）。
+        if (DebugOptions.Has("debug.confirm") && initial.Length > 0) return new Result(initial, isChecked);
         var dialog = Dialogs.Create(root, title);
         dialog.PrimaryButtonText = confirm;
         dialog.CloseButtonText = L10n.Tr("common.cancel");
