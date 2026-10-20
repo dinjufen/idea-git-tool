@@ -2500,6 +2500,23 @@
         }
       }
     },
+    "commit.button.commit.tooltip.win": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Commit selected files (Ctrl+Enter)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提交选中的文件 (Ctrl+Enter)"
+          }
+        }
+      }
+    },
     "commit.button.commitAndPush": {
       "extractionState": "manual",
       "localizations": {
@@ -3622,6 +3639,23 @@
         }
       }
     },
+    "diff.next.win": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next Difference (F7)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一个差异 (F7)"
+          }
+        }
+      }
+    },
     "diff.previous": {
       "extractionState": "manual",
       "localizations": {
@@ -3635,6 +3669,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "上一个差异"
+          }
+        }
+      }
+    },
+    "diff.previous.win": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous Difference (Shift+F7)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一个差异 (Shift+F7)"
           }
         }
       }

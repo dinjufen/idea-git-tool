@@ -1,6 +1,7 @@
 using System.Text;
 using GitDeck.Common;
 using GitDeck.Core;
+using GitDeck.Diff;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.UI;
@@ -25,6 +26,12 @@ public sealed class CodeEditor : Grid
     private const int DeletedMarker = 2;
 
     private const int FindIndicator = 8;
+
+    // Diff 装饰：整行背景（新增 / 修改 / 删除，以及不提交时的浅色）、无对应行时的分隔线、单词级高亮。
+    private const int DiffLineMarkerBase = 3;
+    private const int DiffExcludedMarkerBase = 6;
+    private const int DiffSeparatorMarkerBase = 9;
+    private const int InlineIndicatorBase = 9;
     private const int StyleDefault = 32;
     private const int StyleLineNumber = 33;
 
@@ -152,6 +159,138 @@ public sealed class CodeEditor : Grid
     }
 
     /// 把第 `line` 行（从 0 开始）滚动到视口中并放置光标。
+    /// 点击行号（参数为从 0 开始的行）。Diff 中用于按行选择要提交的改动。
+    public event Action<int>? LineNumberClicked;
+
+    /// 垂直滚动位置变化（两侧同步滚动、重画连接带）。
+    public event Action? Scrolled;
+
+    /// 编辑器组件加载完成（此后行位置等信息可用）。
+    public event Action? Initialized;
+
+    public int LineCount => _ready ? (int)_control.Editor.LineCount : _text.Count(c => c == '\n') + 1;
+
+    /// 视口顶部的行（Diff 两侧同步滚动）。
+    public int FirstVisibleLine
+    {
+        get => _ready ? (int)_control.Editor.FirstVisibleLine : 0;
+        set
+        {
+            if (_ready) _control.Editor.FirstVisibleLine = Math.Max(0, value);
+        }
+    }
+
+    /// 第 `line` 行顶部相对编辑器文本区域顶部的位置（逻辑像素）；用于画 Diff 连接带。
+    public double LineTop(int line)
+    {
+        if (!_ready) return 0;
+        var editor = _control.Editor;
+        var scale = XamlRoot?.RasterizationScale ?? 1;
+        var count = (int)editor.LineCount;
+        if (line >= count)
+        {
+            var last = Math.Max(0, count - 1);
+            return (editor.PointYFromPosition(editor.PositionFromLine(last)) + editor.TextHeight(last)) / scale;
+        }
+        return editor.PointYFromPosition(editor.PositionFromLine(Math.Max(0, line))) / scale;
+    }
+
+    /// 编辑器文本区域在本控件中的上边距（查找栏显示时向下偏移）。
+    public double TextAreaTop => _findBar.Visibility == Visibility.Visible ? _findBar.ActualHeight : 0;
+
+    /// 显示垂直滚动条（Diff 左侧隐藏，只保留右侧的滚动条）。
+    public bool ShowVerticalScrollBar
+    {
+        get => _showVerticalScrollBar;
+        set
+        {
+            _showVerticalScrollBar = value;
+            if (_ready) _control.Editor.VScrollBar = value;
+        }
+    }
+
+    private bool _showVerticalScrollBar = true;
+    private IReadOnlyList<DiffLine> _diffLines = [];
+    private IReadOnlyList<DiffInline> _diffInline = [];
+    private Func<int, string?>? _lineNumberText;
+    private int _lineNumberWidth;
+
+    /// Diff 中一行的装饰：所在变更块的种类，是否不提交，或者是对侧有内容时画在该行下方的分隔线。
+    public readonly record struct DiffLine(int Line, LineChangeKind Kind, bool Excluded = false, bool Separator = false);
+
+    /// 单词级变化（UTF-16 偏移）。
+    public readonly record struct DiffInline(uint Start, uint End, LineChangeKind Kind);
+
+    /// 设置 Diff 装饰（整行背景、分隔线与单词级高亮）。
+    public void SetDiffDecorations(IReadOnlyList<DiffLine> lines, IReadOnlyList<DiffInline> inline)
+    {
+        _diffLines = lines;
+        _diffInline = inline;
+        ApplyDiffDecorations();
+    }
+
+    /// 自定义行号（统一 Diff 视图显示新旧两列行号）；`width` 为预留的字符数。
+    public void SetLineNumbers(int width, Func<int, string?>? text)
+    {
+        _lineNumberWidth = width;
+        _lineNumberText = text;
+        ApplyLineNumbers();
+    }
+
+    private void ApplyDiffDecorations()
+    {
+        if (!_ready) return;
+        var editor = _control.Editor;
+        for (var i = 0; i < 3; i++)
+        {
+            editor.MarkerDeleteAll(DiffLineMarkerBase + i);
+            editor.MarkerDeleteAll(DiffExcludedMarkerBase + i);
+            editor.MarkerDeleteAll(DiffSeparatorMarkerBase + i);
+            editor.IndicatorCurrent = InlineIndicatorBase + i;
+            editor.IndicatorClearRange(0, editor.Length);
+        }
+        foreach (var line in _diffLines)
+        {
+            var kind = (int)line.Kind;
+            var marker = line.Separator ? DiffSeparatorMarkerBase + kind : (line.Excluded ? DiffExcludedMarkerBase : DiffLineMarkerBase) + kind;
+            editor.MarkerAdd(line.Line, marker);
+        }
+        if (_diffInline.Count > 0)
+        {
+            var offsets = Utf8Offsets(_text);
+            foreach (var range in _diffInline)
+            {
+                if (range.End > _text.Length || range.End <= range.Start) continue;
+                editor.IndicatorCurrent = InlineIndicatorBase + (int)range.Kind;
+                editor.IndicatorFillRange(offsets[range.Start], offsets[range.End] - offsets[range.Start]);
+            }
+        }
+    }
+
+    private void ApplyLineNumbers()
+    {
+        if (!_ready) return;
+        var editor = _control.Editor;
+        if (_lineNumberText is null)
+        {
+            editor.SetMarginTypeN(NumberMargin, MarginType.Number);
+            UpdateNumberMarginWidth();
+            return;
+        }
+        editor.SetMarginTypeN(NumberMargin, MarginType.RText);
+        editor.MarginTextClearAll();
+        var count = (int)editor.LineCount;
+        for (var line = 0; line < count; line++)
+        {
+            if (_lineNumberText(line) is { } text)
+            {
+                editor.MarginSetText(line, text);
+                editor.MarginSetStyle(line, StyleLineNumber);
+            }
+        }
+        editor.SetMarginWidthN(NumberMargin, editor.TextWidth(StyleLineNumber, new string('9', Math.Max(3, _lineNumberWidth))) + 12);
+    }
+
     public void Reveal(int line)
     {
         if (!_ready) return;
@@ -201,11 +340,31 @@ public sealed class CodeEditor : Grid
             const int textChange = (int)(ModificationFlags.InsertText | ModificationFlags.DeleteText);
             if ((args.ModificationType & textChange) != 0 && !_suppressChange) TextUpdated(raiseEvent: true);
         };
-        editor.UpdateUI += (_, _) => ReportCaret();
+        editor.UpdateUI += (_, args) =>
+        {
+            ReportCaret();
+            if ((args.Updated & (int)Update.VScroll) != 0) Scrolled?.Invoke();
+        };
+        editor.SetMarginSensitiveN(NumberMargin, true);
+        editor.MarginClick += (_, args) =>
+        {
+            if (args.Margin == NumberMargin) LineNumberClicked?.Invoke((int)editor.LineFromPosition(args.Position));
+        };
+        editor.VScrollBar = _showVerticalScrollBar;
+        for (var i = 0; i < 3; i++)
+        {
+            editor.MarkerDefine(DiffLineMarkerBase + i, MarkerSymbol.Background);
+            editor.MarkerDefine(DiffExcludedMarkerBase + i, MarkerSymbol.Background);
+            editor.MarkerDefine(DiffSeparatorMarkerBase + i, MarkerSymbol.Underline);
+            editor.IndicSetStyle(InlineIndicatorBase + i, IndicatorStyle.FullBox);
+            editor.IndicSetUnder(InlineIndicatorBase + i, true);
+        }
 
         ApplyAppearance();
         ApplyLineChanges();
         ScheduleHighlight(TimeSpan.Zero);
+        // 等首次排版完成后再通知，行位置才是准确的。
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => Initialized?.Invoke());
     }
 
     private bool IsDark => ActualTheme == ElementTheme.Dark;
@@ -249,8 +408,20 @@ public sealed class CodeEditor : Grid
         editor.MarkerSetFore(DeletedMarker, Bgr(SyntaxTheme.LineDeleted(dark)));
         editor.IndicSetFore(FindIndicator, Bgr(SyntaxTheme.FindMatch(dark)));
         editor.IndicSetAlpha(FindIndicator, (Alpha)255);
+        foreach (var kind in Enum.GetValues<LineChangeKind>())
+        {
+            var i = (int)kind;
+            var block = DiffColors.Block(kind, dark);
+            editor.MarkerSetBack(DiffLineMarkerBase + i, Bgr(block));
+            editor.MarkerSetBack(DiffExcludedMarkerBase + i, Bgr(DiffColors.Blend(block, SyntaxTheme.Background(dark), 0.3)));
+            editor.MarkerSetBack(DiffSeparatorMarkerBase + i, Bgr(DiffColors.Marker(kind, dark)));
+            editor.IndicSetFore(InlineIndicatorBase + i, Bgr(DiffColors.Inline(kind, dark)));
+            editor.IndicSetAlpha(InlineIndicatorBase + i, (Alpha)255);
+        }
         UpdateNumberMarginWidth();
+        ApplyLineNumbers();
         ApplyStyles(_spans);
+        ApplyDiffDecorations();
     }
 
     private void SettingsChanged()
@@ -261,6 +432,7 @@ public sealed class CodeEditor : Grid
 
     private void UpdateNumberMarginWidth()
     {
+        if (_lineNumberText is not null) return;
         var editor = _control.Editor;
         var digits = Math.Max(3, editor.LineCount.ToString(System.Globalization.CultureInfo.InvariantCulture).Length);
         var width = editor.TextWidth(StyleLineNumber, new string('9', digits)) + 12;

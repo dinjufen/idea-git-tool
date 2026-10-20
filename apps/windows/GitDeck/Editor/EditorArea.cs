@@ -2,6 +2,7 @@ using System.Text;
 using GitDeck.Common;
 using GitDeck.Controls;
 using GitDeck.Core;
+using GitDeck.Diff;
 using GitDeck.Project;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -10,12 +11,44 @@ using Microsoft.UI.Xaml.Media;
 
 namespace GitDeck.Editor;
 
-/// 编辑器区域：标签栏 + 代码编辑器（语法高亮、查找、相对 HEAD 的变更标记）。与 mac 端 EditorAreaView 一致。
-/// Diff 页等其他标签内容在后续批次加入。
+/// 编辑器区域：标签栏 + 代码编辑器（语法高亮、查找、相对 HEAD 的变更标记）或 Diff 页。与 mac 端 EditorAreaView 一致。
 public sealed class EditorArea : Grid
 {
+    /// 标签页的内容：文件文档或 Diff 页。
+    public interface ITab
+    {
+        string Title { get; }
+
+        string Tooltip { get; }
+
+        bool IsModified { get; }
+
+        /// 标签上显示 Diff 图标。
+        bool IsDiff { get; }
+
+        UIElement View { get; }
+    }
+
+    /// Diff 页：同一来源（例如同一提交中的同一文件）只打开一个标签。
+    public sealed class DiffTab(string key, string title, string tooltip, DiffView view) : ITab
+    {
+        public string Key { get; } = key;
+
+        public string Title { get; } = title;
+
+        public string Tooltip { get; } = tooltip;
+
+        public bool IsModified => false;
+
+        public bool IsDiff => true;
+
+        public DiffView Diff { get; } = view;
+
+        public UIElement View => Diff;
+    }
+
     /// 打开的文件。
-    public sealed class Document
+    public sealed class Document : ITab
     {
         public Document(string path, string? relativePath, string text, bool hasBom)
         {
@@ -46,14 +79,20 @@ public sealed class EditorArea : Grid
         public CancellationTokenSource? LineStatusCancel { get; set; }
 
         public string Title => System.IO.Path.GetFileName(Path);
+
+        public string Tooltip => Path;
+
+        public bool IsDiff => false;
+
+        public UIElement View => Editor;
     }
 
     private readonly ProjectModel _model;
     private readonly StackPanel _tabBar = new() { Orientation = Orientation.Horizontal };
     private readonly Grid _content = new();
     private readonly FrameworkElement _emptyState;
-    private readonly List<Document> _documents = [];
-    private Document? _active;
+    private readonly List<ITab> _tabs = [];
+    private ITab? _active;
     private string? _lastHead;
 
     public EditorArea(ProjectModel model)
@@ -87,16 +126,33 @@ public sealed class EditorArea : Grid
 
     public event Action<string, bool>? Message;
 
-    public CodeEditor? ActiveEditor => _active?.Editor;
+    private IEnumerable<Document> Documents => _tabs.OfType<Document>();
 
-    public bool HasModifiedDocuments => _documents.Any(d => d.IsModified);
+    public CodeEditor? ActiveEditor => (_active as Document)?.Editor;
+
+    public DiffView? ActiveDiff => (_active as DiffTab)?.Diff;
+
+    public bool HasModifiedDocuments => Documents.Any(d => d.IsModified);
+
+    /// 打开 Diff 页；`key` 相同的 Diff 已打开时直接切换过去。
+    public void OpenDiff(string key, string title, string tooltip, Func<DiffView> make)
+    {
+        if (_tabs.OfType<DiffTab>().FirstOrDefault(t => t.Key == key) is { } existing)
+        {
+            Activate(existing);
+            return;
+        }
+        var tab = new DiffTab(key, title, tooltip, make());
+        _tabs.Add(tab);
+        Activate(tab);
+    }
 
     // MARK: - 打开与保存
 
     public void Open(string path)
     {
         path = System.IO.Path.GetFullPath(path);
-        if (_documents.FirstOrDefault(d => RecentProjects.SamePath(d.Path, path)) is { } existing)
+        if (Documents.FirstOrDefault(d => RecentProjects.SamePath(d.Path, path)) is { } existing)
         {
             Activate(existing);
             return;
@@ -121,7 +177,7 @@ public sealed class EditorArea : Grid
         {
             if (document == _active) CaretInfoChanged?.Invoke($"{line}:{column}    {document.Editor.LineEnding}    UTF-8");
         };
-        _documents.Add(document);
+        _tabs.Add(document);
         Activate(document);
         LoadBase(document);
     }
@@ -130,7 +186,7 @@ public sealed class EditorArea : Grid
     public void Open(string path, int line)
     {
         Open(path);
-        if (_active is { } document && RecentProjects.SamePath(document.Path, path))
+        if (_active is Document document && RecentProjects.SamePath(document.Path, path))
         {
             // 新打开的编辑器尚未加载，等加载完成后再滚动。
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => document.Editor.Reveal(Math.Max(0, line)));
@@ -139,7 +195,7 @@ public sealed class EditorArea : Grid
 
     public void SaveActive()
     {
-        if (_active is not { } document) return;
+        if (_active is not Document document) return;
         try
         {
             Write(document);
@@ -161,7 +217,7 @@ public sealed class EditorArea : Grid
     /// 关闭窗口前：逐个询问未保存的文件；取消时返回 false。
     public async Task<bool> ConfirmCloseAll()
     {
-        foreach (var document in _documents.Where(d => d.IsModified).ToList())
+        foreach (var document in Documents.Where(d => d.IsModified).ToList())
         {
             Activate(document);
             if (!await ConfirmClose(document)) return false;
@@ -173,7 +229,7 @@ public sealed class EditorArea : Grid
     public void ReloadFromDisk(IReadOnlyCollection<string> paths)
     {
         var changed = new HashSet<string>(paths.Select(System.IO.Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
-        foreach (var document in _documents.Where(d => !d.IsModified && changed.Contains(d.Path)))
+        foreach (var document in Documents.Where(d => !d.IsModified && changed.Contains(d.Path)).ToList())
         {
             if (!TryRead(document.Path, out var text, out _) || text == document.Editor.Text) continue;
             document.IsReloading = true;
@@ -225,9 +281,9 @@ public sealed class EditorArea : Grid
 
     private void SaveSession()
     {
-        var paths = _documents.Select(d => d.Path).ToList();
+        var paths = Documents.Select(d => d.Path).ToList();
         // 当前标签放在最后，恢复时最后打开即成为当前标签。
-        if (_active is { } active)
+        if (_active is Document active)
         {
             paths.Remove(active.Path);
             paths.Add(active.Path);
@@ -286,29 +342,32 @@ public sealed class EditorArea : Grid
     {
         if (_model.IsRefreshing || _model.Status.Branch.Oid == _lastHead) return;
         _lastHead = _model.Status.Branch.Oid;
-        foreach (var document in _documents) LoadBase(document);
+        foreach (var document in Documents.ToList()) LoadBase(document);
     }
 
     // MARK: - 标签页
 
-    private async Task Close(Document document)
+    private async Task Close(ITab tab)
     {
-        if (!await ConfirmClose(document)) return;
-        document.LineStatusCancel?.Cancel();
-        var index = _documents.IndexOf(document);
-        _documents.Remove(document);
-        if (_active == document)
+        if (tab is Document document)
+        {
+            if (!await ConfirmClose(document)) return;
+            document.LineStatusCancel?.Cancel();
+        }
+        var index = _tabs.IndexOf(tab);
+        _tabs.Remove(tab);
+        if (_active == tab)
         {
             _active = null;
             _content.Children.Clear();
-            if (_documents.Count == 0)
+            if (_tabs.Count == 0)
             {
                 ShowEmptyState();
                 RebuildTabs();
             }
             else
             {
-                Activate(_documents[Math.Min(index, _documents.Count - 1)]);
+                Activate(_tabs[Math.Min(index, _tabs.Count - 1)]);
             }
         }
         else
@@ -348,12 +407,13 @@ public sealed class EditorArea : Grid
         }
     }
 
-    private void Activate(Document document)
+    private void Activate(ITab tab)
     {
         _content.Children.Clear();
-        _active = document;
-        _content.Children.Add(document.Editor);
-        document.Editor.Focus();
+        _active = tab;
+        _content.Children.Add(tab.View);
+        if (tab is Document document) document.Editor.Focus();
+        else CaretInfoChanged?.Invoke("");
         RebuildTabs();
         SaveSession();
     }
@@ -396,12 +456,12 @@ public sealed class EditorArea : Grid
     private void RebuildTabs()
     {
         _tabBar.Children.Clear();
-        foreach (var document in _documents)
+        foreach (var item in _tabs)
         {
-            var tab = new EditorTab(document.Title, document.IsModified, document == _active);
-            ToolTipService.SetToolTip(tab, document.Path);
-            tab.Selected += () => Activate(document);
-            tab.CloseRequested += () => _ = Close(document);
+            var tab = new EditorTab(item.Title, item.IsModified, item == _active, item.IsDiff);
+            ToolTipService.SetToolTip(tab, item.Tooltip);
+            tab.Selected += () => Activate(item);
+            tab.CloseRequested += () => _ = Close(item);
             _tabBar.Children.Add(tab);
         }
     }
@@ -414,7 +474,7 @@ public sealed class EditorTab : Grid
 
     public event Action? CloseRequested;
 
-    public EditorTab(string title, bool modified, bool selected)
+    public EditorTab(string title, bool modified, bool selected, bool isDiff = false)
     {
         Padding = new Thickness(12, 0, 6, 0);
         Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
@@ -425,7 +485,9 @@ public sealed class EditorTab : Grid
         }, selected ? "PrimaryTextBrush" : "SecondaryTextBrush");
         var close = new IconButton(Icon.Close, L10n.Tr("menu.file.closeTab"), 18, 10) { VerticalAlignment = VerticalAlignment.Center };
         close.Click += (_, _) => CloseRequested?.Invoke();
-        Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { label, close } });
+        var stack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { label, close } };
+        if (isDiff) stack.Children.Insert(0, Icons.Create(Icon.Diff, 12, Icons.ThemeBrush(this, "AccentBrush")));
+        Children.Add(stack);
         if (selected)
         {
             Children.Add(Themed.Background(new Border { Height = 2, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(-12, 0, -6, 0) }, "AccentBrush"));

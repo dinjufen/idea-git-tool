@@ -21,5 +21,16 @@ public static class FileStatus
 
     public static bool IsIgnored(this FileChange change) => change.Unstaged == ChangeKind.Ignored;
 
+    public static string Title(this ConflictKind kind) => kind switch
+    {
+        ConflictKind.BothDeleted => Common.L10n.Tr("conflict.bothDeleted"),
+        ConflictKind.AddedByUs => Common.L10n.Tr("conflict.addedByUs"),
+        ConflictKind.DeletedByThem => Common.L10n.Tr("conflict.deletedByThem"),
+        ConflictKind.AddedByThem => Common.L10n.Tr("conflict.addedByThem"),
+        ConflictKind.DeletedByUs => Common.L10n.Tr("conflict.deletedByUs"),
+        ConflictKind.BothAdded => Common.L10n.Tr("conflict.bothAdded"),
+        _ => Common.L10n.Tr("conflict.bothModified"),
+    };
+
     public static bool IsDeleted(this FileChange change) => change.Staged == ChangeKind.Deleted || change.Unstaged == ChangeKind.Deleted;
 }

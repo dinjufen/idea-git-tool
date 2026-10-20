@@ -24,6 +24,13 @@ public enum Icon
     Close,
     File,
     CollapseAll,
+    ExpandAll,
+    Rollback,
+    Diff,
+    Shelve,
+    Gear,
+    ArrowUp,
+    ArrowDown,
 }
 
 public static class Icons
@@ -44,6 +51,13 @@ public static class Icons
         Icon.Close => "M4.5,4.5 L11.5,11.5 M11.5,4.5 L4.5,11.5",
         Icon.File => "M3.5,1.5 L9.5,1.5 L12.5,4.5 L12.5,14.5 L3.5,14.5 Z M9.5,1.5 L9.5,4.5 L12.5,4.5",
         Icon.CollapseAll => "M4.5,2.5 L8,6 L11.5,2.5 M4.5,13.5 L8,10 L11.5,13.5 M2.5,8 L13.5,8",
+        Icon.ExpandAll => "M4.5,5.5 L8,2 L11.5,5.5 M4.5,10.5 L8,14 L11.5,10.5",
+        Icon.Rollback => "M3,6.5 L11,6.5 A3.5,3.5 0 0 1 11,13.5 L6,13.5 M5.5,3.5 L2.5,6.5 L5.5,9.5",
+        Icon.Diff => "M5,2.5 L5,8.5 M2,5.5 L8,5.5 M8,12.5 L14,12.5",
+        Icon.Shelve => "M2,9.5 L2,13.5 L14,13.5 L14,9.5 M8,2 L8,10 M5,7 L8,10 L11,7",
+        Icon.Gear => "M8,5.5 A2.5,2.5 0 1 1 7.99,5.5 Z M8,1.5 L8,3.5 M8,12.5 L8,14.5 M1.5,8 L3.5,8 M12.5,8 L14.5,8 M3.4,3.4 L4.8,4.8 M11.2,11.2 L12.6,12.6 M3.4,12.6 L4.8,11.2 M11.2,4.8 L12.6,3.4",
+        Icon.ArrowUp => "M8,13.5 L8,2.5 M3.5,7 L8,2.5 L12.5,7",
+        Icon.ArrowDown => "M8,2.5 L8,13.5 M3.5,9 L8,13.5 L12.5,9",
         _ => "",
     };
 

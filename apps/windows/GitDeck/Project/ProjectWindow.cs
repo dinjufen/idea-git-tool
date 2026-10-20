@@ -1,6 +1,8 @@
 using GitDeck.Common;
 using GitDeck.Controls;
+using GitDeck.Commit;
 using GitDeck.Core;
+using GitDeck.Diff;
 using GitDeck.Editor;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
@@ -53,7 +55,9 @@ public sealed class ProjectWindow : Window
     private readonly Splitter _leftSplitter = new(vertical: true);
     private readonly Splitter _rightSplitter = new(vertical: true);
     private readonly Splitter _bottomSplitter = new(vertical: false);
-    private readonly Dictionary<ToolWindowId, ToolWindowPanel> _toolWindows = [];
+    private readonly Dictionary<ToolWindowId, FrameworkElement> _toolWindows = [];
+    private readonly LineSelectionStore _lineSelections = new();
+    private readonly CommitToolWindow _commitWindow;
 
     private readonly FileWatcher _fileWatcher;
     private readonly EditorArea _editor;
@@ -67,6 +71,7 @@ public sealed class ProjectWindow : Window
         Model = new ProjectModel(repository);
         _editor = new EditorArea(Model);
         _projectTree = new ProjectTree(Model);
+        _commitWindow = new CommitToolWindow(Model, _lineSelections);
         _projectWidget = new ToolbarWidget(_badge, L10n.Tr("toolbar.project.tooltip"));
         Title = $"{Model.ProjectName} – {Model.RootPath}";
         ExtendsContentIntoTitleBar = true;
@@ -83,6 +88,7 @@ public sealed class ProjectWindow : Window
 
         foreach (var id in Enum.GetValues<ToolWindowId>()) _toolWindows[id] = new ToolWindowPanel(id.Title());
         _toolWindows[ToolWindowId.Project] = _projectTree.View;
+        _toolWindows[ToolWindowId.Commit] = _commitWindow;
         ApplyToolWindowState();
         Model.Changed += ModelChanged;
         Model.Refresh();
@@ -218,11 +224,14 @@ public sealed class ProjectWindow : Window
         _projectWidget.Click += (_, _) => ShowProjectMenu();
         _vcsWidget.Click += (_, _) => NotImplemented(L10n.Tr("git.action.branches"));
         _refreshButton.Click += (_, _) => Model.Refresh();
-        _commitButton.Click += (_, _) => Show(ToolWindowId.Commit);
+        _commitButton.Click += (_, _) => ShowCommit();
         _updateButton.Click += (_, _) => NotImplemented(L10n.Tr("git.action.update"));
         _pushButton.Click += (_, _) => NotImplemented(L10n.Tr("git.action.push"));
 
         _projectTree.OpenFile += path => _editor.Open(path);
+        _commitWindow.OpenFile += path => _editor.Open(path);
+        _commitWindow.ShowDiff += change => ShowLocalDiff(change);
+        _commitWindow.PushAfterCommit += () => NotImplemented(L10n.Tr("git.action.push"));
         _editor.CaretInfoChanged += _statusBar.SetEditorInfo;
         _editor.Message += (text, isError) => _statusBar.SetMessage(text, isError);
 
@@ -237,7 +246,9 @@ public sealed class ProjectWindow : Window
         AddAccelerator(VirtualKey.Number1, VirtualKeyModifiers.Menu, () => Toggle(ToolWindowId.Project));
         AddAccelerator(VirtualKey.Number0, VirtualKeyModifiers.Menu, () => Toggle(ToolWindowId.Commit));
         AddAccelerator(VirtualKey.Number9, VirtualKeyModifiers.Menu, () => Toggle(ToolWindowId.Git));
-        AddAccelerator(VirtualKey.K, VirtualKeyModifiers.Control, () => Show(ToolWindowId.Commit));
+        AddAccelerator(VirtualKey.K, VirtualKeyModifiers.Control, ShowCommit);
+        AddAccelerator(VirtualKey.F7, VirtualKeyModifiers.None, NextDifference);
+        AddAccelerator(VirtualKey.F7, VirtualKeyModifiers.Shift, PreviousDifference);
         AddAccelerator(VirtualKey.K, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => NotImplemented(L10n.Tr("git.action.push")));
         AddAccelerator(VirtualKey.T, VirtualKeyModifiers.Control, () => NotImplemented(L10n.Tr("git.action.update")));
         AddAccelerator(VirtualKey.R, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, Model.Refresh);
@@ -392,6 +403,61 @@ public sealed class ProjectWindow : Window
 
     public CodeEditor? ActiveEditor => _editor.ActiveEditor;
 
+    public void NextDifference() => _editor.ActiveDiff?.NextDifference();
+
+    public void PreviousDifference() => _editor.ActiveDiff?.PreviousDifference();
+
+    /// 打开提交工具窗口并聚焦提交信息（Ctrl+K，与 IDEA 一致）。
+    public void ShowCommit()
+    {
+        Show(ToolWindowId.Commit);
+        _commitWindow.FocusMessage();
+    }
+
+    /// 本地变更：HEAD 与工作区文件比较（提交工具窗口中的 Show Diff），可选择要提交的改动。
+    public void ShowLocalDiff(FileChange change)
+    {
+        var repository = Model.Repository;
+        var root = Model.RootPath;
+        var basePath = change.OrigPath ?? change.Path;
+        var headTitle = Model.Status.Branch.Oid is { } oid ? L10n.Tr("diff.title.head", oid[..Math.Min(8, oid.Length)]) : "HEAD";
+        Task.Run(() =>
+        {
+            string? baseText;
+            try
+            {
+                baseText = repository.FileAtRevision("HEAD", basePath);
+            }
+            catch (CoreException)
+            {
+                baseText = null;
+            }
+            var text = change.IsDeleted() ? null : ReadWorkingFile(Path.Combine(root, change.Path));
+            return (baseText, text);
+        }).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
+        {
+            var (baseText, text) = task.Result;
+            _editor.OpenDiff("local:" + change.Path, Path.GetFileName(change.Path), L10n.Tr("diff.tooltip.local", change.Path), () => new DiffView(
+                new DiffSide(headTitle, baseText),
+                new DiffSide(L10n.Tr("diff.title.local"), text),
+                change.Path,
+                change.Conflict is null ? new DiffInclusion(_lineSelections, change.Path) : null));
+        }), TaskScheduler.Default);
+    }
+
+    /// 读取工作区文件；非 UTF-8 内容按有损方式解码，与核心读取历史版本的处理一致。
+    private static string? ReadWorkingFile(string path)
+    {
+        try
+        {
+            return File.Exists(path) ? System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(path)) : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     public void SaveActive() => _editor.SaveActive();
 
     public void CloseActiveTab() => _ = _editor.CloseActive();
@@ -480,6 +546,25 @@ public sealed class ProjectWindow : Window
                         }
                         break;
                     case "editorFont": ShowEditorFontDialog(); break;
+                    case "commit": ShowCommit(); break;
+                    case "partialCommit" when DebugOptions.Get("debug.file") is { } partialPath
+                                              && Model.ChangesByPath.TryGetValue(partialPath, out var partialChange):
+                        // 打开 Diff（配合 -debug.excludeBlock 把某块移出提交），稍后以 -debug.message 提交。
+                        ShowCommit();
+                        ShowLocalDiff(partialChange);
+                        var commitTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+                        commitTimer.Tick += (_, _) =>
+                        {
+                            commitTimer.Stop();
+                            _ = _commitWindow.DebugCommit(DebugOptions.Get("debug.message") ?? "debug commit");
+                        };
+                        commitTimer.Start();
+                        break;
+                    case "localDiff" when DebugOptions.Get("debug.file") is { } diffPath
+                                          && Model.ChangesByPath.TryGetValue(diffPath, out var diffChange):
+                        ShowCommit();
+                        ShowLocalDiff(diffChange);
+                        break;
                 }
             };
             timer.Start();
