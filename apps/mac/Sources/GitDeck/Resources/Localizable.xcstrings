@@ -2959,6 +2959,23 @@
         }
       }
     },
+    "common.ok": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "确定"
+          }
+        }
+      }
+    },
     "compare.failed": {
       "extractionState": "manual",
       "localizations": {
@@ -4200,6 +4217,23 @@
         }
       }
     },
+    "editor.unsupported.win": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cannot open %1$@: binary files and files not encoded in UTF-8 are not supported yet"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法打开 %1$@：暂不支持二进制文件或非 UTF-8 编码的文件"
+          }
+        }
+      }
+    },
     "error.commandFailed": {
       "extractionState": "manual",
       "localizations": {
@@ -4421,6 +4455,23 @@
         }
       }
     },
+    "find.next.win": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next Occurrence (Enter)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一个匹配项 (Enter)"
+          }
+        }
+      }
+    },
     "find.noMatches": {
       "extractionState": "manual",
       "localizations": {
@@ -4468,6 +4519,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "上一个匹配项 (⇧↩)"
+          }
+        }
+      }
+    },
+    "find.previous.win": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous Occurrence (Shift+Enter)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一个匹配项 (Shift+Enter)"
           }
         }
       }
@@ -10061,6 +10129,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "系统等宽字体（SF Mono）"
+          }
+        }
+      }
+    },
+    "settings.editor.systemFont.win": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default monospaced (Cascadia Mono / Consolas)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认等宽字体（Cascadia Mono / Consolas）"
           }
         }
       }

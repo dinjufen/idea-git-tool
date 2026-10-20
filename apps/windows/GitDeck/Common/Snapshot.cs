@@ -16,14 +16,18 @@ public static class Snapshot
         var path = DebugOptions.Get("debug.snapshot");
         if (path is null) return;
         var delay = DebugOptions.Double("debug.snapshotDelay", 2);
-        var timer = window.DispatcherQueue.CreateTimer();
-        timer.Interval = TimeSpan.FromSeconds(delay);
-        timer.IsRepeating = false;
+        // 编辑器组件加载后 DispatcherQueueTimer 会停止触发（WinUIEdit 的问题），这里用 XAML 的 DispatcherTimer。
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(delay) };
         timer.Tick += async (_, _) =>
         {
+            timer.Stop();
             try
             {
                 await Render(window, path);
+            }
+            catch (Exception e)
+            {
+                Log.Error("snapshot failed", e);
             }
             finally
             {

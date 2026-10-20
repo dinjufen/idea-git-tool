@@ -24,3 +24,7 @@ bin/
 obj/
 *.user
 .vs/
+
+# WinUIEdit 编译产物与 NuGet 包（由 scripts/build-editor-win.ps1 生成）
+/apps/windows/Vendor/WinUIEdit/_buildWinUI3/
+/apps/windows/Vendor/WinUIEdit/packages/

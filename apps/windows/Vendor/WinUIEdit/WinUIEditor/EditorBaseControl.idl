@@ -1,0 +1,15 @@
+#include "Defines.idl"
+import "EditorWrapper.idl";
+import "IEditorAccess.idl";
+
+namespace WinUIEditor
+{
+	[default_interface]
+	[webhosthidden]
+	runtimeclass EditorBaseControl : DUX.Controls.Control, IEditorAccess
+	{
+		EditorBaseControl();
+		Editor Editor { get; };
+		event Windows.Foundation.EventHandler<Double> DpiChanged;
+	}
+}

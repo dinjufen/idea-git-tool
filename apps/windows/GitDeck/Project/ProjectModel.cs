@@ -30,6 +30,9 @@ public sealed class ProjectModel
 
     public BranchRef[] Branches { get; private set; } = [];
 
+    /// 相对路径 → 变更，供 Project 树着色。
+    public IReadOnlyDictionary<string, FileChange> ChangesByPath { get; private set; } = new Dictionary<string, FileChange>();
+
     public bool IsRefreshing { get; private set; }
 
     public string? LastError { get; private set; }
@@ -88,6 +91,7 @@ public sealed class ProjectModel
                 else
                 {
                     (Status, Branches) = task.Result;
+                    ChangesByPath = Status.Changes.GroupBy(c => c.Path).ToDictionary(g => g.Key, g => g.First());
                     LastError = null;
                 }
                 IsRefreshing = false;

@@ -1,6 +1,7 @@
 using GitDeck.Common;
 using GitDeck.Controls;
 using GitDeck.Core;
+using GitDeck.Editor;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -55,12 +56,17 @@ public sealed class ProjectWindow : Window
     private readonly Dictionary<ToolWindowId, ToolWindowPanel> _toolWindows = [];
 
     private readonly FileWatcher _fileWatcher;
+    private readonly EditorArea _editor;
+    private readonly ProjectTree _projectTree;
     private MenuFlyout? _mainMenu;
+    private bool _closeConfirmed;
 
     public ProjectWindow(AppController app, Repository repository)
     {
         _app = app;
         Model = new ProjectModel(repository);
+        _editor = new EditorArea(Model);
+        _projectTree = new ProjectTree(Model);
         _projectWidget = new ToolbarWidget(_badge, L10n.Tr("toolbar.project.tooltip"));
         Title = $"{Model.ProjectName} – {Model.RootPath}";
         ExtendsContentIntoTitleBar = true;
@@ -76,11 +82,29 @@ public sealed class ProjectWindow : Window
         RestorePlacement();
 
         foreach (var id in Enum.GetValues<ToolWindowId>()) _toolWindows[id] = new ToolWindowPanel(id.Title());
+        _toolWindows[ToolWindowId.Project] = _projectTree.View;
         ApplyToolWindowState();
         Model.Changed += ModelChanged;
         Model.Refresh();
-        _fileWatcher = new FileWatcher(Model.RootPath, _ => Model.Refresh());
+        _fileWatcher = new FileWatcher(Model.RootPath, paths =>
+        {
+            Model.Refresh();
+            _editor.ReloadFromDisk(paths);
+        });
         _fileWatcher.Start();
+        _editor.RestoreSession();
+
+        // 有未保存的文件时，关闭窗口前逐个询问。
+        AppWindow.Closing += async (_, e) =>
+        {
+            if (_closeConfirmed || !_editor.HasModifiedDocuments) return;
+            e.Cancel = true;
+            if (await _editor.ConfirmCloseAll())
+            {
+                _closeConfirmed = true;
+                Close();
+            }
+        };
 
         Closed += (_, _) =>
         {
@@ -124,7 +148,7 @@ public sealed class ProjectWindow : Window
         _mainRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 120 });
         _mainRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _mainRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(380) });
-        var editor = BuildEditorPlaceholder();
+        var editor = _editor;
         Grid.SetColumn(_leftSplitter, 1);
         Grid.SetColumn(editor, 2);
         Grid.SetColumn(_rightSplitter, 3);
@@ -170,34 +194,6 @@ public sealed class ProjectWindow : Window
         _toolbarRight.SizeChanged += (_, _) => UpdateTitleBarRegions();
     }
 
-    /// 编辑器区域在 W2 实现；这里先显示 IDEA 风格的空状态（常用操作与快捷键）。
-    private FrameworkElement BuildEditorPlaceholder()
-    {
-        var hints = new (string Title, string Shortcut)[]
-        {
-            (L10n.Tr("editor.empty.commit"), "Ctrl+K"),
-            (L10n.Tr("editor.empty.update"), "Ctrl+T"),
-            (L10n.Tr("editor.empty.push"), "Ctrl+Shift+K"),
-            (L10n.Tr("editor.empty.project"), "Alt+1"),
-        };
-        var list = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        foreach (var (title, shortcut) in hints)
-        {
-            list.Children.Add(new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 8,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Children =
-                {
-                    Themed.Foreground(new TextBlock { Text = title }, "SecondaryTextBrush"),
-                    Themed.Foreground(new TextBlock { Text = shortcut }, "AccentBrush"),
-                },
-            });
-        }
-        return Themed.Background(new Grid { Children = { list } }, "EditorBackgroundBrush");
-    }
-
     private void UpdateTitleBarRegions()
     {
         if (_toolbar.XamlRoot is null) return;
@@ -226,6 +222,10 @@ public sealed class ProjectWindow : Window
         _updateButton.Click += (_, _) => NotImplemented(L10n.Tr("git.action.update"));
         _pushButton.Click += (_, _) => NotImplemented(L10n.Tr("git.action.push"));
 
+        _projectTree.OpenFile += path => _editor.Open(path);
+        _editor.CaretInfoChanged += _statusBar.SetEditorInfo;
+        _editor.Message += (text, isError) => _statusBar.SetMessage(text, isError);
+
         _leftSplitter.Dragged += delta => Resize(_mainRow.ColumnDefinitions[0], delta, 120);
         _rightSplitter.Dragged += delta => Resize(_mainRow.ColumnDefinitions[4], -delta, 160);
         _bottomSplitter.Dragged += delta => ResizeRow(_workArea.RowDefinitions[2], -delta, 80);
@@ -242,6 +242,15 @@ public sealed class ProjectWindow : Window
         AddAccelerator(VirtualKey.T, VirtualKeyModifiers.Control, () => NotImplemented(L10n.Tr("git.action.update")));
         AddAccelerator(VirtualKey.R, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, Model.Refresh);
         AddAccelerator(VirtualKey.W, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, Close);
+        AddAccelerator(VirtualKey.S, VirtualKeyModifiers.Control, SaveActive);
+        AddAccelerator(VirtualKey.F4, VirtualKeyModifiers.Control, CloseActiveTab);
+        AddAccelerator(VirtualKey.F, VirtualKeyModifiers.Control, () => _editor.ActiveEditor?.ShowFindBar());
+        AddAccelerator(VirtualKey.R, VirtualKeyModifiers.Control, () => _editor.ActiveEditor?.ShowFindBar(replace: true));
+        AddAccelerator(VirtualKey.F3, VirtualKeyModifiers.None, () => _editor.ActiveEditor?.FindNext());
+        AddAccelerator(VirtualKey.F3, VirtualKeyModifiers.Shift, () => _editor.ActiveEditor?.FindPrevious());
+        AddAccelerator((VirtualKey)187, VirtualKeyModifiers.Control, () => EditorSettings.FontSize += 1);
+        AddAccelerator((VirtualKey)189, VirtualKeyModifiers.Control, () => EditorSettings.FontSize -= 1);
+        AddAccelerator(VirtualKey.Number0, VirtualKeyModifiers.Control, EditorSettings.Reset);
     }
 
     private void AddAccelerator(VirtualKey key, VirtualKeyModifiers modifiers, Action action)
@@ -381,6 +390,14 @@ public sealed class ProjectWindow : Window
 
     public void RefreshStatus() => Model.Refresh();
 
+    public CodeEditor? ActiveEditor => _editor.ActiveEditor;
+
+    public void SaveActive() => _editor.SaveActive();
+
+    public void CloseActiveTab() => _ = _editor.CloseActive();
+
+    public void ShowEditorFontDialog() => _ = EditorFontDialog.Show(_root.XamlRoot);
+
     // MARK: - 模型变化
 
     private void ModelChanged()
@@ -437,11 +454,11 @@ public sealed class ProjectWindow : Window
         if (action is not null)
         {
             // 等状态加载后执行，与 mac 端一致。
-            var timer = DispatcherQueue.CreateTimer();
-            timer.Interval = TimeSpan.FromMilliseconds(800);
-            timer.IsRepeating = false;
+            // 注意：编辑器组件加载后 DispatcherQueueTimer 会停止触发（WinUIEdit 的问题），这里用 XAML 的 DispatcherTimer。
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
             timer.Tick += (_, _) =>
             {
+                timer.Stop();
                 switch (action)
                 {
                     case "mainMenu": ShowMainMenu(); break;
@@ -452,6 +469,17 @@ public sealed class ProjectWindow : Window
                         Show(ToolWindowId.AiReview);
                         break;
                     case "clone": _ = _app.CloneProject(this); break;
+                    case "expandTree": _projectTree.ExpandAll(); break;
+                    case "openFile" when DebugOptions.Get("debug.file") is { } file:
+                        _projectTree.ExpandAll(1);
+                        _editor.Open(Path.Combine(Model.RootPath, file), (int)DebugOptions.Double("debug.line", 0));
+                        if (DebugOptions.Get("debug.query") is { } query)
+                        {
+                            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => _editor.ActiveEditor?.ShowFindBar());
+                            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => _editor.ActiveEditor?.SetFindQuery(query));
+                        }
+                        break;
+                    case "editorFont": ShowEditorFontDialog(); break;
                 }
             };
             timer.Start();

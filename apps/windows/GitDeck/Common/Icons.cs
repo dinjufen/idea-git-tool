@@ -20,6 +20,10 @@ public enum Icon
     Menu,
     ChevronDown,
     Search,
+    ChevronUp,
+    Close,
+    File,
+    CollapseAll,
 }
 
 public static class Icons
@@ -36,6 +40,10 @@ public static class Icons
         Icon.Menu => "M2.5,4 L13.5,4 M2.5,8 L13.5,8 M2.5,12 L13.5,12",
         Icon.ChevronDown => "M4.5,6.5 L8,10 L11.5,6.5",
         Icon.Search => "M7,2.5 A4.5,4.5 0 1 1 6.99,2.5 Z M10.3,10.3 L13.5,13.5",
+        Icon.ChevronUp => "M4.5,9.5 L8,6 L11.5,9.5",
+        Icon.Close => "M4.5,4.5 L11.5,11.5 M11.5,4.5 L4.5,11.5",
+        Icon.File => "M3.5,1.5 L9.5,1.5 L12.5,4.5 L12.5,14.5 L3.5,14.5 Z M9.5,1.5 L9.5,4.5 L12.5,4.5",
+        Icon.CollapseAll => "M4.5,2.5 L8,6 L11.5,2.5 M4.5,13.5 L8,10 L11.5,13.5 M2.5,8 L13.5,8",
         _ => "",
     };
 

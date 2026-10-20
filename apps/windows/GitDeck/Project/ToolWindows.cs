@@ -95,21 +95,27 @@ public sealed class ToolWindowStripe : Grid
     }
 }
 
-/// 工具窗口外框：标题栏 + 内容。各工具窗口的内容在后续批次中实现。
+/// 工具窗口外框：标题栏（标题 + 右侧操作按钮）+ 内容。尚未实现的工具窗口显示占位文字。
 public sealed class ToolWindowPanel : Grid
 {
-    public ToolWindowPanel(string title, UIElement? body = null)
+    public ToolWindowPanel(string title, UIElement? body = null, IEnumerable<UIElement>? actions = null)
     {
         Themed.Background(this, "ToolWindowBackgroundBrush");
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(32) });
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        var header = Themed.Foreground(new TextBlock
+        var header = new Grid { Margin = new Thickness(12, 0, 6, 0) };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(Themed.Foreground(new TextBlock
         {
             Text = title,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(12, 0, 12, 0),
-        }, "PrimaryTextBrush");
+        }, "PrimaryTextBrush"));
+        var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var action in actions ?? []) toolbar.Children.Add(action);
+        SetColumn(toolbar, 1);
+        header.Children.Add(toolbar);
         Children.Add(header);
         var content = body ?? new TextBlock
         {

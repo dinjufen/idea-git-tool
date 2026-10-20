@@ -15,12 +15,15 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets/GitDeck.ico</ApplicationIcon>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <!-- 编辑器组件（docs/DECISIONS.md 第 14 项）。源码在 Vendor/WinUIEdit；在能从源码编译之前先引用同一版本的 NuGet 包。 -->
+    <PackageReference Include="WinUIEdit" Version="0.0.5-prerelease" />
   </ItemGroup>
 
   <ItemGroup>

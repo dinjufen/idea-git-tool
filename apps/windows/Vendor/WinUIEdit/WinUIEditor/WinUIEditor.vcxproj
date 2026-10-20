@@ -1,0 +1,908 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\ChangeBuild.props" />
+  <Import Project="..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.props" Condition="$(WinUIEditorUseWinUI3) And Exists('..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.props')" />
+  <Import Project="..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.props" Condition="Exists('..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.props')" />
+  <Import Project="..\packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.props" Condition="Exists('..\packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.props')" />
+  <PropertyGroup Label="Globals">
+    <CppWinRTOptimized>true</CppWinRTOptimized>
+    <CppWinRTRootNamespaceAutoMerge>true</CppWinRTRootNamespaceAutoMerge>
+    <MinimalCoreWin>true</MinimalCoreWin>
+    <ProjectGuid>{290647e3-d8cb-46b5-87ce-409f721e441a}</ProjectGuid>
+    <ProjectName>WinUIEditor</ProjectName>
+    <RootNamespace>WinUIEditor</RootNamespace>
+    <DefaultLanguage>en-US</DefaultLanguage>
+    <MinimumVisualStudioVersion>16.0</MinimumVisualStudioVersion>
+    <AppContainerApplication>true</AppContainerApplication>
+    <ApplicationType>Windows Store</ApplicationType>
+    <ApplicationTypeRevision>10.0</ApplicationTypeRevision>
+    <WindowsTargetPlatformVersion Condition="'$(WindowsTargetPlatformVersion)' == ''">10.0.22621.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformMinVersion Condition="$(WinUIEditorUseWinUI3)">10.0.17763.0</WindowsTargetPlatformMinVersion>
+    <WindowsTargetPlatformMinVersion Condition="!$(WinUIEditorUseWinUI3)">10.0.15063.0</WindowsTargetPlatformMinVersion>
+    <DesktopCompatible Condition="$(WinUIEditorUseWinUI3)">true</DesktopCompatible>
+    <UseWinUI Condition="$(WinUIEditorUseWinUI3)">true</UseWinUI>
+    <_NoWinAPIFamilyApp Condition="$(WinUIEditorUseWinUI3)">true</_NoWinAPIFamilyApp>
+    <_VC_Target_Library_Platform Condition="$(WinUIEditorUseWinUI3)">Desktop</_VC_Target_Library_Platform>
+    <UseCrtSDKReference>false</UseCrtSDKReference>
+  </PropertyGroup>
+  <PropertyGroup>
+    <UseCrtSDKReferenceStaticWarning Condition="!$(WinUIEditorUseWinUI3)">false</UseCrtSDKReferenceStaticWarning>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <Import Project="..\DualBuild.props" />
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|ARM">
+      <Configuration>Debug</Configuration>
+      <Platform>ARM</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|arm64">
+      <Configuration>Debug</Configuration>
+      <Platform>arm64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|ARM">
+      <Configuration>Release</Configuration>
+      <Platform>ARM</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|arm64">
+      <Configuration>Release</Configuration>
+      <Platform>arm64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <LinkIncremental>true</LinkIncremental>
+    <UseDummyPage>true</UseDummyPage>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'" Label="Configuration">
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup />
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)pch.pch</PrecompiledHeaderOutputFile>
+      <AdditionalIncludeDirectories>..\scintilla\winui;..\scintilla\include;..\scintilla\src;..\lexilla\include\;..\lexilla\lexlib;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <WarningLevel>Level4</WarningLevel>
+      <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
+      <PreprocessorDefinitions>SCI_EMPTYCATALOGUE;_CRT_SECURE_NO_DEPRECATE;_SCL_SECURE_NO_WARNINGS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NOMINMAX;_WINRT_DLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="$(WinUIEditorUseWinUI3)">WINUI3;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalUsingDirectories>$(WindowsSDK_WindowsMetadata);$(AdditionalUsingDirectories)</AdditionalUsingDirectories>
+    </ClCompile>
+    <Midl>
+      <PreprocessorDefinitions Condition="$(WinUIEditorUseWinUI3)">WINUI3;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateWindowsMetadata>true</GenerateWindowsMetadata>
+      <ModuleDefinitionFile>WinUIEditor.def</ModuleDefinitionFile>
+      <AdditionalDependencies>muiload.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories Condition="!$(WinUIEditorUseWinUI3) And '$(Platform)' == 'x64'">%(AdditionalLibraryDirectories);$(VC_LibraryPath_VC_x64_Desktop)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories Condition="!$(WinUIEditorUseWinUI3) And '$(Platform)' == 'Win32'">%(AdditionalLibraryDirectories);$(VC_LibraryPath_VC_x86_Desktop)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories Condition="!$(WinUIEditorUseWinUI3) And '$(Platform)' == 'ARM'">%(AdditionalLibraryDirectories);$(VC_LibraryPath_VC_arm_Desktop)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories Condition="!$(WinUIEditorUseWinUI3) And '$(Platform)' == 'arm64'">%(AdditionalLibraryDirectories);$(VC_LibraryPath_VC_arm64_Desktop)</AdditionalLibraryDirectories>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)' == 'Debug'">
+    <ClCompile>
+      <PreprocessorDefinitions>USE_DUMMY_PAGE;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries);libucrtd.lib</IgnoreSpecificDefaultLibraries>
+      <AdditionalOptions>%(AdditionalOptions) /defaultlib:ucrtd.lib</AdditionalOptions>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)' == 'Release'">
+    <ClCompile>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ControlFlowGuard>Guard</ControlFlowGuard>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries);libucrt.lib</IgnoreSpecificDefaultLibraries>
+      <AdditionalOptions>%(AdditionalOptions) /defaultlib:ucrt.lib</AdditionalOptions>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="AutocompletionControl.h">
+      <DependentUpon>AutocompletionControl.cpp</DependentUpon>
+      <SubType>Code</SubType>
+    </ClInclude>
+    <ClInclude Include="AutocompletionWrapper.h" />
+    <ClInclude Include="CallTipControl.h">
+      <DependentUpon>CallTipControl.cpp</DependentUpon>
+      <SubType>Code</SubType>
+    </ClInclude>
+    <ClInclude Include="CallTipWrapper.h" />
+    <ClInclude Include="CodeEditorHandler.SciEdit.h" />
+    <ClInclude Include="CodeEditorHandler.h" />
+    <ClInclude Include="ControlIncludes.h" />
+    <ClInclude Include="DarkPlus.h" />
+    <ClInclude Include="DummyPage.h" Condition="'$(UseDummyPage)' == 'true'">
+      <DependentUpon>DummyPage.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </ClInclude>
+    <ClInclude Include="Helpers.h" />
+    <ClInclude Include="EditorWrapper.h">
+      <DependentUpon>EditorWrapper.cpp</DependentUpon>
+      <SubType>Code</SubType>
+    </ClInclude>
+    <ClInclude Include="LightPlus.h" />
+    <ClInclude Include="EditorBaseControl.h">
+      <DependentUpon>EditorBaseControl.cpp</DependentUpon>
+      <SubType>Code</SubType>
+    </ClInclude>
+    <ClInclude Include="CodeEditorControl.h">
+      <DependentUpon>CodeEditorControl.cpp</DependentUpon>
+      <SubType>Code</SubType>
+    </ClInclude>
+    <ClInclude Include="EditorBaseControlAutomationPeer.h">
+      <DependentUpon>EditorBaseControlAutomationPeer.cpp</DependentUpon>
+      <SubType>Code</SubType>
+    </ClInclude>
+    <ClInclude Include="MainWrapper.h" />
+    <ClInclude Include="MuiResourceLoader.h" />
+    <ClInclude Include="pch.h" />
+    <ClInclude Include="..\scintilla\winui\ListBox.h" />
+    <ClInclude Include="..\scintilla\winui\PlatWin.h" />
+    <ClInclude Include="..\scintilla\winui\ScintillaWin.h" />
+    <ClInclude Include="..\scintilla\winui\SurfaceD2D.h" />
+    <ClInclude Include="..\scintilla\winui\WinTypes.h" />
+    <ClInclude Include="TextMateScope.h" />
+    <ClInclude Include="TextRangeProvider.h" />
+    <ClInclude Include="Wrapper.h" />
+    <ClInclude Include="XamlStringIds.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="AutocompletionControl.cpp">
+      <SubType>Code</SubType>
+    </ClCompile>
+    <ClCompile Include="AutocompletionWrapper.cpp" />
+    <ClCompile Include="CallTipControl.cpp">
+      <SubType>Code</SubType>
+    </ClCompile>
+    <ClCompile Include="CallTipWrapper.cpp" />
+    <ClCompile Include="CodeEditorHandler.SciEdit.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="CodeEditorHandler.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="DummyPage.cpp" Condition="'$(UseDummyPage)' == 'true'">
+      <DependentUpon>DummyPage.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </ClCompile>
+    <ClCompile Include="Helpers.cpp" />
+    <ClCompile Include="EditorWrapper.cpp">
+      <SubType>Code</SubType>
+    </ClCompile>
+    <ClCompile Include="EditorBaseControl.cpp">
+      <SubType>Code</SubType>
+    </ClCompile>
+    <ClCompile Include="CodeEditorControl.cpp">
+      <SubType>Code</SubType>
+    </ClCompile>
+    <ClCompile Include="CodeEditorHandler.SyntaxHighlighting.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="EditorBaseControlAutomationPeer.cpp">
+      <SubType>Code</SubType>
+    </ClCompile>
+    <ClCompile Include="MainWrapper.cpp" />
+    <ClCompile Include="MuiResourceLoader.cpp" />
+    <ClCompile Include="pch.cpp">
+      <PrecompiledHeader>Create</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
+    <ClCompile Include="..\lexilla\src\Lexilla.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\winui\ListBox.cxx" />
+    <ClCompile Include="..\scintilla\winui\PlatWin.cxx" />
+    <ClCompile Include="..\scintilla\winui\ScintillaWin.cxx" />
+    <ClCompile Include="..\scintilla\winui\SurfaceD2D.cxx" />
+    <ClCompile Include="TextRangeProvider.cpp" />
+    <ClCompile Include="Wrapper.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="WinUIEditor.def" />
+    <None Include="packages.config" />
+    <None Include="Defines.idl" />
+  </ItemGroup>
+  <ItemGroup>
+    <Midl Include="AutocompletionControl.idl">
+      <DependentUpon>AutocompletionControl.cpp</DependentUpon>
+      <SubType>Code</SubType>
+    </Midl>
+    <Midl Include="CallTipControl.idl">
+      <DependentUpon>CallTipControl.cpp</DependentUpon>
+      <SubType>Code</SubType>
+    </Midl>
+    <Midl Include="DummyPage.idl" Condition="'$(UseDummyPage)' == 'true'">
+      <DependentUpon>DummyPage.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Midl>
+    <Midl Include="EditorWrapper.idl">
+      <DependentUpon>EditorWrapper.cpp</DependentUpon>
+      <SubType>Code</SubType>
+    </Midl>
+    <Midl Include="EditorBaseControl.idl">
+      <DependentUpon>EditorBaseControl.cpp</DependentUpon>
+      <SubType>Code</SubType>
+    </Midl>
+    <Midl Include="CodeEditorControl.idl">
+      <DependentUpon>CodeEditorControl.cpp</DependentUpon>
+      <SubType>Code</SubType>
+    </Midl>
+    <Midl Include="EditorBaseControlAutomationPeer.idl">
+      <DependentUpon>EditorBaseControlAutomationPeer.cpp</DependentUpon>
+      <SubType>Code</SubType>
+    </Midl>
+    <Midl Include="IEditorAccess.idl" />
+  </ItemGroup>
+  <ItemGroup>
+    <Page Include="DummyPage.xaml" Condition="'$(UseDummyPage)' == 'true'">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Themes\Generic.xaml" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="..\packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.targets" Condition="Exists('..\packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.targets')" />
+    <Import Project="..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.targets" Condition="Exists('..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.targets')" />
+    <Import Project="..\packages\Microsoft.Web.WebView2.1.0.4022.49\build\native\Microsoft.Web.WebView2.targets" Condition="$(WinUIEditorUseWinUI3) And Exists('..\packages\Microsoft.Web.WebView2.1.0.4022.49\build\native\Microsoft.Web.WebView2.targets')" />
+    <Import Project="..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.targets" Condition="$(WinUIEditorUseWinUI3) And Exists('..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.targets')" />
+    <Import Project="..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets" Condition="Exists('..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets')" />
+  </ImportGroup>
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('..\packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.props'))" />
+    <Error Condition="!Exists('..\packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.targets'))" />
+    <Error Condition="!Exists('..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.props'))" />
+    <Error Condition="!Exists('..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.targets'))" />
+    <Error Condition="$(WinUIEditorUseWinUI3) And !Exists('..\packages\Microsoft.Web.WebView2.1.0.4022.49\build\native\Microsoft.Web.WebView2.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Web.WebView2.1.0.4022.49\build\native\Microsoft.Web.WebView2.targets'))" />
+    <Error Condition="$(WinUIEditorUseWinUI3) And !Exists('..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.props'))" />
+    <Error Condition="$(WinUIEditorUseWinUI3) And !Exists('..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.targets'))" />
+    <Error Condition="!Exists('..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets'))" />
+  </Target>
+  <ItemGroup>
+    <!--<WildcardClInclude Include="..\scintilla\include\*.h">-->
+    <ClInclude Include="..\scintilla\include\ILexer.h" />
+    <ClInclude Include="..\scintilla\include\ILoader.h" />
+    <ClInclude Include="..\scintilla\include\Sci_Position.h" />
+    <ClInclude Include="..\scintilla\include\Scintilla.h" />
+    <ClInclude Include="..\scintilla\include\ScintillaCall.h" />
+    <ClInclude Include="..\scintilla\include\ScintillaMessages.h" />
+    <ClInclude Include="..\scintilla\include\ScintillaStructures.h" />
+    <ClInclude Include="..\scintilla\include\ScintillaTypes.h" />
+    <ClInclude Include="..\scintilla\include\ScintillaWidget.h" />
+    <!--</WildcardClInclude>-->
+    <!--<WildcardClInclude Include="..\scintilla\src\*.h">-->
+    <ClInclude Include="..\scintilla\src\AutoComplete.h" />
+    <ClInclude Include="..\scintilla\src\CallTip.h" />
+    <ClInclude Include="..\scintilla\src\CaseConvert.h" />
+    <ClInclude Include="..\scintilla\src\CaseFolder.h" />
+    <ClInclude Include="..\scintilla\src\CellBuffer.h" />
+    <ClInclude Include="..\scintilla\src\ChangeHistory.h" />
+    <ClInclude Include="..\scintilla\src\CharacterCategoryMap.h" />
+    <ClInclude Include="..\scintilla\src\CharacterType.h" />
+    <ClInclude Include="..\scintilla\src\CharClassify.h" />
+    <ClInclude Include="..\scintilla\src\ContractionState.h" />
+    <ClInclude Include="..\scintilla\src\DBCS.h" />
+    <ClInclude Include="..\scintilla\src\Debugging.h" />
+    <ClInclude Include="..\scintilla\src\Decoration.h" />
+    <ClInclude Include="..\scintilla\src\Document.h" />
+    <ClInclude Include="..\scintilla\src\EditModel.h" />
+    <ClInclude Include="..\scintilla\src\Editor.h" />
+    <ClInclude Include="..\scintilla\src\EditView.h" />
+    <ClInclude Include="..\scintilla\src\ElapsedPeriod.h" />
+    <ClInclude Include="..\scintilla\src\Geometry.h" />
+    <ClInclude Include="..\scintilla\src\Indicator.h" />
+    <ClInclude Include="..\scintilla\src\KeyMap.h" />
+    <ClInclude Include="..\scintilla\src\LineMarker.h" />
+    <ClInclude Include="..\scintilla\src\MarginView.h" />
+    <ClInclude Include="..\scintilla\src\Partitioning.h" />
+    <ClInclude Include="..\scintilla\src\PerLine.h" />
+    <ClInclude Include="..\scintilla\src\Platform.h" />
+    <ClInclude Include="..\scintilla\src\Position.h" />
+    <ClInclude Include="..\scintilla\src\PositionCache.h" />
+    <ClInclude Include="..\scintilla\src\RESearch.h" />
+    <ClInclude Include="..\scintilla\src\RunStyles.h" />
+    <ClInclude Include="..\scintilla\src\ScintillaBase.h" />
+    <ClInclude Include="..\scintilla\src\Selection.h" />
+    <ClInclude Include="..\scintilla\src\SparseVector.h" />
+    <ClInclude Include="..\scintilla\src\SplitVector.h" />
+    <ClInclude Include="..\scintilla\src\Style.h" />
+    <ClInclude Include="..\scintilla\src\UndoHistory.h" />
+    <ClInclude Include="..\scintilla\src\UniConversion.h" />
+    <ClInclude Include="..\scintilla\src\UniqueString.h" />
+    <ClInclude Include="..\scintilla\src\ViewStyle.h" />
+    <ClInclude Include="..\scintilla\src\XPM.h" />
+    <!--</WildcardClInclude>-->
+    <!--<WildcardClInclude Include="..\lexilla\include\*.h">-->
+    <ClInclude Include="..\lexilla\include\Lexilla.h" />
+    <ClInclude Include="..\lexilla\include\SciLexer.h" />
+    <!--</WildcardClInclude>-->
+    <!--<WildcardClInclude Include="..\lexilla\lexlib\*.h">-->
+    <ClInclude Include="..\lexilla\lexlib\Accessor.h" />
+    <ClInclude Include="..\lexilla\lexlib\CatalogueModules.h" />
+    <ClInclude Include="..\lexilla\lexlib\CharacterCategory.h" />
+    <ClInclude Include="..\lexilla\lexlib\CharacterSet.h" />
+    <ClInclude Include="..\lexilla\lexlib\DefaultLexer.h" />
+    <ClInclude Include="..\lexilla\lexlib\InList.h" />
+    <ClInclude Include="..\lexilla\lexlib\LexAccessor.h" />
+    <ClInclude Include="..\lexilla\lexlib\LexerBase.h" />
+    <ClInclude Include="..\lexilla\lexlib\LexerModule.h" />
+    <ClInclude Include="..\lexilla\lexlib\LexerSimple.h" />
+    <ClInclude Include="..\lexilla\lexlib\OptionSet.h" />
+    <ClInclude Include="..\lexilla\lexlib\PropSetSimple.h" />
+    <ClInclude Include="..\lexilla\lexlib\SparseState.h" />
+    <ClInclude Include="..\lexilla\lexlib\StringCopy.h" />
+    <ClInclude Include="..\lexilla\lexlib\StyleContext.h" />
+    <ClInclude Include="..\lexilla\lexlib\SubStyles.h" />
+    <ClInclude Include="..\lexilla\lexlib\WordList.h" />
+    <!--</WildcardClInclude>-->
+  </ItemGroup>
+  <ItemGroup>
+    <!--<WildcardClCompile Include="..\scintilla\src\*.cxx" PrecompiledHeader="NotUsing">-->
+    <ClCompile Include="..\scintilla\src\AutoComplete.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\CallTip.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\CaseConvert.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\CaseFolder.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\CellBuffer.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\ChangeHistory.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\CharacterCategoryMap.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\CharacterType.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\CharClassify.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\ContractionState.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\DBCS.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\Decoration.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\Document.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\EditModel.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\Editor.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\EditView.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\Geometry.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\Indicator.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\KeyMap.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\LineMarker.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\MarginView.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\PerLine.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\PositionCache.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\RESearch.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\RunStyles.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\ScintillaBase.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\Selection.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\Style.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\UndoHistory.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\UniConversion.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\UniqueString.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\ViewStyle.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\scintilla\src\XPM.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <!--</WildcardClInclude>-->
+    <!--<WildcardClCompile Include="..\scintilla\call\*.cxx" PrecompiledHeader="NotUsing">-->
+    <ClCompile Include="..\scintilla\call\ScintillaCall.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <!--</WildcardClInclude>-->
+    <!--<WildcardClCompile Include="..\lexilla\lexers\*.cxx" PrecompiledHeader="NotUsing">-->
+    <ClCompile Include="..\lexilla\lexers\LexA68k.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexAbaqus.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexAda.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexAPDL.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexAsciidoc.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexAsm.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexAsn1.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexASY.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexAU3.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexAVE.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexAVS.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexBaan.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexBash.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexBasic.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexBatch.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexBibTeX.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexBullant.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexCaml.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexCIL.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexCLW.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexCmake.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexCOBOL.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexCoffeeScript.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexConf.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexCPP.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexCrontab.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexCsound.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexCSS.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexD.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexDart.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexDataflex.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexDiff.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexDMAP.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexDMIS.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexECL.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexEDIFACT.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexEiffel.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexErlang.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexErrorList.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexEScript.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexEscSeq.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexFlagship.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexForth.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexFortran.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexFSharp.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexGAP.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexGDScript.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexGui4Cli.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexHaskell.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexHex.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexHollywood.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexHTML.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexIndent.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexInno.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexJSON.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexJulia.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexKix.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexKVIrc.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexLaTeX.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexLisp.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexLout.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexLua.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexMagik.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexMake.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexMarkdown.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexMatlab.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexMaxima.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexMetapost.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexMMIXAL.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexModula.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexMPT.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexMSSQL.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexMySQL.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexNim.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexNimrod.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexNix.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexNsis.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexNull.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexOpal.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexOScript.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexPascal.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexPB.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexPerl.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexPLM.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexPO.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexPOV.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexPowerPro.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexPowerShell.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexProgress.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexProps.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexPS.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexPython.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexR.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexRaku.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexRebol.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexRegistry.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexRuby.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexRust.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexSAS.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexScriptol.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexSINEX.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexSmalltalk.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexSML.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexSorcus.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexSpecman.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexSpice.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexSQL.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexStata.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexSTTXT.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexTACL.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexTADS3.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexTAL.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexTCL.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexTCMD.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexTeX.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexTOML.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexTroff.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexTxt2tags.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexVB.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexVerilog.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexVHDL.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexVisualProlog.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexX12.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexYAML.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexers\LexZig.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <!--</WildcardClInclude>-->
+    <!--<WildcardClCompile Include="..\lexilla\lexlib\*.cxx" PrecompiledHeader="NotUsing">-->
+    <ClCompile Include="..\lexilla\lexlib\Accessor.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexlib\CharacterCategory.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexlib\CharacterSet.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexlib\DefaultLexer.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexlib\InList.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexlib\LexAccessor.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexlib\LexerBase.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexlib\LexerModule.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexlib\LexerSimple.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexlib\PropSetSimple.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexlib\StyleContext.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\lexilla\lexlib\WordList.cxx">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <!--</WildcardClInclude>-->
+  </ItemGroup>
+</Project>

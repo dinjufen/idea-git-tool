@@ -1,0 +1,5 @@
+#ifdef WINUI3
+#define DUX Microsoft.UI.Xaml
+#else
+#define DUX Windows.UI.Xaml
+#endif

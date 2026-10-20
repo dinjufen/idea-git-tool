@@ -117,7 +117,9 @@ public sealed class AppController
         _exiting = true;
         foreach (var project in _projects.ToList()) project.Close();
         _welcome?.Close();
-        Application.Current.Exit();
+        // 等窗口（含编辑器组件）销毁完成后再退出进程。
+        Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread()
+            .TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, Application.Current.Exit);
     }
 
     private ProjectWindow Present(Repository repository)
@@ -125,7 +127,6 @@ public sealed class AppController
         var window = new ProjectWindow(this, repository);
         window.Closed += (_, _) =>
         {
-            Log.Info($"project window closed: {window.Model.RootPath}");
             _projects.Remove(window);
             if (_projects.Count == 0 && !_exiting) ShowWelcome();
         };

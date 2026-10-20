@@ -15,6 +15,7 @@ public static class MainMenu
     {
         var menu = new MenuFlyout();
         menu.Items.Add(FileMenu(window, app));
+        menu.Items.Add(EditMenu(window));
         menu.Items.Add(ViewMenu(window));
         menu.Items.Add(GitMenu(window));
         menu.Items.Add(HelpMenu(window));
@@ -29,9 +30,36 @@ public static class MainMenu
         menu.Items.Add(Item(L10n.Tr("menu.file.clone"), async () => await app.CloneProject(window)));
         menu.Items.Add(Item(L10n.Tr("menu.file.welcome"), () => app.ShowWelcome()));
         menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(Item(L10n.Tr("menu.file.save"), window.SaveActive, "Ctrl+S"));
+        menu.Items.Add(Item(L10n.Tr("menu.file.closeTab"), window.CloseActiveTab, "Ctrl+F4"));
         menu.Items.Add(Item(L10n.Tr("menu.file.closeProject"), window.Close, "Ctrl+Shift+W"));
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(Item(L10n.Tr("menu.file.exit"), app.ExitApplication));
+        return menu;
+    }
+
+    private static MenuFlyoutSubItem EditMenu(ProjectWindow window)
+    {
+        var menu = new MenuFlyoutSubItem { Text = L10n.Tr("menu.edit") };
+        var editor = window.ActiveEditor;
+        void Add(string key, Action<Editor.CodeEditor> action, string shortcut)
+        {
+            var item = Item(L10n.Tr(key), () => { if (window.ActiveEditor is { } e) action(e); }, shortcut);
+            item.IsEnabled = editor is not null;
+            menu.Items.Add(item);
+        }
+        Add("menu.edit.undo", e => e.Undo(), "Ctrl+Z");
+        Add("menu.edit.redo", e => e.Redo(), "Ctrl+Shift+Z");
+        menu.Items.Add(new MenuFlyoutSeparator());
+        Add("menu.edit.cut", e => e.Cut(), "Ctrl+X");
+        Add("menu.edit.copy", e => e.Copy(), "Ctrl+C");
+        Add("menu.edit.paste", e => e.Paste(), "Ctrl+V");
+        Add("menu.edit.selectAll", e => e.SelectAll(), "Ctrl+A");
+        menu.Items.Add(new MenuFlyoutSeparator());
+        Add("menu.edit.find", e => e.ShowFindBar(), "Ctrl+F");
+        Add("menu.edit.replace", e => e.ShowFindBar(replace: true), "Ctrl+R");
+        Add("menu.edit.findNext", e => e.FindNext(), "F3");
+        Add("menu.edit.findPrevious", e => e.FindPrevious(), "Shift+F3");
         return menu;
     }
 
@@ -56,6 +84,24 @@ public static class MainMenu
             theme.Items.Add(item);
         }
         menu.Items.Add(theme);
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(Item(L10n.Tr("menu.view.editorFont"), window.ShowEditorFontDialog));
+        menu.Items.Add(Item(L10n.Tr("menu.view.fontIncrease"), () => Editor.EditorSettings.FontSize += 1, "Ctrl+="));
+        menu.Items.Add(Item(L10n.Tr("menu.view.fontDecrease"), () => Editor.EditorSettings.FontSize -= 1, "Ctrl+-"));
+        menu.Items.Add(Item(L10n.Tr("menu.view.fontReset"), Editor.EditorSettings.Reset, "Ctrl+0"));
+        var spacing = new MenuFlyoutSubItem { Text = L10n.Tr("menu.view.lineSpacing") };
+        foreach (var value in Editor.EditorSettings.LineSpacingOptions)
+        {
+            var item = new RadioMenuFlyoutItem
+            {
+                Text = value.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture),
+                GroupName = "lineSpacing",
+                IsChecked = Editor.EditorSettings.LineSpacing == value,
+            };
+            item.Click += (_, _) => Editor.EditorSettings.LineSpacing = value;
+            spacing.Items.Add(item);
+        }
+        menu.Items.Add(spacing);
         return menu;
     }
 
