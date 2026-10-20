@@ -165,6 +165,9 @@ public sealed class EditorArea : Grid
     /// 当前编辑的文件相对仓库根目录的路径（不在仓库中或不是文件时为 null）。
     public string? ActiveRelativePath => (_active as Document)?.RelativePath;
 
+    /// 当前编辑的文件（完整路径）。
+    public string? ActivePath => (_active as Document)?.Path;
+
     public bool IsActiveAnnotated => (_active as Document)?.Editor.Annotations is not null;
 
     /// 打开 Diff 页；`key` 相同的 Diff 已打开时直接切换过去。

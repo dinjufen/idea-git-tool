@@ -66,6 +66,12 @@ public sealed class ProjectWindow : Window
     private readonly GitToolWindow _gitWindow;
     private readonly BranchesPopup _branchesPopup;
     private readonly ConflictResolver _conflicts;
+    /// 本窗口中的所有仓库（主仓库 + 加入的嵌套仓库 / 子模块）。
+    private readonly Workspace _workspace;
+    private readonly WorkspaceOperations _workspaceOperations;
+    private readonly WorkspaceBanner _banner = new();
+    /// 非主仓库的操作对象（按仓库缓存）。
+    private readonly Dictionary<ProjectModel, GitOperations> _extraOperations = [];
     private readonly StashesView _stashes;
     private readonly AIReviewController _aiReview;
     private readonly AIReviewToolWindow _aiWindow;
@@ -85,8 +91,11 @@ public sealed class ProjectWindow : Window
         _projectTree = new ProjectTree(Model);
         _commitWindow = new CommitToolWindow(Model, _lineSelections);
         _operations = new GitOperations(Model, () => _root.XamlRoot);
+        _workspace = new Workspace(Model);
+        _workspaceOperations = new WorkspaceOperations(_workspace, OperationsFor, () => _root.XamlRoot);
+        _operations.Peers = () => AllOperations;
         _gitWindow = new GitToolWindow(Model, _operations);
-        _branchesPopup = new BranchesPopup(Model, _operations, ShowCommit);
+        _branchesPopup = new BranchesPopup(_workspace, OperationsFor, ShowCommit);
         _conflicts = new ConflictResolver(Model, () => _root.XamlRoot);
         _stashes = new StashesView(Model, _operations);
         _aiReview = new AIReviewController(Model, () => _root.XamlRoot);
@@ -127,9 +136,12 @@ public sealed class ProjectWindow : Window
         ApplyToolWindowState();
         Model.Changed += ModelChanged;
         Model.Refresh();
+        _projectTree.Workspace = _workspace;
+        _workspace.Changed += WorkspaceChanged;
+        _workspace.Load();
         _fileWatcher = new FileWatcher(Model.RootPath, paths =>
         {
-            Model.Refresh();
+            _workspace.RefreshAll();
             _editor.ReloadFromDisk(paths);
         });
         _fileWatcher.Start();
@@ -222,9 +234,12 @@ public sealed class ProjectWindow : Window
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        Grid.SetRow(body, 1);
-        Grid.SetRow(_statusBar, 2);
+        _root.RowDefinitions.Insert(1, new RowDefinition { Height = GridLength.Auto });
+        Grid.SetRow(_banner, 1);
+        Grid.SetRow(body, 2);
+        Grid.SetRow(_statusBar, 3);
         _root.Children.Add(_toolbar);
+        _root.Children.Add(_banner);
         _root.Children.Add(body);
         _root.Children.Add(_statusBar);
         Themed.Background(_root, "HeaderBackgroundBrush");
@@ -258,15 +273,24 @@ public sealed class ProjectWindow : Window
         _menuButton.Click += (_, _) => ShowMainMenu();
         _projectWidget.Click += (_, _) => ShowProjectMenu();
         _vcsWidget.Click += (_, _) => ShowBranches();
-        _refreshButton.Click += (_, _) => Model.Refresh();
+        _refreshButton.Click += (_, _) => _workspace.RefreshAll();
+        // AI 评审分支（批次 C 中改为评审所选仓库）。
+        _branchesPopup.ReviewBranch = (_, name) => _aiReview.ReviewBranch(name);
+        _banner.AddClicked += () => _workspace.Add([.. _workspace.Candidates.Select(c => c.Path)]);
+        _banner.IgnoreClicked += () => _workspace.Ignore([.. _workspace.Candidates.Select(c => c.Path)]);
+        _workspaceOperations.Progress += title =>
+        {
+            _statusBar.SetBusy(title is not null || _workspace.IsRefreshing);
+            if (title is not null) _statusBar.SetMessage(title);
+        };
         _commitButton.Click += (_, _) => ShowCommit();
-        _updateButton.Click += (_, _) => _ = _operations.UpdateProject();
-        _pushButton.Click += (_, _) => _ = _operations.Push();
+        _updateButton.Click += (_, _) => UpdateAll();
+        _pushButton.Click += (_, _) => PushAll();
 
         _projectTree.OpenFile += path => _editor.Open(path);
         _commitWindow.OpenFile += path => _editor.Open(path);
         _commitWindow.ShowDiff += change => ShowLocalDiff(change);
-        _commitWindow.PushAfterCommit += () => _ = _operations.Push();
+        _commitWindow.PushAfterCommit += PushAll;
         _commitWindow.ResolveConflict += change =>
         {
             if (change is not null) _conflicts.OpenMerge(change);
@@ -316,14 +340,14 @@ public sealed class ProjectWindow : Window
         AddAccelerator(VirtualKey.K, VirtualKeyModifiers.Control, ShowCommit);
         AddAccelerator(VirtualKey.F7, VirtualKeyModifiers.None, NextDifference);
         AddAccelerator(VirtualKey.F7, VirtualKeyModifiers.Shift, PreviousDifference);
-        AddAccelerator(VirtualKey.K, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => _ = _operations.Push());
-        AddAccelerator(VirtualKey.T, VirtualKeyModifiers.Control, () => _ = _operations.UpdateProject());
+        AddAccelerator(VirtualKey.K, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, PushAll);
+        AddAccelerator(VirtualKey.T, VirtualKeyModifiers.Control, UpdateAll);
         AddAccelerator(VirtualKey.N, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, () => _ = _operations.NewBranch());
         AddAccelerator(VirtualKey.Z, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, RollbackChanges);
         AddAccelerator(VirtualKey.S, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, () => SettingsWindow.Show());
         // IDEA Windows 键位：Ctrl+Shift+` 打开分支弹窗。
         AddAccelerator((VirtualKey)192, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, ShowBranches);
-        AddAccelerator(VirtualKey.R, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, Model.Refresh);
+        AddAccelerator(VirtualKey.R, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, _workspace.RefreshAll);
         AddAccelerator(VirtualKey.W, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, Close);
         AddAccelerator(VirtualKey.S, VirtualKeyModifiers.Control, SaveActive);
         AddAccelerator(VirtualKey.F4, VirtualKeyModifiers.Control, CloseActiveTab);
@@ -471,7 +495,63 @@ public sealed class ProjectWindow : Window
         _ => RightVisible,
     };
 
-    public void RefreshStatus() => Model.Refresh();
+    public void RefreshStatus() => _workspace.RefreshAll();
+
+    // MARK: - 多仓库
+
+    public Workspace Workspace => _workspace;
+
+    /// 某个仓库的操作对象：主仓库用窗口的操作对象，其他仓库按需创建并共享窗口的回调。
+    public GitOperations OperationsFor(ProjectModel model)
+    {
+        if (model == Model) return _operations;
+        if (_extraOperations.TryGetValue(model, out var existing)) return existing;
+        var operations = new GitOperations(model, () => _root.XamlRoot) { Peers = () => AllOperations };
+        operations.Progress += title =>
+        {
+            _statusBar.SetBusy(title is not null || _workspace.IsRefreshing);
+            if (title is not null) _statusBar.SetMessage(title);
+        };
+        operations.RevealCommit += hash =>
+        {
+            Show(ToolWindowId.Git);
+            _gitWindow.Reveal(hash);
+        };
+        _extraOperations[model] = operations;
+        return operations;
+    }
+
+    private IEnumerable<GitOperations> AllOperations => _workspace.Models.Select(OperationsFor);
+
+    public void FetchAll() => _ = _workspaceOperations.FetchAll();
+
+    public void UpdateAll() => _ = _workspaceOperations.UpdateAll();
+
+    public void PushAll() => _ = _workspaceOperations.PushAll();
+
+    /// 把选择的目录作为仓库加入本项目（Git > 将仓库加入项目）。
+    public async void AddRepository()
+    {
+        if (await Dialogs.PickFolder(this) is { } path) _workspace.Add([path]);
+    }
+
+    private readonly Dictionary<ProjectModel, (string Text, bool IsError)?> _shownNotifications = [];
+
+    /// 仓库列表或任一仓库状态变化：更新分支组件、提示条与状态栏。
+    private void WorkspaceChanged()
+    {
+        _vcsWidget.Title = _workspace.BranchWidgetTitle;
+        _statusBar.SetBusy(_workspace.IsRefreshing || _operations.IsRunning || _workspaceOperations.IsRunning);
+        _banner.Show(_workspace.Candidates);
+        // 其他仓库的操作结果显示在状态栏（主仓库的由 ModelChanged 处理）。
+        foreach (var model in _workspace.Models.Where(m => m != Model))
+        {
+            var notification = model.Notification;
+            if (_shownNotifications.TryGetValue(model, out var shown) && shown == notification) continue;
+            _shownNotifications[model] = notification;
+            if (notification is { } n) _statusBar.SetMessage(n.Text, n.IsError);
+        }
+    }
 
     public CodeEditor? ActiveEditor => _editor.ActiveEditor;
 
@@ -489,7 +569,9 @@ public sealed class ProjectWindow : Window
     /// 本地变更：HEAD 与工作区文件比较（提交工具窗口中的 Show Diff），可选择要提交的改动。
     public GitOperations Operations => _operations;
 
-    public void ShowBranches() => _branchesPopup.ShowAt(_vcsWidget);
+    /// 分支弹窗；多仓库时默认选中当前编辑的文件所在的仓库。
+    public void ShowBranches() =>
+        _branchesPopup.ShowAt(_vcsWidget, _editor.ActivePath is { } path ? _workspace.ModelContaining(path) : Model);
 
     public bool HasConflicts => _conflicts.HasConflicts;
 
@@ -850,9 +932,39 @@ public sealed class ProjectWindow : Window
                     case "editorFont": ShowEditorFontDialog(); break;
                     case "commit": ShowCommit(); break;
                     case "log": Show(ToolWindowId.Git); break;
-                    case "branches": ShowBranches(); break;
-                    case "push": _ = _operations.Push(); break;
-                    case "update": _ = _operations.UpdateProject(); break;
+                    case "branches":
+                        // 等加入的仓库加载完成（多仓库时显示带仓库选择的弹窗）。
+                        var branchesTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) };
+                        branchesTimer.Tick += (_, _) =>
+                        {
+                            branchesTimer.Stop();
+                            ShowBranches();
+                        };
+                        branchesTimer.Start();
+                        break;
+                    case "push": PushAll(); break;
+                    case "update": UpdateAll(); break;
+                    case "addRepos":
+                        // 等检测完成后加入检测到的仓库，再展开 Project 工具窗口。
+                        Show(ToolWindowId.Project);
+                        var addTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) };
+                        addTimer.Tick += (_, _) =>
+                        {
+                            addTimer.Stop();
+                            _workspace.Add([.. _workspace.Candidates.Select(c => c.Path)]);
+                        };
+                        addTimer.Start();
+                        break;
+                    case "checkoutBranch" when DebugOptions.Get("debug.branch") is { } syncBranch:
+                        // 等加入的仓库加载后在主仓库签出 `-debug.branch`（验证同步分支控制）。
+                        var syncTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) };
+                        syncTimer.Tick += (_, _) =>
+                        {
+                            syncTimer.Stop();
+                            _ = _operations.Checkout(GitOperations.TargetKind.Local, syncBranch);
+                        };
+                        syncTimer.Start();
+                        break;
                     case "newBranch": _ = _operations.NewBranch(); break;
                     case "conflicts": ResolveConflicts(); break;
                     case "stash": StashChanges(); break;

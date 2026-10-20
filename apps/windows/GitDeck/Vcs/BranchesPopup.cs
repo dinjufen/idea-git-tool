@@ -9,25 +9,51 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 namespace GitDeck.Vcs;
 
 /// VCS 分支组件弹出的 Branches 弹窗：搜索框、常用操作、本地分支、远程分支与标签（与 mac 端 BranchesPopover 一致）。
+/// 多仓库项目中顶部可选择仓库（带标识色与当前分支）并开启同步分支控制（与 mac 端 RepositoryBranchesPopover 一致）。
 public sealed class BranchesPopup
 {
-    private readonly ProjectModel _model;
-    private readonly GitOperations _operations;
+    private readonly Workspace _workspace;
+    private readonly Func<ProjectModel, GitOperations> _operationsFor;
+    private ProjectModel _model;
+    private GitOperations _operations;
     private readonly Action _commit;
+    private readonly ComboBox _repositories = new() { MinWidth = 220 };
+    private readonly CheckBox _sync = new() { Content = L10n.Tr("workspace.sync"), MinWidth = 0, VerticalAlignment = VerticalAlignment.Center };
+    private readonly Grid _header = new() { ColumnSpacing = 8 };
+    private bool _loadingRepositories;
     // 弹窗限制在窗口内绘制（与 IDEA 一致），也便于调试截图。
     private readonly Flyout _flyout = new() { ShouldConstrainToRootBounds = true };
     private readonly TextBox _search = new() { PlaceholderText = L10n.Tr("branches.search.placeholder") };
     private readonly ListView _list = new() { SelectionMode = ListViewSelectionMode.Single, IsItemClickEnabled = true };
 
-    public BranchesPopup(ProjectModel model, GitOperations operations, Action commit)
+    public BranchesPopup(Workspace workspace, Func<ProjectModel, GitOperations> operationsFor, Action commit)
     {
-        _model = model;
-        _operations = operations;
+        _workspace = workspace;
+        _operationsFor = operationsFor;
+        _model = workspace.Primary;
+        _operations = operationsFor(_model);
         _commit = commit;
         var root = new Grid { Width = 400, Height = 480, RowSpacing = 8 };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        Grid.SetRow(_list, 1);
+        _header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        _header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _header.Children.Add(_repositories);
+        Grid.SetColumn(_sync, 1);
+        _header.Children.Add(_sync);
+        ToolTipService.SetToolTip(_sync, L10n.Tr("workspace.sync.tooltip"));
+        _sync.Click += (_, _) => SyncBranchControl.IsEnabled = _sync.IsChecked == true;
+        _repositories.SelectionChanged += (_, _) =>
+        {
+            if (_loadingRepositories || _repositories.SelectedIndex < 0) return;
+            _model = _workspace.Models[_repositories.SelectedIndex];
+            _operations = _operationsFor(_model);
+            Rebuild();
+        };
+        Grid.SetRow(_search, 1);
+        Grid.SetRow(_list, 2);
+        root.Children.Add(_header);
         root.Children.Add(_search);
         root.Children.Add(_list);
         _flyout.Content = root;
@@ -52,8 +78,37 @@ public sealed class BranchesPopup
         _flyout.Opened += (_, _) => _search.Focus(FocusState.Programmatic);
     }
 
-    public void ShowAt(FrameworkElement anchor)
+    /// AI 评审某个分支相对当前分支的改动（分支菜单）。
+    public Func<ProjectModel, string, Task>? ReviewBranch { get; set; }
+
+    /// 显示弹窗；多仓库项目中默认选中 `selected`（当前编辑的文件所在的仓库）。
+    public void ShowAt(FrameworkElement anchor, ProjectModel? selected = null)
     {
+        _model = selected is not null && _workspace.Models.Contains(selected) ? selected : _workspace.Primary;
+        _operations = _operationsFor(_model);
+        _header.Visibility = _workspace.IsMultiRoot ? Visibility.Visible : Visibility.Collapsed;
+        if (_workspace.IsMultiRoot)
+        {
+            _loadingRepositories = true;
+            _repositories.Items.Clear();
+            var dark = anchor.ActualTheme == ElementTheme.Dark;
+            foreach (var model in _workspace.Models)
+            {
+                _repositories.Items.Add(new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 8,
+                    Children =
+                    {
+                        new Border { Width = 10, Height = 10, CornerRadius = new CornerRadius(2.5), VerticalAlignment = VerticalAlignment.Center, Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(_workspace.Color(model, dark)) },
+                        new TextBlock { Text = $"{_workspace.DisplayName(model)}  —  {model.CurrentBranchTitle}", VerticalAlignment = VerticalAlignment.Center },
+                    },
+                });
+            }
+            _repositories.SelectedIndex = Math.Max(0, _workspace.Models.ToList().IndexOf(_model));
+            _sync.IsChecked = SyncBranchControl.IsEnabled;
+            _loadingRepositories = false;
+        }
         _search.Text = "";
         Rebuild();
         _flyout.ShowAt(anchor, new FlyoutShowOptions { Placement = FlyoutPlacementMode.BottomEdgeAlignedLeft });
@@ -213,8 +268,8 @@ public sealed class BranchesPopup
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(Item(L10n.Tr("branches.menu.compare", current), () => ops.CompareWithCurrent(name), !isCurrent));
         menu.Items.Add(Item(L10n.Tr("branches.menu.showDiff"), () => ops.ShowDiffWithWorkingTree(name)));
-        // AI 评审在 W7 中启用。
-        menu.Items.Add(Item(L10n.Tr("branches.menu.aiReview", current, name), null));
+        var model = _model;
+        menu.Items.Add(Item(L10n.Tr("branches.menu.aiReview", current, name), ReviewBranch is { } review ? () => review(model, name) : null, !isCurrent));
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(Item(L10n.Tr("branches.menu.rebaseOnto", current, name), () => ops.Rebase(name), !isCurrent));
         menu.Items.Add(Item(L10n.Tr("branches.menu.mergeInto", name, current), () => ops.Merge(name), !isCurrent));

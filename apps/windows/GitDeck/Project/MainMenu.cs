@@ -113,9 +113,9 @@ public static class MainMenu
         var menu = new MenuFlyoutSubItem { Text = L10n.Tr("menu.git") };
         var ops = window.Operations;
         menu.Items.Add(Item(L10n.Tr("git.action.commit"), window.ShowCommit, "Ctrl+K"));
-        menu.Items.Add(Item(L10n.Tr("git.action.push"), ops.Push, "Ctrl+Shift+K"));
-        menu.Items.Add(Item(L10n.Tr("git.action.update"), ops.UpdateProject, "Ctrl+T"));
-        menu.Items.Add(Item(L10n.Tr("git.action.fetch"), ops.Fetch));
+        menu.Items.Add(Item(L10n.Tr("git.action.push"), window.PushAll, "Ctrl+Shift+K"));
+        menu.Items.Add(Item(L10n.Tr("git.action.update"), window.UpdateAll, "Ctrl+T"));
+        menu.Items.Add(Item(L10n.Tr("git.action.fetch"), window.FetchAll));
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(Item(L10n.Tr("git.action.branches"), window.ShowBranches, "Ctrl+Shift+`"));
         menu.Items.Add(Item(L10n.Tr("branches.action.new"), () => ops.NewBranch(), "Ctrl+Alt+N"));
@@ -125,7 +125,7 @@ public static class MainMenu
         menu.Items.Add(Item(L10n.Tr("patch.menu.create"), window.CreatePatch));
         menu.Items.Add(Item(L10n.Tr("patch.menu.apply"), window.ApplyPatch));
         menu.Items.Add(new MenuFlyoutSeparator());
-        // 多仓库项目（W8）的菜单项在对应批次中加入。
+        menu.Items.Add(Item(L10n.Tr("workspace.menu.add"), window.AddRepository));
         menu.Items.Add(Item(L10n.Tr("remotes.menu"), window.ManageRemotes));
         menu.Items.Add(Item(L10n.Tr("submodules.menu"), window.ManageSubmodules));
         menu.Items.Add(Item(L10n.Tr("worktree.menu.new"), window.NewWorktree));

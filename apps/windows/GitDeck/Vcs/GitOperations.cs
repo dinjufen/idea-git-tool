@@ -97,13 +97,35 @@ public sealed partial class GitOperations
         Revision,
     }
 
-    public Task Checkout(TargetKind kind, string name, CheckoutMode mode = CheckoutMode.Normal) =>
+    /// 同一窗口中其他仓库的操作对象（同步分支控制时对它们执行相同的分支操作）。
+    public Func<IEnumerable<GitOperations>>? Peers { get; set; }
+
+    /// 同步分支控制：对其他仓库执行 `action`（被同步的操作不再继续传播）。
+    private async Task Propagate(Func<GitOperations, Task> action)
+    {
+        if (!SyncBranchControl.IsEnabled || Peers is null) return;
+        foreach (var peer in Peers().Where(p => p != this).ToList()) await action(peer);
+    }
+
+    public Task Checkout(TargetKind kind, string name, CheckoutMode mode = CheckoutMode.Normal, bool synchronize = true) =>
         Run(L10n.Tr("ops.progress.checkout", name), repo => kind switch
         {
             TargetKind.Local => repo.CheckoutBranch(name, mode),
             TargetKind.Remote => repo.CheckoutRemoteBranch(name, mode),
             _ => repo.CheckoutRevision(name, mode),
-        }, outcome => Done(outcome.StashConflicts ? L10n.Tr("ops.checkout.stashConflicts", name) : L10n.Tr("ops.checkout.done", name), outcome.StashConflicts),
+        }, async outcome =>
+        {
+            Post(outcome.StashConflicts ? L10n.Tr("ops.checkout.stashConflicts", name) : L10n.Tr("ops.checkout.done", name), outcome.StashConflicts);
+            // 同步分支控制：其他仓库中有同名本地分支时一并签出。
+            if (synchronize && kind == TargetKind.Local)
+            {
+                await Propagate(peer =>
+                {
+                    var hasBranch = peer._model.Branches.Any(b => b.Kind == BranchKind.Local && b.Name == name);
+                    return hasBranch && peer._model.Status.Branch.Head != name ? peer.Checkout(TargetKind.Local, name, mode, synchronize: false) : Task.CompletedTask;
+                });
+            }
+        },
         async error =>
         {
             if (error is CoreException.LocalChangesWouldBeOverwritten overwritten) await AskCheckoutProblem(kind, name, overwritten.files);
@@ -159,8 +181,20 @@ public sealed partial class GitOperations
                 : repository.IsValidBranchName(name) ? null : L10n.Tr("ops.validate.invalid"),
             L10n.Tr("ops.newBranch.checkout"));
         if (result is null) return;
-        await Run(L10n.Tr("ops.progress.newBranch", result.Name), repo => repo.CreateBranch(result.Name, startPoint, result.Checked),
-            () => Done(L10n.Tr("ops.newBranch.done", result.Name)), error => ShowError(L10n.Tr("ops.newBranch.failed"), error));
+        await Run(L10n.Tr("ops.progress.newBranch", result.Name), repo => repo.CreateBranch(result.Name, startPoint, result.Checked), async () =>
+        {
+            Post(L10n.Tr("ops.newBranch.done", result.Name));
+            // 同步分支控制：从当前提交新建分支时，在其他仓库的当前提交上也新建同名分支。
+            if (startPoint is null) await Propagate(peer => peer.CreateBranchQuietly(result.Name, result.Checked));
+        }, error => ShowError(L10n.Tr("ops.newBranch.failed"), error));
+    }
+
+    /// 同步分支控制：在本仓库的当前提交上新建分支（已存在时跳过），不弹对话框。
+    public Task CreateBranchQuietly(string name, bool checkout)
+    {
+        if (LocalBranchNames.Contains(name)) return Task.CompletedTask;
+        return Run(L10n.Tr("ops.progress.newBranch", name), repo => repo.CreateBranch(name, null, checkout),
+            () => Task.CompletedTask, error => ShowError(L10n.Tr("ops.newBranch.failed"), error));
     }
 
     public async Task Rename(string branch)
@@ -298,7 +332,8 @@ public sealed partial class GitOperations
         }, error => ShowError(L10n.Tr("ops.update.failed"), error));
     }
 
-    private async Task<UpdateMethod?> ChooseUpdateMethod()
+    /// 询问更新方式（或按设置直接使用默认方式）；多仓库更新时也复用这个对话框。
+    public async Task<UpdateMethod?> ChooseUpdateMethod()
     {
         if (!GitSettings.ShowUpdateDialog) return GitSettings.UpdateMethod;
         if (Root is not { } root) return null;
@@ -351,7 +386,7 @@ public sealed partial class GitOperations
         if (await PushDialog.Show(root, target, [.. remotes.Select(r => r.Name)], _model.ProjectName) is { } options) await PerformPush(options);
     }
 
-    private Task PerformPush(PushOptions options)
+    public Task PerformPush(PushOptions options)
     {
         var destination = $"{options.Remote}/{options.RemoteBranch}";
         return Run(L10n.Tr("ops.progress.push", destination), repo => repo.Push(options),

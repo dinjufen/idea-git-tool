@@ -89,13 +89,33 @@ public sealed partial class ProjectTree
         Rebuild();
     }
 
+    private Workspace? _workspace;
+
+    /// 多仓库项目：嵌套仓库的根目录显示仓库标识色与分支，其中的文件按所属仓库的状态着色。
+    public Workspace? Workspace
+    {
+        get => _workspace;
+        set
+        {
+            _workspace = value;
+            // 工作区的变化通知在界面线程上发出。
+            if (value is not null) value.Changed += Rebuild;
+            Rebuild();
+        }
+    }
+
     /// 按展开状态重建可见行，保持选中项与滚动位置。
     private void Rebuild()
     {
         var selected = Selected;
         var rows = new List<FileNode>();
         _root.Collect(rows);
-        foreach (var node in rows) node.BrushKey = BrushKey(node);
+        foreach (var node in rows)
+        {
+            node.BrushKey = BrushKey(node);
+            node.Repository = RepositoryRootedAt(node);
+            node.Detail = Detail(node);
+        }
         _list.ItemsSource = rows;
         if (selected is not null && rows.Contains(selected)) _list.SelectedItem = selected;
     }
@@ -136,13 +156,30 @@ public sealed partial class ProjectTree
     /// （IDEA 的 “Highlight directories that contain modified files”）。
     private string BrushKey(FileNode node)
     {
-        if (_model.ChangesByPath.TryGetValue(node.RelativePath, out var change)) return change.BrushKey();
-        if (node.IsDirectory && node.RelativePath.Length > 0)
+        // 文件所属的仓库（嵌套仓库中的文件使用嵌套仓库的状态）。
+        var (owner, relative) = _workspace is { IsMultiRoot: true } workspace ? workspace.Locate(node.FullPath) : (_model, node.RelativePath);
+        if (owner.ChangesByPath.TryGetValue(relative, out var change)) return change.BrushKey();
+        if (node.IsDirectory && (relative.Length > 0 || owner != _model))
         {
-            var prefix = node.RelativePath + "/";
-            if (_model.Status.Changes.Any(c => c.Path.StartsWith(prefix, StringComparison.Ordinal) && !c.IsIgnored())) return "StatusModifiedBrush";
+            var prefix = relative.Length == 0 ? "" : relative + "/";
+            if (owner.Status.Changes.Any(c => c.Path.StartsWith(prefix, StringComparison.Ordinal) && !c.IsIgnored())) return "StatusModifiedBrush";
         }
         return "PrimaryTextBrush";
+    }
+
+    /// 以该目录为根目录的其他仓库。
+    private ProjectModel? RepositoryRootedAt(FileNode node)
+    {
+        if (!node.IsDirectory || node.IsRoot || _workspace is not { IsMultiRoot: true } workspace) return null;
+        return workspace.Models.FirstOrDefault(m => m != _model && RecentProjects.SamePath(m.RootPath, node.FullPath));
+    }
+
+    /// 根节点显示完整路径；多仓库项目中仓库根目录显示当前分支（IDEA 多仓库项目中的仓库根标记）。
+    private string Detail(FileNode node)
+    {
+        if (node.Repository is { } repository) return $"[{repository.BranchWidgetTitle}]";
+        if (!node.IsRoot) return "";
+        return _workspace is { IsMultiRoot: true } ? $"[{_model.BranchWidgetTitle}]  {node.FullPath}" : node.FullPath;
     }
 
     /// 与资源管理器相同的排序（数字按数值比较，不区分大小写）。
@@ -179,6 +216,11 @@ public sealed partial class ProjectTree
             : RelativePath[(RelativePath.LastIndexOf('/') + 1)..];
 
         public string BrushKey { get; set; } = "PrimaryTextBrush";
+
+        /// 以本目录为根的其他仓库（多仓库项目）。
+        public ProjectModel? Repository { get; set; }
+
+        public string Detail { get; set; } = "";
 
         public bool IsExpanded
         {
@@ -258,7 +300,7 @@ public sealed partial class ProjectTree
         private readonly ProjectTree _tree;
         private readonly Grid _chevronArea = new() { Width = 16, Height = 16, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
         private readonly FrameworkElement _chevron = Icons.Create(Icon.ChevronDown, 12);
-        private readonly FrameworkElement _folderIcon = Icons.Create(Icon.Folder, 14);
+        private readonly Grid _folderIcon = new() { Width = 14, Height = 14, VerticalAlignment = VerticalAlignment.Center };
         private readonly FrameworkElement _fileIcon = Icons.Create(Icon.File, 14);
         private readonly TextBlock _name = new() { VerticalAlignment = VerticalAlignment.Center };
         private readonly TextBlock _detail = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) };
@@ -294,15 +336,22 @@ public sealed partial class ProjectTree
             _folderIcon.Visibility = node.IsDirectory ? Visibility.Visible : Visibility.Collapsed;
             _fileIcon.Visibility = node.IsDirectory ? Visibility.Collapsed : Visibility.Visible;
             _name.Text = node.Name;
-            _name.FontWeight = node.IsRoot ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
-            _detail.Text = node.IsRoot ? node.FullPath : "";
-            _detail.Visibility = node.IsRoot ? Visibility.Visible : Visibility.Collapsed;
+            _name.FontWeight = node.IsRoot || node.Repository is not null ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
+            _detail.Text = node.Detail;
+            _detail.Visibility = node.Detail.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             UpdateColor();
         }
 
         private void UpdateColor()
         {
-            if (_node is { } node) _name.Foreground = Icons.ThemeBrush(_name, node.BrushKey);
+            if (_node is not { } node) return;
+            _name.Foreground = Icons.ThemeBrush(_name, node.BrushKey);
+            // 其他仓库的根目录：图标使用仓库标识色。
+            var brush = node.Repository is { } repository && _tree._workspace is { } workspace
+                ? new SolidColorBrush(workspace.Color(repository, ActualTheme == ElementTheme.Dark))
+                : null;
+            _folderIcon.Children.Clear();
+            _folderIcon.Children.Add(Icons.Create(Icon.Folder, 14, brush));
         }
     }
 }
