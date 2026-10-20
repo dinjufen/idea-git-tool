@@ -11,7 +11,6 @@ using Microsoft.UI.Xaml.Media;
 namespace GitDeck.Git;
 
 /// 底部 Git 工具窗口：Log、Console、Worktrees 标签页，以及按需打开的文件历史标签（与 mac 端 GitToolWindow 一致）。
-/// Console 与 Worktrees 在 W6 中实现。
 public sealed class GitToolWindow : Grid
 {
     private readonly List<Button> _tabButtons = [];
@@ -39,8 +38,10 @@ public sealed class GitToolWindow : Grid
             Margin = new Thickness(0, 0, 14, 0),
         }, "PrimaryTextBrush"));
         AddTab(header, "git.tab.log", Log);
-        AddTab(header, "git.tab.console", Placeholder());
-        AddTab(header, "git.tab.worktrees", Placeholder());
+        Console = new ConsoleView(model.RootPath);
+        Worktrees = new WorktreesView(model, operations);
+        AddTab(header, "git.tab.console", Console);
+        AddTab(header, "git.tab.worktrees", Worktrees);
         Children.Add(header);
         Select(0);
         // 选中页签的背景取自主题资源，元素进入可视树或主题切换后重新取色。
@@ -49,6 +50,14 @@ public sealed class GitToolWindow : Grid
     }
 
     public LogView Log { get; }
+
+    public ConsoleView Console { get; }
+
+    public WorktreesView Worktrees { get; }
+
+    public void ShowConsole() => Select(1);
+
+    public void ShowWorktrees() => Select(2);
 
     /// 文件历史中双击修订：打开该修订的完整 Diff。
     public event Action<string, string?, ChangedFile>? OpenHistoryDiff;

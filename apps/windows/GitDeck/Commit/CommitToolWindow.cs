@@ -116,6 +116,9 @@ public sealed class CommitToolWindow : Grid
     /// 储藏选中的文件（为空时储藏全部）。
     public event Action<List<string>>? StashRequested;
 
+    /// 把选中的改动保存为补丁（为空时为全部改动）。
+    public event Action<List<string>>? CreatePatchRequested;
+
     /// 解决冲突：打开该文件的三栏合并（参数为 null 时打开 Conflicts 对话框）。
     public event Action<FileChange?>? ResolveConflict;
 
@@ -681,7 +684,7 @@ public sealed class CommitToolWindow : Grid
             Add(menu, L10n.Tr("commit.action.rollback"), () => _ = RollbackSelected());
             Add(menu, L10n.Tr("commit.action.shelve"), ShelveSelected);
             Add(menu, L10n.Tr("stash.action.stashSelected"), StashSelected);
-            Add(menu, L10n.Tr("patch.menu.createSelected"), notImplemented("patch.menu.createSelected"), enabled: false);
+            Add(menu, L10n.Tr("patch.menu.createSelected"), () => CreatePatchRequested?.Invoke([.. SelectedFiles().Where(c => c.Conflict is null).Select(c => c.Path)]));
             menu.Items.Add(new MenuFlyoutSeparator());
             var conflictTarget = SelectedFiles().FirstOrDefault(c => c.Conflict is not null);
             Add(menu, L10n.Tr("git.action.resolveConflicts"), () => ResolveConflict?.Invoke(conflictTarget),
@@ -763,7 +766,7 @@ public sealed class CommitToolWindow : Grid
     // MARK: - 回滚
 
     /// 回滚选中的文件（选中分组时为该组全部文件）；未选中时对话框中全选。
-    private async Task RollbackSelected()
+    public async Task RollbackSelected()
     {
         var changes = _model.Status.Changes.Where(c => !c.IsUntracked() && c.Conflict is null && !c.IsIgnored()).ToList();
         if (changes.Count == 0) return;

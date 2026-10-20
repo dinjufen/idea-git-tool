@@ -37,7 +37,7 @@ public sealed partial class GitOperations
 
     public bool IsRunning => RunningTitle is not null;
 
-    private XamlRoot? Root => _root();
+    private XamlRoot? Root => _rootOverride ?? _root();
 
     // MARK: - 执行框架
 

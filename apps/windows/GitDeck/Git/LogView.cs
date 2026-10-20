@@ -357,21 +357,51 @@ public sealed class LogView : Grid
         menu.Items.Add(new MenuFlyoutSeparator());
         Add("log.menu.checkout", () => _ = _operations.Checkout(GitOperations.TargetKind.Revision, single!.Hash), single is not null);
         Add("log.menu.newBranch", () => _ = _operations.NewBranch(single!.Hash), single is not null);
-        // 以下操作在 W6（标签、补丁、拣选、还原、重置、改写历史）与 W7（AI 评审）中启用。
-        Add("log.menu.newTag", null);
+        Add("log.menu.newTag", () => _ = _operations.NewTag(single!.Hash), single is not null);
         menu.Items.Add(new MenuFlyoutSeparator());
-        Add("log.menu.createPatch", null);
+        // 补丁按从旧到新排列。
+        Add("log.menu.createPatch", () => _ = _operations.CreatePatchFromCommits([.. Enumerable.Reverse(targets).Select(c => c.Hash)]), targets.Count > 0);
+        // AI 评审在 W7 中启用。
         Add("log.menu.aiReview", null);
         menu.Items.Add(new MenuFlyoutSeparator());
-        Add("log.menu.cherryPick", null);
-        Add("log.menu.revert", null);
-        Add("log.menu.reset", null);
+        // 拣选按从旧到新应用；还原按从新到旧进行，与 IDEA 一致。
+        Add("log.menu.cherryPick", () => _ = _operations.CherryPick([.. Enumerable.Reverse(targets).Select(c => c.Hash)]), targets.Count > 0);
+        Add("log.menu.revert", () => _ = _operations.Revert([.. targets.Select(c => c.Hash)]), targets.Count > 0);
+        Add("log.menu.reset", () => _ = _operations.ResetDialog(single!.Hash, single.Subject), single is not null);
         menu.Items.Add(new MenuFlyoutSeparator());
-        Add("log.menu.undoCommit", null);
-        Add("log.menu.editMessage", null);
-        Add("log.menu.drop", null);
-        Add("log.menu.interactiveRebase", null);
+        // 与 IDEA 一致：只能撤销当前分支的最新提交；改写历史只适用于当前分支上的提交。
+        var head = _model.Status.Branch.Oid;
+        bool OnCurrentBranch(LogCommit commit)
+        {
+            try
+            {
+                return _model.Repository.IsAncestor(commit.Hash, "HEAD");
+            }
+            catch (CoreException)
+            {
+                return false;
+            }
+        }
+        var singleOnBranch = single is not null && OnCurrentBranch(single);
+        Add("log.menu.undoCommit", () => _ = _operations.UndoCommit(single!.Hash), single is not null && single.Hash == head);
+        Add("log.menu.editMessage", () => _ = EditMessage(single!), singleOnBranch);
+        Add("log.menu.drop", () => _ = _operations.DropCommits([.. targets.Select(c => c.Hash)]), targets.Count > 0 && targets.All(OnCurrentBranch));
+        Add("log.menu.interactiveRebase", () => _ = _operations.InteractiveRebase(single!.Hash), singleOnBranch);
         return menu;
+    }
+
+    private async Task EditMessage(LogCommit commit)
+    {
+        var repository = _model.Repository;
+        string? message = null;
+        try
+        {
+            message = (await Task.Run(() => repository.CommitDetails(commit.Hash))).Message;
+        }
+        catch (CoreException)
+        {
+        }
+        await _operations.EditMessage(commit.Hash, message ?? commit.Subject);
     }
 
     // MARK: - 行

@@ -10,6 +10,8 @@ namespace GitDeck.Common;
 /// - `-debug.confirm`：推送对话框与名称对话框直接按默认值确认（用于验证推送、搁置等流程）。
 /// - `-debug.action history|annotate` 与 `-debug.file <相对路径>`：打开该文件的历史 / 打开文件并显示 Annotate 注释。
 /// - `-debug.action stash|shelve|stashes|shelf`：打开储藏 / 搁置对话框，或显示储藏 / 搁置标签并展开第一项。
+/// - `-debug.action remotes|submodules|console|worktrees|newTag|reset`：打开对应窗口、标签或对话框；
+///   `applyPatch` 配合 `-debug.file <补丁路径>`，`cherryPick|revert|rebase` 配合 `-debug.hash <提交>`。
 /// - `-debug.action merge`：打开第一个冲突文件的三栏合并；`-debug.mergeApplyNonConflicting`、`-debug.mergeUndo` 随后应用不冲突的更改 / 撤销一次。
 /// - `-debug.theme light|dark`、`-debug.lang en|zh-Hans`：临时覆盖主题与语言（不写入设置）。
 public static class DebugOptions

@@ -119,7 +119,7 @@ public sealed class RadioOptions : StackPanel
                     Text = detail,
                     Style = (Style)Application.Current.Resources["SecondaryTextStyle"],
                     TextWrapping = TextWrapping.Wrap,
-                    Margin = new Thickness(28, -6, 0, 0),
+                    Margin = new Thickness(28, -2, 0, 0),
                 });
             }
             Children.Add(item);

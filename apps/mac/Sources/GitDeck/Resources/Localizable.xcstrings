@@ -8841,6 +8841,23 @@
         }
       }
     },
+    "patch.fileType": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Patch files"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "补丁文件"
+          }
+        }
+      }
+    },
     "patch.menu.apply": {
       "extractionState": "manual",
       "localizations": {
@@ -9245,6 +9262,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "最新的提交在最上方。双击提交可编辑其消息。"
+          }
+        }
+      }
+    },
+    "rebase.hint.win": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Newest commits are at the top. Select a reworded or squashed commit to edit its message below."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最新的提交在最上方。选中改写或压缩的提交后，在下方编辑其消息。"
           }
         }
       }

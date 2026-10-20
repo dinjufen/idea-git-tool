@@ -278,6 +278,7 @@ public sealed class ProjectWindow : Window
         _commitWindow.ShowHistory += ShowFileHistory;
         _commitWindow.ShelveRequested += (paths, name) => _ = _operations.Shelve(paths, name);
         _commitWindow.StashRequested += paths => _ = _operations.StashChanges(paths);
+        _commitWindow.CreatePatchRequested += paths => _ = _operations.CreatePatch(paths);
         _stashes.ShowFileDiff += ShowStashFile;
         _shelf.ShowFileDiff += ShowShelfFile;
         _gitWindow.OpenHistoryDiff += ShowCommitFile;
@@ -300,6 +301,7 @@ public sealed class ProjectWindow : Window
         AddAccelerator(VirtualKey.K, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, () => _ = _operations.Push());
         AddAccelerator(VirtualKey.T, VirtualKeyModifiers.Control, () => _ = _operations.UpdateProject());
         AddAccelerator(VirtualKey.N, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, () => _ = _operations.NewBranch());
+        AddAccelerator(VirtualKey.Z, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, RollbackChanges);
         // IDEA Windows 键位：Ctrl+Shift+` 打开分支弹窗。
         AddAccelerator((VirtualKey)192, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, ShowBranches);
         AddAccelerator(VirtualKey.R, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, Model.Refresh);
@@ -492,6 +494,42 @@ public sealed class ProjectWindow : Window
     }
 
     public void StashChanges() => _ = _operations.StashChanges();
+
+    public void RollbackChanges()
+    {
+        Show(ToolWindowId.Commit);
+        _ = _commitWindow.RollbackSelected();
+    }
+
+    public void NewTag() => _ = _operations.NewTag(null);
+
+    public void CreatePatch() => _ = _operations.CreatePatch([]);
+
+    public void ApplyPatch() => _ = _operations.ApplyPatch();
+
+    public void ManageRemotes() => Present(new RemotesDialog(Model, _operations));
+
+    public void ManageSubmodules() => Present(new SubmodulesDialog(Model, _operations));
+
+    private void Present(Window dialog)
+    {
+        dialog.Activate();
+        // 调试截图：管理窗口是独立窗口，截取该窗口。
+        if (DebugOptions.Get("debug.action") is "remotes" or "submodules") Snapshot.Schedule(dialog);
+    }
+
+    public void NewWorktree()
+    {
+        Show(ToolWindowId.Git);
+        _gitWindow.ShowWorktrees();
+        _ = _operations.NewWorktree();
+    }
+
+    public void ShowGitConsole()
+    {
+        Show(ToolWindowId.Git);
+        _gitWindow.ShowConsole();
+    }
 
     /// IDEA 的 “Unstash Changes”：打开提交工具窗口的储藏标签。
     public void UnstashChanges()
@@ -739,6 +777,22 @@ public sealed class ProjectWindow : Window
                     case "newBranch": _ = _operations.NewBranch(); break;
                     case "conflicts": ResolveConflicts(); break;
                     case "stash": StashChanges(); break;
+                    case "remotes": ManageRemotes(); break;
+                    case "submodules": ManageSubmodules(); break;
+                    case "console":
+                        ShowGitConsole();
+                        _gitWindow.Console.ShowBackgroundCommands();
+                        break;
+                    case "worktrees":
+                        Show(ToolWindowId.Git);
+                        _gitWindow.ShowWorktrees();
+                        break;
+                    case "newTag": NewTag(); break;
+                    case "reset" when Model.Status.Branch.Oid is { } resetHead: _ = _operations.ResetDialog(resetHead, ""); break;
+                    case "applyPatch" when DebugOptions.Get("debug.file") is { } patchFile: _ = _operations.ApplyPatchFile(patchFile); break;
+                    case "cherryPick" when DebugOptions.Get("debug.hash") is { } pickHash: _ = _operations.CherryPick([pickHash]); break;
+                    case "revert" when DebugOptions.Get("debug.hash") is { } revertHash: _ = _operations.Revert([revertHash]); break;
+                    case "rebase" when DebugOptions.Get("debug.hash") is { } rebaseHash: _ = _operations.InteractiveRebase(rebaseHash); break;
                     case "shelve": ShelveChanges(); break;
                     case "stashes":
                         UnstashChanges();
@@ -790,6 +844,7 @@ public sealed class ProjectWindow : Window
             };
             timer.Start();
         }
+        if (action is "remotes" or "submodules") return;
         if (action == "merge")
         {
             // 合并窗口打开后截取该窗口。

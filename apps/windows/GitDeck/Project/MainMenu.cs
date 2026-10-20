@@ -117,8 +117,18 @@ public static class MainMenu
         menu.Items.Add(Item(L10n.Tr("git.action.branches"), window.ShowBranches, "Ctrl+Shift+`"));
         menu.Items.Add(Item(L10n.Tr("branches.action.new"), () => ops.NewBranch(), "Ctrl+Alt+N"));
         menu.Items.Add(Item(L10n.Tr("branches.action.checkoutRevision"), ops.CheckoutRevisionDialog));
-        if (window.HasConflicts) menu.Items.Add(Item(L10n.Tr("git.action.resolveConflicts"), window.ResolveConflicts));
+        menu.Items.Add(Item(L10n.Tr("tag.new.menu"), window.NewTag));
         menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(Item(L10n.Tr("patch.menu.create"), window.CreatePatch));
+        menu.Items.Add(Item(L10n.Tr("patch.menu.apply"), window.ApplyPatch));
+        menu.Items.Add(new MenuFlyoutSeparator());
+        // 多仓库项目（W8）的菜单项在对应批次中加入。
+        menu.Items.Add(Item(L10n.Tr("remotes.menu"), window.ManageRemotes));
+        menu.Items.Add(Item(L10n.Tr("submodules.menu"), window.ManageSubmodules));
+        menu.Items.Add(Item(L10n.Tr("worktree.menu.new"), window.NewWorktree));
+        menu.Items.Add(Item(L10n.Tr("console.menu"), window.ShowGitConsole));
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(Item(L10n.Tr("commit.action.rollback"), window.RollbackChanges, "Ctrl+Alt+Z"));
         menu.Items.Add(Item(L10n.Tr("stash.menu.stash"), window.StashChanges));
         menu.Items.Add(Item(L10n.Tr("stash.menu.unstash"), window.UnstashChanges));
         menu.Items.Add(Item(L10n.Tr("shelf.menu.shelve"), window.ShelveChanges));
@@ -131,7 +141,8 @@ public static class MainMenu
         history.IsEnabled = window.HasActiveFile;
         menu.Items.Add(history);
         var state = window.Model.Status.State;
-        if (state != Core.RepositoryState.Normal) menu.Items.Add(new MenuFlyoutSeparator());
+        if (state != Core.RepositoryState.Normal || window.HasConflicts) menu.Items.Add(new MenuFlyoutSeparator());
+        if (window.HasConflicts) menu.Items.Add(Item(L10n.Tr("git.action.resolveConflicts"), window.ResolveConflicts));
         switch (state)
         {
             case Core.RepositoryState.Rebasing:
