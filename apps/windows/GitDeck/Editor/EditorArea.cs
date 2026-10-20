@@ -50,9 +50,10 @@ public sealed class EditorArea : Grid
     /// 打开的文件。
     public sealed class Document : ITab
     {
-        public Document(string path, string? relativePath, string text, bool hasBom)
+        public Document(string path, ProjectModel owner, string? relativePath, string text, bool hasBom)
         {
             Path = path;
+            Owner = owner;
             RelativePath = relativePath;
             HasBom = hasBom;
             Editor = new CodeEditor(text, CoreApi.LanguageForPath(System.IO.Path.GetFileName(path)));
@@ -60,7 +61,10 @@ public sealed class EditorArea : Grid
 
         public string Path { get; }
 
-        /// 相对仓库根目录的路径（`/` 分隔）；仓库外的文件为 null（不显示变更标记）。
+        /// 文件所属的仓库（多仓库项目中为包含该文件的嵌套仓库）。
+        public ProjectModel Owner { get; }
+
+        /// 相对所属仓库根目录的路径（`/` 分隔）；仓库外的文件为 null（不显示变更标记）。
         public string? RelativePath { get; }
 
         public CodeEditor Editor { get; }
@@ -98,7 +102,9 @@ public sealed class EditorArea : Grid
     private readonly FrameworkElement _emptyState;
     private readonly List<ITab> _tabs = [];
     private ITab? _active;
-    private string? _lastHead;
+    /// 各仓库上次的 HEAD；变化时重新读取该仓库中打开文件的基准版本。
+    private readonly Dictionary<ProjectModel, string?> _lastHeads = [];
+    private Workspace? _workspace;
 
     public EditorArea(ProjectModel model)
     {
@@ -134,8 +140,8 @@ public sealed class EditorArea : Grid
     /// 在 Git 日志中定位某个提交（点击 Annotate 注释时）。
     public event Action<string>? ShowCommit;
 
-    /// 显示文件历史（相对仓库根目录的路径）。
-    public event Action<string>? ShowHistory;
+    /// 显示文件历史：相对所属仓库根目录的路径与所属仓库。
+    public event Action<string, ProjectModel>? ShowHistory;
 
     /// 点击编辑器中的 AI 评审标记（参数为发现下标）。
     public event Action<int>? ShowFinding;
@@ -164,6 +170,20 @@ public sealed class EditorArea : Grid
 
     /// 当前编辑的文件相对仓库根目录的路径（不在仓库中或不是文件时为 null）。
     public string? ActiveRelativePath => (_active as Document)?.RelativePath;
+
+    /// 多仓库项目：嵌套仓库中的文件使用该仓库的变更标记、Blame 与历史。
+    public Workspace? Workspace
+    {
+        get => _workspace;
+        set
+        {
+            if (_workspace is not null) _workspace.Changed -= ModelChanged;
+            else _model.Changed -= ModelChanged;
+            _workspace = value;
+            if (value is not null) value.Changed += ModelChanged;
+            else _model.Changed += ModelChanged;
+        }
+    }
 
     /// 当前编辑的文件（完整路径）。
     public string? ActivePath => (_active as Document)?.Path;
@@ -199,7 +219,8 @@ public sealed class EditorArea : Grid
             Message?.Invoke(L10n.Tr("editor.unsupported.win", System.IO.Path.GetFileName(path)), true);
             return;
         }
-        var document = new Document(path, RelativePath(path), text, hasBom);
+        var (owner, relativePath) = Locate(path);
+        var document = new Document(path, owner, relativePath, text, hasBom);
         document.Editor.TextChanged += () =>
         {
             if (!document.IsModified && !document.IsReloading)
@@ -242,7 +263,7 @@ public sealed class EditorArea : Grid
             Write(document);
             document.IsModified = false;
             RebuildTabs();
-            _model.Refresh();
+            document.Owner.Refresh();
             // 保存后重新 blame，使注释与文件内容对应。
             if (document.Editor.Annotations is not null) LoadBlame(document);
         }
@@ -305,12 +326,14 @@ public sealed class EditorArea : Grid
     private static void Write(Document document) =>
         File.WriteAllText(document.Path, document.Editor.Text, new UTF8Encoding(document.HasBom));
 
-    private string? RelativePath(string path)
+    /// 文件所属的仓库与相对路径；不在任何仓库中时路径为 null。
+    private (ProjectModel Owner, string? RelativePath) Locate(string path)
     {
-        var relative = System.IO.Path.GetRelativePath(_model.RootPath, path);
-        return relative.StartsWith("..", StringComparison.Ordinal) || System.IO.Path.IsPathRooted(relative)
+        var owner = _workspace?.ModelContaining(path) ?? _model;
+        var relative = System.IO.Path.GetRelativePath(owner.RootPath, path);
+        return (owner, relative.StartsWith("..", StringComparison.Ordinal) || System.IO.Path.IsPathRooted(relative)
             ? null
-            : relative.Replace('\\', '/');
+            : relative.Replace('\\', '/'));
     }
 
     // MARK: - 打开的标签页持久化（与 IDEA 重新打开项目时恢复编辑器标签一致）
@@ -341,7 +364,7 @@ public sealed class EditorArea : Grid
     private void LoadBase(Document document)
     {
         if (document.RelativePath is not { } path) return;
-        var repository = _model.Repository;
+        var repository = document.Owner.Repository;
         Task.Run(() =>
         {
             try
@@ -384,12 +407,17 @@ public sealed class EditorArea : Grid
     /// 提交、检出等操作改变 HEAD 后，重新读取所有打开文件的基准版本。
     private void ModelChanged()
     {
-        if (_model.IsRefreshing || _model.Status.Branch.Oid == _lastHead) return;
-        _lastHead = _model.Status.Branch.Oid;
-        foreach (var document in Documents.ToList())
+        foreach (var model in _workspace?.Models ?? [_model])
         {
-            LoadBase(document);
-            if (document.Editor.Annotations is not null) LoadBlame(document);
+            if (model.IsRefreshing) continue;
+            var head = model.Status.Branch.Oid;
+            if (_lastHeads.TryGetValue(model, out var last) && last == head) continue;
+            _lastHeads[model] = head;
+            foreach (var document in Documents.Where(d => d.Owner == model).ToList())
+            {
+                LoadBase(document);
+                if (document.Editor.Annotations is not null) LoadBlame(document);
+            }
         }
     }
 
@@ -402,7 +430,7 @@ public sealed class EditorArea : Grid
 
     private void UpdateReviewMarkers(Document document)
     {
-        if (document.RelativePath is not { } path || _aiReview is null)
+        if (document.RelativePath is not { } path || _aiReview is null || document.Owner != _model)
         {
             document.Editor.ReviewMarkers = [];
             return;
@@ -448,7 +476,7 @@ public sealed class EditorArea : Grid
     private void LoadBlame(Document document)
     {
         if (document.RelativePath is not { } path) return;
-        var repository = _model.Repository;
+        var repository = document.Owner.Repository;
         var file = document.Path;
         Task.Run(() =>
         {
@@ -523,7 +551,7 @@ public sealed class EditorArea : Grid
         var history = new MenuFlyoutItem { Text = L10n.Tr("git.action.showHistory"), IsEnabled = document.RelativePath is not null };
         history.Click += (_, _) =>
         {
-            if (document.RelativePath is { } path) ShowHistory?.Invoke(path);
+            if (document.RelativePath is { } path) ShowHistory?.Invoke(path, document.Owner);
         };
         menu.Items.Add(annotate);
         menu.Items.Add(history);

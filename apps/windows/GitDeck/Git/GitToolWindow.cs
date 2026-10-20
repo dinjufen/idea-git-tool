@@ -60,14 +60,15 @@ public sealed class GitToolWindow : Grid
     public void ShowWorktrees() => Select(2);
 
     /// 文件历史中双击修订：打开该修订的完整 Diff。
-    public event Action<string, string?, ChangedFile>? OpenHistoryDiff;
+    public event Action<string, string?, ChangedFile, ProjectModel>? OpenHistoryDiff;
 
-    /// 打开（或替换）文件历史标签页。
-    public void ShowHistory(string path)
+    /// 打开（或替换）文件历史标签页；多仓库项目中 `model` 为文件所属的仓库。
+    public void ShowHistory(string path, ProjectModel? model = null)
     {
         CloseHistory();
-        var view = new FileHistoryView(_model, path);
-        view.OpenDiff += (hash, parent, file) => OpenHistoryDiff?.Invoke(hash, parent, file);
+        var owner = model ?? _model;
+        var view = new FileHistoryView(owner, path);
+        view.OpenDiff += (hash, parent, file) => OpenHistoryDiff?.Invoke(hash, parent, file, owner);
         SetRow(view, 1);
         Children.Add(view);
         _history = view;

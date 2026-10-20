@@ -89,9 +89,10 @@ public sealed class ProjectWindow : Window
         Model = new ProjectModel(repository);
         _editor = new EditorArea(Model);
         _projectTree = new ProjectTree(Model);
-        _commitWindow = new CommitToolWindow(Model, _lineSelections);
         _operations = new GitOperations(Model, () => _root.XamlRoot);
         _workspace = new Workspace(Model);
+        _commitWindow = new CommitToolWindow(_workspace, _lineSelections);
+        _editor.Workspace = _workspace;
         _workspaceOperations = new WorkspaceOperations(_workspace, OperationsFor, () => _root.XamlRoot);
         _operations.Peers = () => AllOperations;
         _gitWindow = new GitToolWindow(Model, _operations);
@@ -289,12 +290,13 @@ public sealed class ProjectWindow : Window
 
         _projectTree.OpenFile += path => _editor.Open(path);
         _commitWindow.OpenFile += path => _editor.Open(path);
-        _commitWindow.ShowDiff += change => ShowLocalDiff(change);
+        _commitWindow.ShowDiff += (model, change, key) => ShowLocalDiff(change, model, key);
         _commitWindow.PushAfterCommit += PushAll;
-        _commitWindow.ResolveConflict += change =>
+        _commitWindow.ResolveConflict += (model, change) =>
         {
-            if (change is not null) _conflicts.OpenMerge(change);
-            else _ = _conflicts.ShowConflicts();
+            var resolver = ConflictsFor(model);
+            if (change is not null) resolver.OpenMerge(change);
+            else _ = resolver.ShowConflicts();
         };
         _operations.Conflicts += _conflicts.RequestConflicts;
         _operations.Progress += title =>
@@ -317,13 +319,24 @@ public sealed class ProjectWindow : Window
             _gitWindow.Reveal(hash);
         };
         _editor.ShowHistory += ShowFileHistory;
-        _commitWindow.ShowHistory += ShowFileHistory;
-        _commitWindow.ShelveRequested += (paths, name) => _ = _operations.Shelve(paths, name);
-        _commitWindow.StashRequested += paths => _ = _operations.StashChanges(paths);
-        _commitWindow.CreatePatchRequested += paths => _ = _operations.CreatePatch(paths);
+        _commitWindow.ShowHistory += (model, path) => ShowFileHistory(path, model);
+        _commitWindow.ShelveRequested += async (groups, name) =>
+        {
+            foreach (var (model, paths) in groups) await OperationsFor(model).Shelve(paths, name);
+        };
+        _commitWindow.StashRequested += async groups =>
+        {
+            if (groups.Count == 0) await _operations.StashChanges([]);
+            foreach (var (model, paths) in groups) await OperationsFor(model).StashChanges(paths);
+        };
+        _commitWindow.CreatePatchRequested += async groups =>
+        {
+            if (groups.Count == 0) await _operations.CreatePatch([]);
+            foreach (var (model, paths) in groups) await OperationsFor(model).CreatePatch(paths);
+        };
         _stashes.ShowFileDiff += ShowStashFile;
         _shelf.ShowFileDiff += ShowShelfFile;
-        _gitWindow.OpenHistoryDiff += ShowCommitFile;
+        _gitWindow.OpenHistoryDiff += (hash, parent, file, model) => ShowCommitFile(hash, parent, file, model);
         _editor.Message += (text, isError) => _statusBar.SetMessage(text, isError);
 
         _leftSplitter.Dragged += delta => Resize(_mainRow.ColumnDefinitions[0], delta, 120);
@@ -517,6 +530,7 @@ public sealed class ProjectWindow : Window
             Show(ToolWindowId.Git);
             _gitWindow.Reveal(hash);
         };
+        operations.Conflicts += ConflictsFor(model).RequestConflicts;
         _extraOperations[model] = operations;
         return operations;
     }
@@ -583,15 +597,32 @@ public sealed class ProjectWindow : Window
     public void ToggleAnnotations() => _editor.ToggleAnnotations();
 
     /// 在底部 Git 工具窗口中打开文件历史标签页。
-    public void ShowFileHistory(string path)
+    public void ShowFileHistory(string path) => ShowFileHistory(path, null);
+
+    /// 多仓库项目中 `model` 为文件所属的仓库，`path` 为仓库内的路径。
+    public void ShowFileHistory(string path, ProjectModel? model)
     {
         Show(ToolWindowId.Git);
-        _gitWindow.ShowHistory(path);
+        _gitWindow.ShowHistory(path, model);
     }
 
     public void ShowHistoryForCurrentFile()
     {
-        if (_editor.ActiveRelativePath is { } path) ShowFileHistory(path);
+        if (_editor.ActivePath is not { } full) return;
+        var (model, relative) = _workspace.Locate(full);
+        ShowFileHistory(relative, model);
+    }
+
+    /// 非主仓库的冲突处理（按仓库缓存）。
+    private readonly Dictionary<ProjectModel, ConflictResolver> _extraConflicts = [];
+
+    private ConflictResolver ConflictsFor(ProjectModel model)
+    {
+        if (model == Model) return _conflicts;
+        if (_extraConflicts.TryGetValue(model, out var existing)) return existing;
+        var resolver = new ConflictResolver(model, () => _root.XamlRoot);
+        _extraConflicts[model] = resolver;
+        return resolver;
     }
 
     public void StashChanges() => _ = _operations.StashChanges();
@@ -746,9 +777,11 @@ public sealed class ProjectWindow : Window
     public void ResolveConflicts() => _ = _conflicts.ShowConflicts();
 
     /// 历史提交中的文件：与第一个父提交比较（Log 详情中双击文件）。
-    public void ShowCommitFile(string hash, string? parent, ChangedFile file)
+    public void ShowCommitFile(string hash, string? parent, ChangedFile file) => ShowCommitFile(hash, parent, file, null);
+
+    public void ShowCommitFile(string hash, string? parent, ChangedFile file, ProjectModel? model)
     {
-        var repository = Model.Repository;
+        var repository = (model ?? Model).Repository;
         var basePath = file.OrigPath ?? file.Path;
         Task.Run(() =>
         {
@@ -799,12 +832,15 @@ public sealed class ProjectWindow : Window
         }
     }
 
-    public void ShowLocalDiff(FileChange change)
+    /// 文件的本地 Diff；多仓库项目中 `model` 为文件所属的仓库，`key` 为提交窗口中的条目键（部分提交的选择以此保存）。
+    public void ShowLocalDiff(FileChange change, ProjectModel? model = null, string? key = null)
     {
-        var repository = Model.Repository;
-        var root = Model.RootPath;
+        var owner = model ?? Model;
+        var selectionKey = key ?? change.Path;
+        var repository = owner.Repository;
+        var root = owner.RootPath;
         var basePath = change.OrigPath ?? change.Path;
-        var headTitle = Model.Status.Branch.Oid is { } oid ? L10n.Tr("diff.title.head", oid[..Math.Min(8, oid.Length)]) : "HEAD";
+        var headTitle = owner.Status.Branch.Oid is { } oid ? L10n.Tr("diff.title.head", oid[..Math.Min(8, oid.Length)]) : "HEAD";
         Task.Run(() =>
         {
             string? baseText;
@@ -821,11 +857,11 @@ public sealed class ProjectWindow : Window
         }).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
         {
             var (baseText, text) = task.Result;
-            _editor.OpenDiff("local:" + change.Path, Path.GetFileName(change.Path), L10n.Tr("diff.tooltip.local", change.Path), () => new DiffView(
+            _editor.OpenDiff("local:" + selectionKey, Path.GetFileName(change.Path), L10n.Tr("diff.tooltip.local", selectionKey), () => new DiffView(
                 new DiffSide(headTitle, baseText),
                 new DiffSide(L10n.Tr("diff.title.local"), text),
                 change.Path,
-                change.Conflict is null ? new DiffInclusion(_lineSelections, change.Path) : null));
+                change.Conflict is null ? new DiffInclusion(_lineSelections, selectionKey) : null));
         }), TaskScheduler.Default);
     }
 
@@ -930,7 +966,20 @@ public sealed class ProjectWindow : Window
                         }
                         break;
                     case "editorFont": ShowEditorFontDialog(); break;
-                    case "commit": ShowCommit(); break;
+                    case "commit":
+                        ShowCommit();
+                        if (DebugOptions.Get("debug.message") is { } debugMessage)
+                        {
+                            // 等各仓库加载后以 -debug.message 提交勾选的改动（验证多仓库提交）。
+                            var debugCommitTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+                            debugCommitTimer.Tick += (_, _) =>
+                            {
+                                debugCommitTimer.Stop();
+                                _ = _commitWindow.DebugCommit(debugMessage);
+                            };
+                            debugCommitTimer.Start();
+                        }
+                        break;
                     case "log": Show(ToolWindowId.Git); break;
                     case "branches":
                         // 等加入的仓库加载完成（多仓库时显示带仓库选择的弹窗）。
