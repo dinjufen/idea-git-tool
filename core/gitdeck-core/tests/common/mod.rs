@@ -36,6 +36,9 @@ pub fn configure(dir: &Path) {
     git(dir, &["config", "user.email", "test@example.com"]);
     git(dir, &["config", "commit.gpgsign", "false"]);
     git(dir, &["config", "core.hooksPath", ".git/hooks"]);
+    // 核心的 GitRunner 会读取系统配置，而 Git for Windows 默认 core.autocrlf=true；
+    // 固定为 false，使断言中的行尾在各平台一致（CRLF 场景另有专门测试）。
+    git(dir, &["config", "core.autocrlf", "false"]);
 }
 
 /// 创建一个空仓库（无提交），默认分支为 main。

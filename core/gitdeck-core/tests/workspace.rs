@@ -232,6 +232,7 @@ fn create_and_apply_patches() {
         tmp.path(),
         &["clone", "-q", a.to_str().unwrap(), fresh.to_str().unwrap()],
     );
+    common::configure(&fresh);
     git(&fresh, &["reset", "-q", "--hard", "HEAD~1"]);
     open(&fresh).apply_patch(commit_patch, false).unwrap();
     assert_eq!(fs::read_to_string(fresh.join("c.txt")).unwrap(), "c\n");

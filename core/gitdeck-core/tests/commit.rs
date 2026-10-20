@@ -335,3 +335,34 @@ fn partial_commit_of_new_file_and_amend() {
     assert_eq!(git(dir, &["show", "HEAD:new.txt"]), "keep\ndraft\n");
     assert!(repo.status().unwrap().changes.is_empty());
 }
+
+#[test]
+fn partial_commit_with_autocrlf_stores_lf_in_repository() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    new_repo(dir);
+    git(dir, &["config", "core.autocrlf", "true"]);
+    commit_file(dir, "f.txt", "1\n2\n3\n", "base");
+    // Windows 上的工作区文件是 CRLF；部分提交的内容按工作区换行风格生成。
+    let working = "1\r\nTWO\r\n3\r\nfour\r\n";
+    fs::write(dir.join("f.txt"), working).unwrap();
+    let repo = open(dir);
+
+    let content =
+        gitdeck_core::partial_text("1\r\n2\r\n3\r\n".into(), working.into(), vec![1], vec![1]);
+    assert_eq!(content, "1\r\n2\r\n3\r\nfour\r\n");
+    repo.commit(CommitOptions {
+        message: "partial".into(),
+        paths: vec!["f.txt".into()],
+        partial: vec![gitdeck_core::PartialFile {
+            path: "f.txt".into(),
+            content,
+        }],
+        ..Default::default()
+    })
+    .unwrap();
+    // 仓库中保存为 LF，工作区保持原样，剩余的修改仍是未暂存改动。
+    assert_eq!(git(dir, &["show", "HEAD:f.txt"]), "1\n2\n3\nfour\n");
+    assert_eq!(fs::read_to_string(dir.join("f.txt")).unwrap(), working);
+    assert_eq!(git(dir, &["diff", "--name-only"]), "f.txt\n");
+}

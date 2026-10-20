@@ -9,7 +9,7 @@ license = "LicenseRef-Proprietary"
 publish = false
 
 [workspace.dependencies]
-uniffi = "0.32"
+uniffi = "=0.31.0"
 thiserror = "2"
 which = "8"
 tempfile = "3"
