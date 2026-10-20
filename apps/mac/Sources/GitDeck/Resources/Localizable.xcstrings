@@ -2330,6 +2330,23 @@
         }
       }
     },
+    "clone.progress.title.win": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloning"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在克隆"
+          }
+        }
+      }
+    },
     "clone.title": {
       "extractionState": "manual",
       "localizations": {
@@ -4829,6 +4846,23 @@
         }
       }
     },
+    "git.download.win": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download Git for Windows"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下载 Git for Windows"
+          }
+        }
+      }
+    },
     "git.tab.closeHistory": {
       "extractionState": "manual",
       "localizations": {
@@ -5947,6 +5981,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "关闭标签页"
+          }
+        }
+      }
+    },
+    "menu.file.exit.win": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exit"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "退出"
           }
         }
       }
@@ -12020,6 +12071,23 @@
         }
       }
     },
+    "toolbar.mainMenu.tooltip.win": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Main Menu"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "主菜单"
+          }
+        }
+      }
+    },
     "toolbar.project.tooltip": {
       "extractionState": "manual",
       "localizations": {
@@ -12441,6 +12509,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "在访达中显示"
+          }
+        }
+      }
+    },
+    "welcome.recent.reveal.win": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show in Explorer"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在资源管理器中显示"
           }
         }
       }

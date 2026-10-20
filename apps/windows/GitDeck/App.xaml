@@ -1,0 +1,57 @@
+<Application
+    x:Class="GitDeck.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+                <ResourceDictionary Source="ms-appx:///Common/Styles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- IDEA New UI 配色（与 mac 端 Common/Theme.swift 一致）。 -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#F7F8FA" />
+                    <SolidColorBrush x:Key="ToolWindowBackgroundBrush" Color="#F7F8FA" />
+                    <SolidColorBrush x:Key="EditorBackgroundBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="SeparatorBrush" Color="#EBECF0" />
+                    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#000000" />
+                    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#818594" />
+                    <SolidColorBrush x:Key="HoverBrush" Color="#DFE1E5" />
+                    <SolidColorBrush x:Key="SelectedStripeBrush" Color="#DFE1E5" />
+                    <SolidColorBrush x:Key="SelectionBrush" Color="#D5E1FF" />
+                    <SolidColorBrush x:Key="AccentBrush" Color="#3574F0" />
+                    <SolidColorBrush x:Key="ErrorTextBrush" Color="#FF0000" />
+                    <SolidColorBrush x:Key="StatusModifiedBrush" Color="#0032A0" />
+                    <SolidColorBrush x:Key="StatusAddedBrush" Color="#067D17" />
+                    <SolidColorBrush x:Key="StatusDeletedBrush" Color="#6C6C6C" />
+                    <SolidColorBrush x:Key="StatusUntrackedBrush" Color="#993300" />
+                    <SolidColorBrush x:Key="StatusIgnoredBrush" Color="#8C8C00" />
+                    <SolidColorBrush x:Key="StatusConflictBrush" Color="#FF0000" />
+                    <SolidColorBrush x:Key="StatusRenamedBrush" Color="#007878" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#2B2D30" />
+                    <SolidColorBrush x:Key="ToolWindowBackgroundBrush" Color="#2B2D30" />
+                    <SolidColorBrush x:Key="EditorBackgroundBrush" Color="#1E1F22" />
+                    <SolidColorBrush x:Key="SeparatorBrush" Color="#1E1F22" />
+                    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#DFE1E5" />
+                    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#6F737A" />
+                    <SolidColorBrush x:Key="HoverBrush" Color="#393B40" />
+                    <SolidColorBrush x:Key="SelectedStripeBrush" Color="#43454A" />
+                    <SolidColorBrush x:Key="SelectionBrush" Color="#2E436E" />
+                    <SolidColorBrush x:Key="AccentBrush" Color="#3574F0" />
+                    <SolidColorBrush x:Key="ErrorTextBrush" Color="#D5756C" />
+                    <SolidColorBrush x:Key="StatusModifiedBrush" Color="#6897BB" />
+                    <SolidColorBrush x:Key="StatusAddedBrush" Color="#629755" />
+                    <SolidColorBrush x:Key="StatusDeletedBrush" Color="#6C6C6C" />
+                    <SolidColorBrush x:Key="StatusUntrackedBrush" Color="#D1675A" />
+                    <SolidColorBrush x:Key="StatusIgnoredBrush" Color="#848504" />
+                    <SolidColorBrush x:Key="StatusConflictBrush" Color="#D5756C" />
+                    <SolidColorBrush x:Key="StatusRenamedBrush" Color="#3A8484" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>
