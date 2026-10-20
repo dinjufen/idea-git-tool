@@ -48,7 +48,7 @@ final class PushDialog: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         guard let content = panel.contentView else { return }
 
         // 第一行：main → origin : main
-        let local = NSTextField.label(target.localBranch, font: .systemFont(ofSize: 13, weight: .semibold))
+        let local = NSTextField.label(target.localBranch, font: Theme.font(ofSize: 13, weight: .semibold))
         let arrow = NSTextField.label("→", color: Theme.secondaryText)
         for remote in remotes { remotePopup.addItem(withTitle: remote) }
         if let remote = target.remote { remotePopup.selectItem(withTitle: remote) }
@@ -163,7 +163,7 @@ final class PushDialog: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     /// 强制推送前确认（IDEA 同样会提示覆盖远程提交的风险）。
     @objc private func forcePush() {
         guard let options = options(force: true) else { return NSSound.beep() }
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.alertStyle = .critical
         alert.messageText = tr("push.force.confirm.title")
         alert.informativeText = tr("push.force.confirm.message", "\(options.remote)/\(options.remoteBranch)")

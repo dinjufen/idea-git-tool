@@ -259,7 +259,7 @@ final class AIReviewToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDe
         let text = NSMutableAttributedString()
         let body: [NSAttributedString.Key: Any] = [.font: Theme.uiFont, .foregroundColor: Theme.text]
         let secondary: [NSAttributedString.Key: Any] = [.font: Theme.smallFont, .foregroundColor: Theme.secondaryText]
-        let bold: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: Theme.text]
+        let bold: [NSAttributedString.Key: Any] = [.font: Theme.font(ofSize: 13, weight: .semibold), .foregroundColor: Theme.text]
         let mono: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular), .foregroundColor: Theme.text]
 
         if let node = selectedFinding {

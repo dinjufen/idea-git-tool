@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppearanceSetting.current.apply()
+        UIFonts.start()
         // git / ssh 需要凭据时调用本程序弹出输入框（见 AskPass）。
         setAskpassProgram(path: Bundle.main.executablePath)
         GitSettings.apply()
@@ -84,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func presentError(_ error: any Error) {
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.alertStyle = .warning
         alert.messageText = tr("error.title")
         alert.informativeText = errorMessage(error)
@@ -96,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             _ = try gitInfo()
         } catch {
-            let alert = NSAlert()
+            let alert = AppAlert()
             alert.alertStyle = .warning
             alert.messageText = tr("error.title")
             alert.informativeText = errorMessage(error)

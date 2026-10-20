@@ -9,7 +9,7 @@ final class NameDialog: NSObject, NSTextFieldDelegate {
         let checked: Bool
     }
 
-    private let alert = NSAlert()
+    private let alert = AppAlert()
     private let field = NSTextField()
     private let checkbox: NSButton?
     private let errorLabel = NSTextField.label("", font: Theme.smallFont, color: Theme.FileStatus.conflict)

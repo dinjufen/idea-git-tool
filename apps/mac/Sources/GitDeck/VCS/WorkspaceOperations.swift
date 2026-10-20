@@ -49,7 +49,7 @@ final class WorkspaceOperations {
             return nil
         }
         guard let (model, error) = failures.first else { return false }
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.alertStyle = .warning
         alert.messageText = tr("workspace.failedIn", title, workspace.displayName(of: model))
         alert.informativeText = errorMessage(error)
@@ -118,7 +118,7 @@ final class WorkspaceOperations {
     }
 
     private func askPush(_ pending: [(ProjectModel, PushTarget)]) {
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.messageText = tr("workspace.push.title")
         alert.informativeText = tr("workspace.push.message")
         var boxes: [NSButton] = []

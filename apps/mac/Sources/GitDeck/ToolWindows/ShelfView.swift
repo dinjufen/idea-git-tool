@@ -248,7 +248,7 @@ final class ShelfView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let icon = NSImageView()
         switch item {
         case let entry as EntryItem:
-            title = NSTextField.label(entry.entry.name, font: .systemFont(ofSize: 13, weight: .medium))
+            title = NSTextField.label(entry.entry.name, font: Theme.font(ofSize: 13, weight: .medium))
             let count = entry.files.count == 1 ? tr("commit.group.oneFile") : tr("commit.group.files", "\(entry.files.count)")
             detail = NSTextField.label("\(LogDateFormatter.short(entry.entry.time))  \(count)", font: Theme.smallFont, color: Theme.secondaryText)
             icon.image = NSImage(systemSymbolName: "tray.full", accessibilityDescription: nil)

@@ -70,7 +70,7 @@ final class LogSubjectCellView: NSView {
         for label in commit.refs {
             cursor = drawRefLabel(label, at: cursor, rowHeight: h) + 4
         }
-        let font = isHead ? NSFont.systemFont(ofSize: 13, weight: .semibold) : Theme.uiFont
+        let font = isHead ? Theme.font(ofSize: 13, weight: .semibold) : Theme.uiFont
         let attrs: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: Theme.text,
@@ -90,7 +90,7 @@ final class LogSubjectCellView: NSView {
     /// 绘制一个圆角引用标签，返回其右边缘 x 坐标。
     private func drawRefLabel(_ label: RefLabel, at x: CGFloat, rowHeight h: CGFloat) -> CGFloat {
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11, weight: label.isCurrent ? .semibold : .regular),
+            .font: Theme.font(ofSize: 11, weight: label.isCurrent ? .semibold : .regular),
             .foregroundColor: Theme.text,
         ]
         let size = label.name.size(withAttributes: attrs)

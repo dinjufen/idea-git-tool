@@ -14,7 +14,7 @@ enum SuggestionPreview {
         let content = ColoredView(Theme.toolWindowBackground)
         sheet.contentView = content
 
-        let heading = NSTextField.label(tr("ai.apply.title", (path as NSString).lastPathComponent), font: .systemFont(ofSize: 13, weight: .semibold))
+        let heading = NSTextField.label(tr("ai.apply.title", (path as NSString).lastPathComponent), font: Theme.font(ofSize: 13, weight: .semibold))
         let subtitle = NSTextField.label(title, font: Theme.smallFont, color: Theme.secondaryText)
         let diff = DiffView(
             left: DiffSide(title: tr("ai.apply.before"), text: before),

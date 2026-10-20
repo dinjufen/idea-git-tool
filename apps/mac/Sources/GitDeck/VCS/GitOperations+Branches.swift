@@ -28,7 +28,7 @@ extension GitOperations {
     }
 
     func deleteRemoteBranch(_ branch: String) {
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.alertStyle = .warning
         alert.messageText = tr("ops.deleteRemote.title", branch)
         alert.informativeText = tr("ops.deleteRemote.message")

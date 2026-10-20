@@ -88,7 +88,7 @@ final class ToolbarWidget: NSControl {
         setAccessibilityRole(.popUpButton)
         setAccessibilityLabel(tooltip)
 
-        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.font = Theme.font(ofSize: 13, weight: .medium)
         label.textColor = Theme.text
         label.lineBreakMode = .byTruncatingTail
         chevron.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
@@ -140,7 +140,7 @@ final class ToolWindowHeader: ColoredView {
         super.init(Theme.toolWindowBackground)
         translatesAutoresizingMaskIntoConstraints = false
         let label = NSTextField(labelWithString: title)
-        label.font = .systemFont(ofSize: 13, weight: .semibold)
+        label.font = Theme.font(ofSize: 13, weight: .semibold)
         label.textColor = Theme.text
 
         let stack = NSStackView(views: [label, NSView()] + actions)

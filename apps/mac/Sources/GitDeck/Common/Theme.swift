@@ -23,8 +23,13 @@ enum Theme {
         static let renamed = dynamic(light: 0x007878, dark: 0x3A8484)
     }
 
-    @MainActor static let uiFont = NSFont.systemFont(ofSize: 13)
-    @MainActor static let smallFont = NSFont.systemFont(ofSize: 12)
+    /// 界面字体（随 设置 > 通用 > 界面字体 变化）；字号按系统默认 13pt 的设计给出，自定义字号时同步缩放。
+    @MainActor static func font(ofSize size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
+        UIFonts.font(ofSize: size, weight: weight)
+    }
+
+    @MainActor static var uiFont: NSFont { font(ofSize: 13) }
+    @MainActor static var smallFont: NSFont { font(ofSize: 12) }
     @MainActor static let editorFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
     static func dynamic(light: UInt32, dark: UInt32) -> NSColor {

@@ -260,7 +260,7 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         switch rows[row] {
         case let .section(title):
-            let label = NSTextField.label(title, font: .systemFont(ofSize: 11, weight: .semibold), color: Theme.secondaryText)
+            let label = NSTextField.label(title, font: Theme.font(ofSize: 11, weight: .semibold), color: Theme.secondaryText)
             return wrap(label, leading: 12)
         case let .action(title, symbol, shortcut, _):
             return BranchRowView(symbol: symbol, title: title, detail: shortcut, enabled: true)

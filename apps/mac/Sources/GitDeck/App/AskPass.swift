@@ -17,7 +17,7 @@ enum AskPass {
         app.setActivationPolicy(.accessory)
         app.activate()
 
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.messageText = tr("askpass.title")
         alert.informativeText = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         alert.icon = NSImage(systemSymbolName: "key.fill", accessibilityDescription: nil)

@@ -708,7 +708,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
                 guard stale.isEmpty else {
                     self.lineSelections?.remove(stale)
                     self.finishCommitting()
-                    let alert = NSAlert()
+                    let alert = AppAlert()
                     alert.messageText = tr("commit.partial.stale")
                     alert.informativeText = tr("commit.partial.stale.message", stale.joined(separator: "\n"))
                     if let window = self.window { alert.beginSheetModal(for: window, completionHandler: nil) } else { alert.runModal() }
@@ -769,7 +769,7 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
             }
             if let (repository, error) = failure {
                 // 钩子输出等错误信息较长，用对话框完整展示。
-                let alert = NSAlert()
+                let alert = AppAlert()
                 alert.alertStyle = .warning
                 alert.messageText = self.workspace.isMultiRoot
                     ? tr("workspace.failedIn", tr("commit.failed"), self.workspace.displayName(of: repository))

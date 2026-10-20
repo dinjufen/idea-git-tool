@@ -49,7 +49,7 @@ final class FileHistoryView: NSView, NSTableViewDataSource, NSTableViewDelegate 
         scroll.drawsBackground = false
 
         let left = NSView()
-        let title = NSTextField.label(path, font: .systemFont(ofSize: 12, weight: .semibold))
+        let title = NSTextField.label(path, font: Theme.font(ofSize: 12, weight: .semibold))
         for view in [title, scroll, statusLabel] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             left.addSubview(view)

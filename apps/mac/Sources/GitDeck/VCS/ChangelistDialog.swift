@@ -3,7 +3,7 @@ import AppKit
 /// 新建 / 编辑 Changelist：名称（不能与已有列表重名）与说明（IDEA 用作该列表的默认提交信息）。
 @MainActor
 final class ChangelistDialog: NSObject, NSTextFieldDelegate {
-    private let alert = NSAlert()
+    private let alert = AppAlert()
     private let nameField = NSTextField()
     private let commentView = NSTextView()
     private let errorLabel = NSTextField.label("", font: Theme.smallFont, color: Theme.FileStatus.conflict)

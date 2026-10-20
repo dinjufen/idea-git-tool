@@ -63,7 +63,7 @@ final class GitOperations {
     }
 
     func showError(_ title: String, _ error: any Error) {
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.alertStyle = .warning
         alert.messageText = title
         alert.informativeText = errorMessage(error)
@@ -125,7 +125,7 @@ final class GitOperations {
 
     /// IDEA 的 “Git Checkout Problem” 对话框：Smart Checkout 或 Force Checkout。
     private func askCheckoutProblem(_ target: CheckoutTarget, files: [String]) {
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.alertStyle = .warning
         alert.messageText = tr("ops.checkoutProblem.title")
         alert.informativeText = tr("ops.checkoutProblem.message", files.prefix(20).joined(separator: "\n"))
@@ -229,7 +229,7 @@ final class GitOperations {
             case .success:
                 model.post(tr("ops.delete.done", branch))
             case .failure(CoreError.BranchNotFullyMerged):
-                let alert = NSAlert()
+                let alert = AppAlert()
                 alert.alertStyle = .warning
                 alert.messageText = tr("ops.delete.notMerged.title", branch)
                 alert.informativeText = tr("ops.delete.notMerged.message")
@@ -300,7 +300,7 @@ final class GitOperations {
             onConflicts()
             return
         }
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.alertStyle = .warning
         alert.messageText = tr("ops.conflicts.title", operation)
         var text = tr("ops.conflicts.message")
@@ -314,7 +314,7 @@ final class GitOperations {
 
     /// IDEA 的 “Stash Changes” 对话框：消息、保留索引、包含未跟踪文件。`paths` 非空时只储藏这些文件。
     func stashChanges(paths: [String] = []) {
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.messageText = paths.isEmpty ? tr("stash.dialog.title") : tr("stash.dialog.titleSelected", "\(paths.count)")
         alert.informativeText = tr("stash.dialog.message", model.currentBranchTitle)
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
@@ -408,7 +408,7 @@ final class GitOperations {
 
     /// 破坏性操作前的确认对话框。
     func confirm(_ title: String, _ message: String, confirm: String, action: @escaping () -> Void) {
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.alertStyle = .warning
         alert.messageText = title
         alert.informativeText = message
@@ -442,7 +442,7 @@ final class GitOperations {
             completion(GitSettings.updateMethod)
             return
         }
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.messageText = tr("ops.update.title")
         alert.informativeText = tr("ops.update.message")
         let options = RadioOptionsView(options: [
@@ -518,7 +518,7 @@ final class GitOperations {
 
     /// IDEA 的 “Push Rejected” 对话框：远程有本地没有的提交时，建议先更新。
     private func askPushRejected(_ reason: String) {
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.alertStyle = .warning
         alert.messageText = tr("ops.pushRejected.title")
         alert.informativeText = tr("ops.error.pushRejected", reason)

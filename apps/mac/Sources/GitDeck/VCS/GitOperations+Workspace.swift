@@ -9,7 +9,7 @@ extension GitOperations {
     /// IDEA 的 “New Worktree” 对话框：分支（已有分支直接检出，新名称则从 HEAD 新建）与位置。
     func newWorktree() {
         let localBranches = model.branches.filter { $0.kind == .local }.map(\.name)
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.messageText = tr("worktree.new.title")
         alert.informativeText = tr("worktree.new.message")
         let branch = NSComboBox(frame: NSRect(x: 0, y: 0, width: 360, height: 26))
@@ -73,7 +73,7 @@ extension GitOperations {
 
     /// 新建或编辑远程：`existing` 为空时新建。
     func editRemote(_ existing: Remote?, completion: @escaping () -> Void) {
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.messageText = existing == nil ? tr("remotes.add.title") : tr("remotes.edit.title", existing!.name)
         let name = NSTextField(frame: NSRect(x: 0, y: 0, width: 380, height: 24))
         name.placeholderString = tr("remotes.name")

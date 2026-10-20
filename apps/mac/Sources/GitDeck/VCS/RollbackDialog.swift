@@ -4,7 +4,7 @@ import GitDeckCore
 /// IDEA 的 “Rollback Changes” 对话框：勾选要回滚的文件，可选择是否删除新增文件的本地副本。
 @MainActor
 final class RollbackDialog: NSObject {
-    private let alert = NSAlert()
+    private let alert = AppAlert()
     private let changes: [FileChange]
     private var checkboxes: [NSButton] = []
     private let deleteAdded = NSButton(checkboxWithTitle: tr("rollback.deleteAdded"), target: nil, action: nil)

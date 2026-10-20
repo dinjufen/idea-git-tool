@@ -166,7 +166,7 @@ final class MergeWindowController: NSWindowController, NSWindowDelegate {
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
         let leftTitle = NSTextField.label(tr("merge.title.side", labels.ours), font: Theme.smallFont, color: Theme.secondaryText)
-        let centerTitle = NSTextField.label(tr("merge.title.result"), font: .systemFont(ofSize: 12, weight: .semibold))
+        let centerTitle = NSTextField.label(tr("merge.title.result"), font: Theme.font(ofSize: 12, weight: .semibold))
         let rightTitle = NSTextField.label(tr("merge.title.side", labels.theirs), font: Theme.smallFont, color: Theme.secondaryText)
 
         let acceptLeft = NSButton(title: tr("merge.acceptSide", labels.ours), target: self, action: #selector(acceptLeftFile))
@@ -485,7 +485,7 @@ final class MergeWindowController: NSWindowController, NSWindowDelegate {
     @objc private func applyResult() {
         let unresolved = chunks.filter { !$0.isResolved }.count
         guard unresolved > 0 else { return save(content: centerEditor.text) }
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.messageText = tr("merge.unresolved.title")
         alert.informativeText = tr("merge.unresolved.message", "\(unresolved)")
         alert.addButton(withTitle: tr("merge.apply"))
@@ -521,7 +521,7 @@ final class MergeWindowController: NSWindowController, NSWindowDelegate {
                 model.refresh()
                 close()
             case let .failure(error):
-                let alert = NSAlert()
+                let alert = AppAlert()
                 alert.messageText = tr("conflicts.failed")
                 alert.informativeText = errorMessage(error)
                 alert.beginSheetModal(for: window!, completionHandler: nil)
@@ -535,7 +535,7 @@ final class MergeWindowController: NSWindowController, NSWindowDelegate {
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard isModified else { return true }
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.messageText = tr("merge.discard.title")
         alert.informativeText = tr("merge.discard.message")
         alert.addButton(withTitle: tr("merge.discard.confirm"))

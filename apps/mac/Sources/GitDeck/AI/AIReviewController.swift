@@ -94,7 +94,7 @@ final class AIReviewController {
     /// 检查是否已配置模型服务，并在本项目首次发送代码前请用户确认。
     func prepare(allowSkip: Bool = false) -> Readiness {
         guard let (config, apiKey) = AISettings.current() else {
-            let alert = NSAlert()
+            let alert = AppAlert()
             alert.messageText = tr("ai.notConfigured.title")
             alert.informativeText = tr("ai.notConfigured.message")
             alert.addButton(withTitle: tr("ai.notConfigured.open"))
@@ -112,7 +112,7 @@ final class AIReviewController {
         }
         let project = model.rootURL.path
         if !AISettings.hasConsent(project: project, config: config) {
-            let alert = NSAlert()
+            let alert = AppAlert()
             alert.messageText = tr("ai.consent.title", AISettings.host(config.baseUrl))
             alert.informativeText = tr("ai.consent.message", model.projectName, AISettings.host(config.baseUrl))
             alert.addButton(withTitle: tr("ai.consent.allow"))
@@ -330,7 +330,7 @@ final class AIReviewController {
         guard let result else {
             // 失败或取消：失败时询问是否仍然提交。
             guard phase == .failed else { return false }
-            let alert = NSAlert()
+            let alert = AppAlert()
             alert.messageText = tr("ai.precommit.failed")
             alert.informativeText = errorText ?? ""
             alert.addButton(withTitle: tr("ai.precommit.commitAnyway"))
@@ -339,7 +339,7 @@ final class AIReviewController {
         }
         let problems = result.findings.filter { $0.severity != .suggestion }.count
         guard problems > 0 else { return true }
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.messageText = tr("ai.precommit.problems", "\(problems)")
         alert.informativeText = tr("ai.precommit.problems.message")
         alert.addButton(withTitle: tr("ai.precommit.review"))
@@ -390,7 +390,7 @@ final class AIReviewController {
             return message
         case let .failure(error):
             if case CoreError.AiCancelled = error { return nil }
-            let alert = NSAlert()
+            let alert = AppAlert()
             alert.alertStyle = .warning
             alert.messageText = tr("ai.message.failed")
             alert.informativeText = errorMessage(error)

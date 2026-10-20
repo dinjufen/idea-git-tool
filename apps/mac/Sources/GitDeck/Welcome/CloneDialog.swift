@@ -4,7 +4,7 @@ import GitDeckCore
 /// IDEA 的 “Get from Version Control”：输入仓库地址与本地目录，克隆后打开项目。
 @MainActor
 final class CloneDialog: NSObject, NSTextFieldDelegate {
-    private let alert = NSAlert()
+    private let alert = AppAlert()
     private let urlField = NSTextField()
     private let directoryField = NSTextField()
     private let errorLabel = NSTextField.label("", font: Theme.smallFont, color: Theme.FileStatus.conflict)

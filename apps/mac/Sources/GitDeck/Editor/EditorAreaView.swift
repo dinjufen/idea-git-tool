@@ -491,7 +491,7 @@ final class EditorAreaView: NSView {
 
     private func close(_ tab: any EditorTabContent) {
         if let doc = tab as? Document, doc.isModified {
-            let alert = NSAlert()
+            let alert = AppAlert()
             alert.messageText = tr("editor.unsaved.title", doc.url.lastPathComponent)
             alert.addButton(withTitle: tr("editor.unsaved.save"))
             alert.addButton(withTitle: tr("editor.unsaved.discard"))

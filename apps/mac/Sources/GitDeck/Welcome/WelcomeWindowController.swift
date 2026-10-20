@@ -40,9 +40,9 @@ final class WelcomeWindowController: NSWindowController, NSTableViewDataSource, 
         // 左侧栏：产品名与版本、导航。
         let sidebar = ColoredView(Theme.toolWindowBackground)
         sidebar.translatesAutoresizingMaskIntoConstraints = false
-        let name = NSTextField.label(L10n.productName, font: .systemFont(ofSize: 15, weight: .semibold))
+        let name = NSTextField.label(L10n.productName, font: Theme.font(ofSize: 15, weight: .semibold))
         let version = NSTextField.label(tr("welcome.version", coreVersion()), font: Theme.smallFont, color: Theme.secondaryText)
-        let nav = NSTextField.label(tr("welcome.nav.projects"), font: .systemFont(ofSize: 13, weight: .medium))
+        let nav = NSTextField.label(tr("welcome.nav.projects"), font: Theme.font(ofSize: 13, weight: .medium))
         let navBackground = ColoredView(Theme.selectedStripeButton)
         navBackground.translatesAutoresizingMaskIntoConstraints = false
         navBackground.layer?.cornerRadius = 6
@@ -171,7 +171,7 @@ final class WelcomeWindowController: NSWindowController, NSTableViewDataSource, 
         let cell = NSView()
         let badge = ProjectBadge()
         badge.text = ProjectBadge.initials(of: name)
-        let title = NSTextField.label(name, font: .systemFont(ofSize: 13, weight: .semibold))
+        let title = NSTextField.label(name, font: Theme.font(ofSize: 13, weight: .semibold))
         let detail = NSTextField.label((path as NSString).abbreviatingWithTildeInPath, font: Theme.smallFont, color: Theme.secondaryText)
         let missing = !FileManager.default.fileExists(atPath: path)
         if missing { title.textColor = Theme.secondaryText }

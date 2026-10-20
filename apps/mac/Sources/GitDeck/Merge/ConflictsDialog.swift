@@ -148,7 +148,7 @@ final class ConflictsDialog: NSObject, NSTableViewDataSource, NSTableViewDelegat
             }.value
             isBusy = false
             if case let .failure(error) = result {
-                let alert = NSAlert()
+                let alert = AppAlert()
                 alert.messageText = tr("conflicts.failed")
                 alert.informativeText = errorMessage(error)
                 alert.beginSheetModal(for: panel, completionHandler: nil)

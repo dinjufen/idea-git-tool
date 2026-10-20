@@ -96,7 +96,7 @@ final class CommitDetailsView: NSView, NSTableViewDataSource, NSTableViewDelegat
         let lines = d.message.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
         let subject = lines.first.map(String.init) ?? ""
         result.append(NSAttributedString(string: subject + "\n", attributes: [
-            .font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: Theme.text,
+            .font: Theme.font(ofSize: 13, weight: .semibold), .foregroundColor: Theme.text,
         ]))
         if lines.count > 1 {
             let rest = lines[1].trimmingCharacters(in: .newlines)

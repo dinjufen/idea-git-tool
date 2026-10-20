@@ -29,7 +29,7 @@ final class ListSheet: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         let content = ColoredView(Theme.toolWindowBackground)
         panel.contentView = content
 
-        let heading = NSTextField.label(title, font: .systemFont(ofSize: 13, weight: .semibold))
+        let heading = NSTextField.label(title, font: Theme.font(ofSize: 13, weight: .semibold))
         let subtitle = NSTextField.label(message, font: Theme.smallFont, color: Theme.secondaryText)
         table.addTableColumn(NSTableColumn(identifier: .init("item")))
         table.headerView = nil
@@ -105,7 +105,7 @@ final class ListSheet: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         let views: [NSView]
         switch items[row] {
         case let .header(text):
-            views = [NSTextField.label(text, font: .systemFont(ofSize: 12, weight: .semibold), color: Theme.secondaryText)]
+            views = [NSTextField.label(text, font: Theme.font(ofSize: 12, weight: .semibold), color: Theme.secondaryText)]
         case let .row(item):
             let title = NSTextField.label(item.title)
             title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)

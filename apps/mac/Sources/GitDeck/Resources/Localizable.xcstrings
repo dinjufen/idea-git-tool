@@ -10632,13 +10632,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "UI font"
+            "value": "UI font:"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "界面字体"
+            "value": "界面字体："
           }
         }
       }
@@ -10673,6 +10673,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "作用于菜单、工具窗口、树和对话框；编辑器字体在“编辑器”页中设置。"
+          }
+        }
+      }
+    },
+    "settings.uiFont.system": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System font (SF Pro)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统字体（SF Pro）"
           }
         }
       }

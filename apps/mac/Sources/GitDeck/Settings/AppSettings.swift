@@ -116,6 +116,8 @@ enum SettingsForm {
 
     /// 设置窗口按每页内容的大小调整（工具栏分页切换时动画过渡）。
     static func fitPreferredSize(_ controller: NSViewController) {
+        // 先换成界面字体，再按其计算大小。
+        UIFonts.apply(to: controller.view)
         controller.view.layoutSubtreeIfNeeded()
         controller.preferredContentSize = controller.view.fittingSize
     }

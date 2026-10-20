@@ -397,6 +397,13 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         }
         if let action = debugAction, !model.isRefreshing, !model.branches.isEmpty {
             debugAction = nil
+            // `-debug.uiFont <字体族|system|off>` 与 `-debug.uiFontSize <字号>`：在窗口显示后修改界面字体，验证立即生效（off 恢复默认）。
+            if let family = UserDefaults.standard.string(forKey: "debug.uiFont") {
+                UIFontSettings.useCustom = family != "off"
+                if family != "off" { UIFontSettings.family = family == "system" ? nil : family }
+                let size = UserDefaults.standard.double(forKey: "debug.uiFontSize")
+                if size > 0 { UIFontSettings.size = size }
+            }
             scheduleDebugSnapshot()
             switch action {
             case "branches":
@@ -418,6 +425,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
                     }
                 }
             case "console": showGitConsole(nil)
+            case "projectMenu":
+                // 弹出菜单（验证界面字体对菜单生效）；菜单跟踪期间由外部截屏。
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.showProjectMenu(nil) }
             case "aiReview":
                 // `-debug.aiApply YES`：评审结束后选中第一个发现、跳转到源码并打开应用建议的预览。
                 aiReview.start(scope: .localChanges(paths: []), title: tr("ai.scope.local", "\(model.status.changes.count)")) { [weak self] result in
@@ -554,7 +564,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         guard let updated = applyReviewSuggestion(
             content: current, line: finding.line, original: suggestion.original, replacement: suggestion.replacement
         ) else {
-            let alert = NSAlert()
+            let alert = AppAlert()
             alert.messageText = tr("ai.apply.notFound")
             alert.informativeText = tr("ai.apply.notFound.message")
             alert.beginSheetModal(for: window)

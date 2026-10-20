@@ -275,7 +275,7 @@ final class FileCellView: NSTableCellView {
     func configure(icon image: NSImage?, name: String, detail: String?, color: NSColor, bold: Bool = false, strikethrough: Bool = false) {
         icon.image = image
         icon.isHidden = image == nil
-        let font = bold ? NSFont.systemFont(ofSize: 13, weight: .semibold) : Theme.uiFont
+        let font = bold ? Theme.font(ofSize: 13, weight: .semibold) : Theme.uiFont
         var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
         if strikethrough { attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
         nameLabel.attributedStringValue = NSAttributedString(string: name, attributes: attrs)

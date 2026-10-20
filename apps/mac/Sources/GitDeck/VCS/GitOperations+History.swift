@@ -47,7 +47,7 @@ extension GitOperations {
 
     /// IDEA 的 “Git Reset” 对话框：选择 Soft / Mixed / Hard / Keep。
     func resetDialog(to hash: String, subject: String) {
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.messageText = tr("reset.title", model.currentBranchTitle, String(hash.prefix(8)))
         alert.informativeText = subject
         let modes: [(ResetMode, String, String)] = [
@@ -86,7 +86,7 @@ extension GitOperations {
 
     /// IDEA 的 “Edit Commit Message”：多行编辑框，已推送时先确认。
     func editMessage(_ hash: String, current: String) {
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.messageText = tr("editMessage.title", String(hash.prefix(8)))
         let scroll = NSTextView.scrollableTextView()
         scroll.frame = NSRect(x: 0, y: 0, width: 420, height: 140)
@@ -163,7 +163,7 @@ extension GitOperations {
     /// IDEA 的 “Create New Tag” 对话框：名称 + 可选说明（填写说明则创建附注标签）。
     func newTag(at target: String?) {
         let existing = Set(model.tags.map(\.name))
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.messageText = tr("tag.new.title")
         alert.informativeText = target.map { tr("tag.new.on", String($0.prefix(8))) } ?? tr("tag.new.onHead")
         let name = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
@@ -213,7 +213,7 @@ extension GitOperations {
         Task {
             let remotes = await Task.detached { (try? repository.remotes()) ?? [] }.value
             guard let remote = remotes.first(where: { $0.name == "origin" }) ?? remotes.first else {
-                let alert = NSAlert()
+                let alert = AppAlert()
                 alert.messageText = tr("tag.push.failed")
                 alert.informativeText = tr("push.noRemote")
                 return present(alert)

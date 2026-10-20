@@ -167,7 +167,7 @@ final class InteractiveRebaseDialog: NSObject, NSTableViewDataSource, NSTableVie
     }
 
     private func promptMessage(for index: Int, initial: String, completion: @escaping (String) -> Void) {
-        let alert = NSAlert()
+        let alert = AppAlert()
         alert.messageText = tr("rebase.message.title", String(rows[index].commit.hash.prefix(8)))
         let scroll = NSTextView.scrollableTextView()
         scroll.frame = NSRect(x: 0, y: 0, width: 420, height: 140)
@@ -245,7 +245,7 @@ final class InteractiveRebaseDialog: NSObject, NSTableViewDataSource, NSTableVie
         case "action":
             text = Self.title(of: item.action)
             color = Self.color(of: item.action)
-            font = .systemFont(ofSize: 12, weight: .semibold)
+            font = Theme.font(ofSize: 12, weight: .semibold)
         case "hash":
             text = String(item.commit.hash.prefix(8))
             color = Theme.secondaryText

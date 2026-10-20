@@ -155,7 +155,7 @@ final class WorktreesView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         case "branch":
             text = worktree.branch ?? tr("worktree.detached")
             color = Theme.text
-            if worktree.isCurrent { font = .systemFont(ofSize: 13, weight: .semibold) }
+            if worktree.isCurrent { font = Theme.font(ofSize: 13, weight: .semibold) }
             if worktree.isMain { text += "  " + tr("worktree.main") }
         case "path":
             text = (worktree.path as NSString).abbreviatingWithTildeInPath

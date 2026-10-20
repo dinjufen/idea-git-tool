@@ -90,7 +90,7 @@ final class ConflictResolver {
                 }
                 #endif
             case let .failure(error):
-                let alert = NSAlert()
+                let alert = AppAlert()
                 alert.messageText = tr("conflicts.failed")
                 alert.informativeText = errorMessage(error)
                 if let window { alert.beginSheetModal(for: window, completionHandler: nil) } else { alert.runModal() }

@@ -20,7 +20,7 @@ final class RepositoriesDialog: NSObject, NSTableViewDataSource, NSTableViewDele
         let content = ColoredView(Theme.toolWindowBackground)
         panel.contentView = content
 
-        let heading = NSTextField.label(tr("repositories.title"), font: .systemFont(ofSize: 13, weight: .semibold))
+        let heading = NSTextField.label(tr("repositories.title"), font: Theme.font(ofSize: 13, weight: .semibold))
         for (id, title, width) in [("name", tr("repositories.column.name"), 180.0), ("branch", tr("repositories.column.branch"), 140.0), ("path", tr("repositories.column.path"), 260.0)] {
             let column = NSTableColumn(identifier: .init(id))
             column.title = title
