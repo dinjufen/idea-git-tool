@@ -178,7 +178,7 @@ scripts/xcstrings-to-resw.*   由 Localizable.xcstrings 生成 .resw（保持单
 7. **W6**：二期功能，包括交互式 Rebase、Cherry-pick、Revert、Reset、Tags、Remotes、Worktrees、Submodules、Patch、Console。
 8. **W7**：AI 评审与设置窗口。
 9. **W8**：多仓库项目。
-10. **W9**：打包（MSIX x64 / arm64）、签名（需要证书，与用户确认）。
+10. **W9**：打包。已按第 15 项决策改为自包含发布 + Inno Setup 安装程序（`scripts/package-win.ps1`，`-Config Debug` 生成可与正式版并存的调试版安装包）；MSIX 与代码签名等有证书后再做。
 
 ## 10. 每批提交前的检查清单
 

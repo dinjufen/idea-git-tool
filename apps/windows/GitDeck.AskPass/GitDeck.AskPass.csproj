@@ -13,6 +13,8 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <ApplicationIcon>../GitDeck/Assets/GitDeck.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- 只发布界面支持的语言（英文与简体中文）的 .NET 资源。 -->
+    <SatelliteResourceLanguages>en;zh-Hans</SatelliteResourceLanguages>
     <!-- Application.SetColorMode（跟随系统深色模式）在 .NET 中仍标记为实验性 API。 -->
     <NoWarn>$(NoWarn);WFO5001</NoWarn>
   </PropertyGroup>
