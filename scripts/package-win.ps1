@@ -5,16 +5,18 @@
 #   build/windows/publish/        自包含发布目录（主程序 + askpass + 核心库）
 #   build/windows/GitDeck-<版本>-x64-setup.exe   安装程序
 #
-# 用法：scripts/package-win.ps1 [-Config Release|Debug] [-SkipCore]
+# 用法：scripts/package-win.ps1 [-Config Release|Debug] [-SkipCore] [-SkipEditor]
 #   -Config Debug  生成调试版安装程序（数据目录为 GitDeck.debug，可在开发机上试装而不影响正式版）
 #   -SkipCore      跳过 Rust 核心的构建（已用 build-core-win.ps1 构建过同一配置时）
+#   -SkipEditor    跳过编辑器组件 WinUIEdit 的编译（已用 build-editor-win.ps1 编译过时）
 #
 # 需要 Inno Setup 6（ISCC.exe）：默认在 %LOCALAPPDATA%\Programs\Inno Setup 6 或 Program Files 下查找，
 # 也可以用环境变量 ISCC 指定。
 param(
     [ValidateSet('Release', 'Debug')]
     [string]$Config = 'Release',
-    [switch]$SkipCore
+    [switch]$SkipCore,
+    [switch]$SkipEditor
 )
 $ErrorActionPreference = 'Stop'
 
@@ -47,6 +49,10 @@ if (-not $SkipCore) {
     Invoke-Checked pwsh @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'build-core-win.ps1'), $Config.ToLowerInvariant())
 }
 
+if (-not $SkipEditor) {
+    Invoke-Checked pwsh @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'build-editor-win.ps1'))
+}
+
 foreach ($dir in @($Publish, $AskPassPublish)) {
     if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
 }
@@ -76,7 +82,7 @@ Get-ChildItem $AskPassPublish -Recurse -File | ForEach-Object {
         Copy-Item $_.FullName $target
     }
 }
-foreach ($required in @('GitDeck.exe', 'GitDeck.AskPass.exe', 'gitdeck_core.dll', 'GitDeck.pri', 'App.xbf')) {
+foreach ($required in @('GitDeck.exe', 'GitDeck.AskPass.exe', 'gitdeck_core.dll', 'GitDeck.pri', 'App.xbf', 'WinUIEditor.dll', 'WinUIEditor.pri', 'WinUIEditorCsWinRT.dll')) {
     if (-not (Test-Path (Join-Path $Publish $required))) { throw "发布目录缺少 $required" }
 }
 # 调试符号不随安装包分发。

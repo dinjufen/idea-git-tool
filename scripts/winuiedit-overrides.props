@@ -1,0 +1,13 @@
+<Project>
+  <!--
+    编译 vendored WinUIEdit 时附加的设置（由 scripts/build-editor-win.ps1 通过 ForceImportBeforeCppTargets 引入，不修改上游工程）：
+    较新的 MSVC 不再支持 C++/WinRT 在 C++17 下使用的实验性协程（/await），改用 C++20 标准协程；
+    Scintilla 中的 u8 字面量按 char 处理（/Zc:char8_t-），与 C++17 下的行为一致。
+  -->
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>%(AdditionalOptions) /Zc:char8_t-</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+</Project>

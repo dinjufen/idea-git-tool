@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    编辑器组件 WinUIEdit 的 C# 投影（见 docs/DECISIONS.md 第 14 项）：由 vendored 源码编译出的 WinUIEditor.winmd
+    用 CsWinRT 生成，代替 NuGet 包中的 WinUIEditorCsWinRT.dll。原生组件 WinUIEditor.dll / .pri 随本项目复制到主程序目录。
+    需要先运行 scripts/build-editor-win.ps1。
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Nullable>enable</Nullable>
+    <!-- 生成的投影代码中有全小写的类型名。 -->
+    <NoWarn>$(NoWarn);CS8981</NoWarn>
+    <AssemblyName>WinUIEditorCsWinRT</AssemblyName>
+    <RootNamespace>WinUIEditor</RootNamespace>
+    <CsWinRTIncludes>WinUIEditor</CsWinRTIncludes>
+    <!-- 只为 WinUIEditor 生成投影；引用的 Windows 类型取自本机系统元数据，不要求安装特定版本的 Windows SDK。 -->
+    <CsWinRTWindowsMetadata>local</CsWinRTWindowsMetadata>
+    <!-- 原生组件只编译 Release 版（编辑器组件一般不需要调试版）。 -->
+    <WinUIEditorBin>$(MSBuildThisFileDirectory)../Vendor/WinUIEdit/_buildWinUI3/x64/Release/WinUIEditor/bin/WinUIEditor/</WinUIEditorBin>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.CsWinRT" Version="2.2.0" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <CsWinRTInputs Include="$(WinUIEditorBin)WinUIEditor.winmd" />
+    <Content Include="$(WinUIEditorBin)WinUIEditor.dll;$(WinUIEditorBin)WinUIEditor.pri" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <Content Include="$(WinUIEditorBin)WinUIEditor/Themes/Generic.xaml" Link="WinUIEditor/Themes/Generic.xaml" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <Target Name="CheckWinUIEditor" BeforeTargets="BeforeBuild" Condition="!Exists('$(WinUIEditorBin)WinUIEditor.winmd')">
+    <Error Text="找不到 WinUIEditor.winmd，请先运行 scripts/build-editor-win.ps1" />
+  </Target>
+
+</Project>

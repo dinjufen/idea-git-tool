@@ -24,12 +24,12 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
-    <!-- 编辑器组件（docs/DECISIONS.md 第 14 项）。源码在 Vendor/WinUIEdit；在能从源码编译之前先引用同一版本的 NuGet 包。 -->
-    <PackageReference Include="WinUIEdit" Version="0.0.5-prerelease" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../GitDeck.Core/GitDeck.Core.csproj" />
+    <!-- 编辑器组件（docs/DECISIONS.md 第 14 项）：从 Vendor/WinUIEdit 源码编译，C# 投影见 GitDeck.Editor。 -->
+    <ProjectReference Include="../GitDeck.Editor/GitDeck.Editor.csproj" />
     <!-- askpass 程序与主程序放在同一目录（核心通过 GIT_ASKPASS / SSH_ASKPASS 调用它）。 -->
     <ProjectReference Include="../GitDeck.AskPass/GitDeck.AskPass.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
