@@ -6,6 +6,7 @@
 
 ```
 core/gitdeck-core/     Rust 共享核心：git CLI 调用与解析（UniFFI 导出给 Swift / C#）
+apps/windows/          Windows 客户端（C# + WinUI 3，开发中）
 core/uniffi-bindgen/   绑定生成工具
 apps/mac/              macOS 客户端（Swift + AppKit，SwiftPM 包）
 apps/mac/Vendor/       第三方源码的 vendored 副本（各自保留 LICENSE，改动说明见其 Package.swift）
@@ -32,6 +33,22 @@ open build/debug/GitDeck.app
 ```
 
 发布构建：`scripts/build-mac-app.sh release`。
+
+## 环境要求（Windows 开发）
+
+- Windows 10 1809+ x64
+- Rust stable（MSVC 工具链）、Git for Windows 2.30+、.NET 10 SDK
+- Visual Studio 2022 或更新版本（“使用 C++ 的桌面开发”与“.NET 桌面开发”）
+
+## 构建与运行（Windows）
+
+```powershell
+scripts/build-core-win.ps1
+dotnet build apps/windows/GitDeck.sln
+dotnet run --project apps/windows/GitDeck.CoreSmoke -- <仓库路径>
+```
+
+`build-core-win.ps1` 编译核心并用 `uniffi-bindgen-cs` 生成 C# 绑定（首次运行会把它安装到 `build/tools`）。
 
 ## 测试
 

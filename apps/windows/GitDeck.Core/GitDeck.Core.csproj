@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Rust 核心的 C# 绑定。Generated/ 与 Native/ 由 scripts/build-core-win.ps1 生成。 -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>GitDeck.Core</RootNamespace>
+    <!-- 生成的绑定代码不受本项目的警告规则约束。 -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="Native/win-x64/gitdeck_core.dll" Condition="Exists('Native/win-x64/gitdeck_core.dll')">
+      <Link>gitdeck_core.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+  </ItemGroup>
+
+  <Target Name="CheckGeneratedBindings" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('Generated/gitdeck_core.cs')"
+           Text="缺少 C# 绑定，请先运行 scripts/build-core-win.ps1" />
+  </Target>
+
+</Project>

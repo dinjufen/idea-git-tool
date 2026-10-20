@@ -14,3 +14,13 @@ xcuserdata/
 
 # macOS
 .DS_Store
+
+# 生成物（由 scripts/build-core-win.ps1 生成）
+/apps/windows/GitDeck.Core/Generated/
+/apps/windows/GitDeck.Core/Native/
+
+# .NET
+bin/
+obj/
+*.user
+.vs/

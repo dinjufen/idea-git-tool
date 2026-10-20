@@ -1,0 +1,5 @@
+# 绑定生成配置。Swift 使用默认值；C# 由 uniffi-bindgen-cs 读取 [bindings.csharp]。
+[bindings.csharp]
+namespace = "GitDeck.Core"
+access_modifier = "public"
+global_methods_class_name = "CoreApi"
