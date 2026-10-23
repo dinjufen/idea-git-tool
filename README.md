@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md)
 
 A cross-platform native Git client modeled on the Git tooling in JetBrains IDEA. Interaction and layout follow the IDEA New UI, it includes an editor with syntax highlighting, and it can review code with AI. The macOS app is Swift + AppKit, the Windows app is C# + WinUI 3, and all git operations live in a shared Rust core.
 
-![Git Log and the Commit tool window](docs/screenshots/log.png)
+![Git Log and the Commit tool window](docs/screenshots/log-en.png)
 
 ## Download
 
@@ -32,23 +32,23 @@ A cross-platform native Git client modeled on the Git tooling in JetBrains IDEA.
 
 ## Screenshots
 
-The screenshots below are from the Windows app with the Chinese UI.
+The screenshots below are from the Windows app.
 
 **Side-by-side diff**: review local changes from the Commit tool window and choose which hunks to commit.
 
-![Side-by-side diff](docs/screenshots/diff.png)
+![Side-by-side diff](docs/screenshots/diff-en.png)
 
 **Three-way merge**: changes from each side on the left and right, the merge result in the middle.
 
-![Three-way merge](docs/screenshots/merge.png)
+![Three-way merge](docs/screenshots/merge-en.png)
 
 **Annotate**: the gutter shows the commit and author that last changed each line.
 
-![Annotate](docs/screenshots/annotate.png)
+![Annotate](docs/screenshots/annotate-en.png)
 
 **Dark theme**
 
-![Dark theme](docs/screenshots/dark.png)
+![Dark theme](docs/screenshots/dark-en.png)
 
 ## Repository layout
 
