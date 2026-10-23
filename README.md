@@ -1,6 +1,6 @@
 # GitDeck（代号）
 
-[English](README.md) | 简体中文
+[English](README.en.md) | 简体中文
 
 对齐 JetBrains IDEA Git 功能的跨平台原生 Git 客户端：交互与界面以 IDEA New UI 为基准，内置带语法高亮的编辑器，并支持 AI 代码评审。macOS 用 Swift + AppKit，Windows 用 C# + WinUI 3，git 操作统一在 Rust 共享核心中实现。
 

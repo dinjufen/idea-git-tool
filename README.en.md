@@ -1,6 +1,6 @@
 # GitDeck (codename)
 
-English | [简体中文](README.zh-CN.md)
+English | [简体中文](README.md)
 
 A cross-platform native Git client modeled on the Git tooling in JetBrains IDEA. Interaction and layout follow the IDEA New UI, it includes an editor with syntax highlighting, and it can review code with AI. The macOS app is Swift + AppKit, the Windows app is C# + WinUI 3, and all git operations live in a shared Rust core.
 
