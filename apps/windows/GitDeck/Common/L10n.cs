@@ -32,6 +32,18 @@ public static partial class L10n
         var setting = overrideLanguage ?? LanguageSetting;
         Language = setting is English or ChineseSimplified ? setting : SystemLanguage();
         (_strings, _fallback) = Load(Language);
+        ApplyFormattingCulture();
+    }
+
+    /// 日期与数字格式跟随界面语言：区域格式的语言与界面语言相同时保留用户的区域设置，
+    /// 否则改用界面语言的默认区域（例如区域为 zh-CN、界面为英文时，日期不再显示成“2026年10月23日”）。
+    private static void ApplyFormattingCulture()
+    {
+        var prefix = Language == ChineseSimplified ? "zh" : "en";
+        if (CultureInfo.CurrentCulture.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return;
+        var culture = new CultureInfo(Language == ChineseSimplified ? "zh-CN" : "en-US");
+        CultureInfo.CurrentCulture = culture;
+        CultureInfo.DefaultThreadCurrentCulture = culture;
     }
 
     /// 查找文案；参数替换 `%1$@`、`%2$@` …（以及按顺序的 `%@`）。
