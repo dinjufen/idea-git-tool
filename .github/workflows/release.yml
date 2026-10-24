@@ -1,0 +1,125 @@
+# 发布：推送 v* 标签时在 GitHub 的 Windows 与 macOS 云主机上打包，并把安装包上传到该标签的 Release（见 docs/DECISIONS.md 第 13 项）。
+# 手动运行（Actions 页面的 Run workflow）只打包、不发布，产物可在运行记录中下载。
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+
+      - name: Package
+        shell: pwsh
+        run: scripts/package-win.ps1 -Config Release
+
+      - name: Rename installer
+        id: name
+        shell: pwsh
+        run: |
+          $label = if ('${{ github.ref_type }}' -eq 'tag') { '${{ github.ref_name }}'.TrimStart('v') } else { 'dev-' + '${{ github.sha }}'.Substring(0, 7) }
+          $target = "build/windows/GitDeck-$label-windows-x64-setup.exe"
+          Move-Item (Get-ChildItem build/windows -Filter 'GitDeck-*-x64-setup.exe' | Select-Object -First 1).FullName $target
+          "file=$target" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: ${{ steps.name.outputs.file }}
+          if-no-files-found: error
+
+  macos:
+    name: macOS arm64
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Rust target
+        run: rustup target add aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos
+
+      - name: Build app
+        run: scripts/build-mac-app.sh release
+
+      - name: Zip app
+        id: name
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then label="${GITHUB_REF_NAME#v}"; else label="dev-${GITHUB_SHA::7}"; fi
+          file="build/GitDeck-$label-macos-arm64.zip"
+          ditto -c -k --keepParent build/release/GitDeck.app "$file"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: ${{ steps.name.outputs.file }}
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    if: github.ref_type == 'tag'
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cat > notes.md <<'EOF'
+          ## 下载 / Downloads
+
+          - **Windows 10/11 (x64)**：`*-windows-x64-setup.exe`，按用户安装，无需管理员权限 / per-user install, no admin rights needed
+          - **macOS 15+ (Apple silicon)**：`*-macos-arm64.zip`，解压后拖到“应用程序”/ unzip and move to Applications
+
+          安装包未签名：Windows 可能出现 SmartScreen 提示（“更多信息 → 仍要运行”）；macOS 首次打开请右键选择“打开”。
+          The packages are not code-signed: Windows may show a SmartScreen prompt ("More info → Run anyway"); on macOS, right-click the app and choose "Open" the first time.
+
+          需要已安装 Git / Requires Git to be installed.
+          EOF
+          prerelease=""
+          case "$TAG" in *-*) prerelease="--prerelease" ;; esac
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "GitDeck ${TAG#v}" --notes-file notes.md --generate-notes $prerelease
+          fi
