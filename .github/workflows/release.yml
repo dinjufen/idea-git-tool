@@ -15,8 +15,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  version:
+    name: Check version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 发布的标签必须与 Cargo.toml 中的版本号一致（Windows 与 mac 端的版本号都取自这里）。
+      - name: Tag matches Cargo.toml
+        if: github.ref_type == 'tag'
+        run: |
+          version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::标签 $GITHUB_REF_NAME 与 Cargo.toml 的版本 $version 不一致：请先把 Cargo.toml 改为 ${GITHUB_REF_NAME#v} 并提交，再打标签"
+            exit 1
+          fi
+
   windows:
     name: Windows x64
+    needs: version
     runs-on: windows-latest
     timeout-minutes: 120
     steps:
@@ -56,6 +72,7 @@ jobs:
 
   macos:
     name: macOS arm64
+    needs: version
     runs-on: macos-latest
     timeout-minutes: 90
     steps:

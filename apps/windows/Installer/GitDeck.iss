@@ -1,5 +1,5 @@
 ; GitDeck 的 Windows 安装程序（Inno Setup 6，见 docs/DECISIONS.md 第 15 项）。
-; 由 scripts/package-win.ps1 调用，传入 AppVersion、SourceDir（自包含发布目录）、OutputDir、RepoRoot；
+; 由 scripts/package-win.ps1 调用，传入 AppVersion（完整版本号）、AppNumericVersion（数字部分）、SourceDir（自包含发布目录）、OutputDir、RepoRoot；
 ; 定义 DebugBuild 时生成调试版（独立的 AppId 与安装目录，可与正式版同时安装）。
 ;
 ; 按用户安装到 %LOCALAPPDATA%\Programs\GitDeck，无需管理员权限。卸载只删除程序文件，
@@ -28,7 +28,7 @@ AppId={{{#AppIdGuid}}
 AppName={#DisplayName}
 AppVersion={#AppVersion}
 AppVerName={#DisplayName} {#AppVersion}
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#AppNumericVersion}
 UninstallDisplayName={#DisplayName}
 UninstallDisplayIcon={app}\GitDeck.exe
 DefaultDirName={localappdata}\Programs\{#InstallFolder}

@@ -19,8 +19,10 @@ public static class AppInfo
     /// `%LOCALAPPDATA%\GitDeck`（调试版为 `GitDeck.debug`）。
     public static string DataDirectory { get; } = CreateDataDirectory();
 
+    /// 版本号（与 Cargo.toml 一致，可带预发布后缀，如 0.2.0-beta）；去掉编译器附加的 `+提交哈希`。
     public static string Version =>
-        Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+        (Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+         ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0").Split('+')[0];
 
     public static string AppDirectory => AppContext.BaseDirectory;
 

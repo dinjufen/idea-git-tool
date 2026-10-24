@@ -34,6 +34,8 @@ function Invoke-Checked {
 
 # 版本号与 mac 端一致，取自 Cargo.toml。
 $Version = (Select-String -Path (Join-Path $Root 'Cargo.toml') -Pattern '^version\s*=\s*"(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+# Windows 的文件版本只能是数字：预发布版本（如 0.2.0-beta）的文件版本取数字部分，显示的版本仍为完整版本号。
+$NumericVersion = ($Version -split '[-+]')[0]
 Write-Host "==> GitDeck $Version ($Config)"
 
 $Iscc = if ($env:ISCC) { $env:ISCC } else {
@@ -90,7 +92,7 @@ Get-ChildItem $Publish -Recurse -Filter *.pdb | Remove-Item -Force
 
 Write-Host '==> Inno Setup'
 $Iss = Join-Path $Apps 'Installer/GitDeck.iss'
-$defines = @("/DAppVersion=$Version", "/DSourceDir=$Publish", "/DOutputDir=$Out", "/DRepoRoot=$Root")
+$defines = @("/DAppVersion=$Version", "/DAppNumericVersion=$NumericVersion", "/DSourceDir=$Publish", "/DOutputDir=$Out", "/DRepoRoot=$Root")
 if ($Config -eq 'Debug') { $defines += '/DDebugBuild' }
 Invoke-Checked $Iscc (@('/Q') + $defines + @($Iss))
 Get-ChildItem $Out -Filter 'GitDeck-*-setup.exe' | ForEach-Object { Write-Host "    $($_.FullName)" }
