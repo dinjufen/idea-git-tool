@@ -8,11 +8,13 @@
 
 ## 下载
 
-**Windows x64**：从 [Releases](https://github.com/dinjufen/idea-git-tool/releases/latest) 下载 `GitDeck-<版本>-x64-setup.exe` 运行即可。按用户安装到 `%LOCALAPPDATA%\Programs\GitDeck`，无需管理员权限。
+**Windows x64**：从 [Releases](https://github.com/dinjufen/idea-git-tool/releases/latest) 下载 `GitDeck-<版本>-windows-x64-setup.exe` 运行即可。按用户安装到 `%LOCALAPPDATA%\Programs\GitDeck`，无需管理员权限。
 
 - 需要 Windows 10 1809+ 和 [Git for Windows](https://git-scm.com/download/win) 2.30+（GitDeck 不内置 git，找不到时欢迎页会提示，也可以在设置中指定路径）。
 - 安装包暂未签名，SmartScreen 提示时选择“仍要运行”。
 - 卸载只删除程序文件，设置（`%LOCALAPPDATA%\GitDeck`）与凭据管理器中的 API Key 会保留。
+
+**macOS（Apple 芯片，macOS 15+）**：从 [Releases](https://github.com/dinjufen/idea-git-tool/releases/latest) 下载 `GitDeck-<版本>-macos-arm64.zip`，解压后把 GitDeck 拖到“应用程序”。应用暂未签名和公证，首次打开请右键选择“打开”。
 
 **macOS**（Apple Silicon，macOS 15+）：暂未提供安装包，需从源码构建，见下文。
 

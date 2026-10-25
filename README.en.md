@@ -8,11 +8,13 @@ A cross-platform native Git client modeled on the Git tooling in JetBrains IDEA.
 
 ## Download
 
-**Windows x64**: download `GitDeck-<version>-x64-setup.exe` from [Releases](https://github.com/dinjufen/idea-git-tool/releases/latest) and run it. It installs per user to `%LOCALAPPDATA%\Programs\GitDeck` and needs no admin rights.
+**Windows x64**: download `GitDeck-<version>-windows-x64-setup.exe` from [Releases](https://github.com/dinjufen/idea-git-tool/releases/latest) and run it. It installs per user to `%LOCALAPPDATA%\Programs\GitDeck` and needs no admin rights.
 
 - Requires Windows 10 1809+ and [Git for Windows](https://git-scm.com/download/win) 2.30+. GitDeck does not bundle git; if it can't find one, the welcome screen says so, and you can set the path in Settings.
 - The installer is not code-signed yet. If SmartScreen warns, choose "Run anyway".
 - Uninstalling removes only the program files. Settings (`%LOCALAPPDATA%\GitDeck`) and API keys in Credential Manager are kept.
+
+**macOS (Apple silicon, macOS 15+)**: download `GitDeck-<version>-macos-arm64.zip` from [Releases](https://github.com/dinjufen/idea-git-tool/releases/latest), unzip it and move GitDeck to Applications. The app is not signed or notarized yet; the first time, right-click it and choose "Open".
 
 **macOS** (Apple Silicon, macOS 15+): no installer yet; build from source as described below.
 
