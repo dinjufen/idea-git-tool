@@ -70,7 +70,9 @@ public sealed class BranchesPopup
                 e.Handled = true;
             }
         };
-        _list.ItemClick += (_, e) => Activate(e.ClickedItem as ListViewItem);
+        // 直接放入 ListViewItem 时，ItemClick 的 ClickedItem 是该项的内容而不是 ListViewItem 本身，这里找回所在的项。
+        _list.ItemClick += (_, e) => Activate(e.ClickedItem as ListViewItem
+            ?? _list.Items.OfType<ListViewItem>().FirstOrDefault(i => ReferenceEquals(i.Content, e.ClickedItem)));
         _list.KeyDown += (_, e) =>
         {
             if (e.Key == Windows.System.VirtualKey.Enter) Activate(_list.SelectedItem as ListViewItem);
