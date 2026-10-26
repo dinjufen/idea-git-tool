@@ -116,6 +116,15 @@ public sealed partial class ProjectTree
             node.Repository = RepositoryRootedAt(node);
             node.Detail = Detail(node);
         }
+        // 行没有增减时（例如检出、提交后只是状态颜色变化）只刷新已显示的行：重设 ItemsSource 会重新生成所有行，文件树会闪一下。
+        if (_list.ItemsSource is List<FileNode> current && current.SequenceEqual(rows))
+        {
+            for (var i = 0; i < current.Count; i++)
+            {
+                if (_list.ContainerFromIndex(i) is ListViewItem { ContentTemplateRoot: Grid { Children.Count: > 0 } root } && root.Children[0] is RowView row) row.Bind(current[i]);
+            }
+            return;
+        }
         _list.ItemsSource = rows;
         if (selected is not null && rows.Contains(selected)) _list.SelectedItem = selected;
     }
