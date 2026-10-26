@@ -107,3 +107,12 @@ fn file_history_follows_renames() {
     assert_eq!(history[0].orig_path.as_deref(), Some("old.rs"));
     assert_eq!(history[2].author_name, "Alice");
 }
+
+#[test]
+fn user_email_reads_repository_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    new_repo(dir);
+    git(dir, &["config", "user.email", "me@example.com"]);
+    assert_eq!(open(dir).user_email().as_deref(), Some("me@example.com"));
+}

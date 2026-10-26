@@ -63,6 +63,11 @@ impl Repository {
         parse_blame(&out.stdout)
     }
 
+    /// 当前用户的提交邮箱（`user.email`）；用于在行内 blame 中把自己的提交显示为“你”。未设置时为 None。
+    pub fn user_email(&self) -> Option<String> {
+        self.config("user.email")
+    }
+
     /// 文件的修订历史（`git log --follow`），最新的在前。
     pub fn file_history(
         &self,

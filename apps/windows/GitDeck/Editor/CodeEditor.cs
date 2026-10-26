@@ -13,7 +13,7 @@ namespace GitDeck.Editor;
 ///
 /// 与 mac 端 CodeEditorView 一致：只使用组件的文本视图，配色、行号、变更标记、高亮（Rust tree-sitter）、查找都自建。
 /// Scintilla 内部以 UTF-8 字节编址，核心的高亮区间与 .NET 字符串以 UTF-16 编址，这里负责两者换算。
-public sealed class CodeEditor : Grid
+public sealed partial class CodeEditor : Grid
 {
     // 页边：0 Annotate 注释（默认隐藏），1 AI 评审标记（有标记时显示），2 行号，3 变更标记，4 与正文之间的空隙。
     private const int AnnotationMargin = 0;
@@ -83,7 +83,11 @@ public sealed class CodeEditor : Grid
         _control.Loaded += (_, _) => Initialize();
         ActualThemeChanged += (_, _) => ApplyAppearance();
         EditorSettings.Changed += SettingsChanged;
-        Unloaded += (_, _) => _highlightCancel?.Cancel();
+        Unloaded += (_, _) =>
+        {
+            _highlightCancel?.Cancel();
+            HideInlineBlamePopup();
+        };
     }
 
     /// 文本被用户编辑（不含程序设置文本）。
@@ -263,13 +267,14 @@ public sealed class CodeEditor : Grid
     }
 
     private BlameResult? _blame;
+    private bool _showAnnotations;
     private IReadOnlyList<int?>? _annotationLineMap;
     private long _oldest;
     private long _newest;
     private ToolTip? _annotationTip;
 
-    /// Annotate（git blame）结果；null 时隐藏注释列。
-    public BlameResult? Annotations
+    /// git blame 结果：Annotate 注释列与光标行的行内提交信息共用。
+    public BlameResult? Blame
     {
         get => _blame;
         set
@@ -278,6 +283,18 @@ public sealed class CodeEditor : Grid
             var times = value?.Commits.Where(c => !c.IsUncommitted).Select(c => c.AuthorTime).ToList() ?? [];
             _oldest = times.Count > 0 ? times.Min() : 0;
             _newest = times.Count > 0 ? times.Max() : 0;
+            ApplyAnnotations();
+            UpdateInlineBlame(force: true);
+        }
+    }
+
+    /// 显示 Annotate 注释列（需要 <see cref="Blame"/>）。
+    public bool ShowAnnotations
+    {
+        get => _showAnnotations;
+        set
+        {
+            _showAnnotations = value;
             ApplyAnnotations();
         }
     }
@@ -291,6 +308,7 @@ public sealed class CodeEditor : Grid
         {
             _annotationLineMap = value;
             ApplyAnnotations();
+            UpdateInlineBlame(force: true);
         }
     }
 
@@ -309,7 +327,7 @@ public sealed class CodeEditor : Grid
         if (!_ready) return;
         var editor = _control.Editor;
         editor.MarginTextClearAll();
-        if (_blame is null)
+        if (_blame is null || !_showAnnotations)
         {
             editor.SetMarginWidthN(AnnotationMargin, 0);
             ApplyLineNumbers();
@@ -349,7 +367,7 @@ public sealed class CodeEditor : Grid
     /// 悬停在注释上时显示提交详情。
     private void ShowAnnotationTip(int x, int y)
     {
-        if (_blame is null && _reviewMarkers.Count == 0) return;
+        if (!_showAnnotations && _reviewMarkers.Count == 0) return;
         var editor = _control.Editor;
         var scale = XamlRoot?.RasterizationScale ?? 1;
         var annotationWidth = editor.GetMarginWidthN(AnnotationMargin);
@@ -555,6 +573,8 @@ public sealed class CodeEditor : Grid
         editor.UpdateUI += (_, args) =>
         {
             ReportCaret();
+            UpdateInlineBlame(force: false);
+            if ((args.Updated & (int)(Update.VScroll | Update.HScroll)) != 0) HideInlineBlamePopup();
             if ((args.Updated & (int)Update.VScroll) != 0) Scrolled?.Invoke();
         };
         editor.SetMarginSensitiveN(NumberMargin, true);
@@ -590,6 +610,7 @@ public sealed class CodeEditor : Grid
         ApplyAppearance();
         ApplyLineChanges();
         ApplyReviewMarkers();
+        InitializeInlineBlame();
         ScheduleHighlight(TimeSpan.Zero);
         // 等首次排版完成后再通知，行位置才是准确的。
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => Initialized?.Invoke());
@@ -667,6 +688,7 @@ public sealed class CodeEditor : Grid
         editor.MarkerSetBack(ConflictSeparatorMarker, Bgr(DiffColors.ConflictMarker(dark)));
         UpdateNumberMarginWidth();
         ApplyAnnotations();
+        ApplyInlineBlameStyle();
         ApplyStyles(_spans);
         ApplyDiffDecorations();
     }

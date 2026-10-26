@@ -1131,6 +1131,18 @@ public sealed class ProjectWindow : Window
                         };
                         annotateTimer.Start();
                         break;
+                    case "inlineBlame" when DebugOptions.Get("debug.file") is { } blamePath:
+                        // 打开文件，把光标放到 -debug.line 行（从 1 开始）并打开行内提交信息的弹窗（-debug.noPopup 时不打开）。
+                        _editor.Open(Path.Combine(Model.RootPath, blamePath));
+                        var blameLine = int.TryParse(DebugOptions.Get("debug.line"), out var parsedLine) ? Math.Max(0, parsedLine - 1) : 0;
+                        var blameTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
+                        blameTimer.Tick += (_, _) =>
+                        {
+                            blameTimer.Stop();
+                            _editor.ActiveEditor?.DebugShowInlineBlame(blameLine, !DebugOptions.Has("debug.noPopup"));
+                        };
+                        blameTimer.Start();
+                        break;
                     case "merge" when Model.Status.Changes.FirstOrDefault(c => c.Conflict is not null) is { } conflict:
                         _conflicts.OpenMerge(conflict);
                         break;

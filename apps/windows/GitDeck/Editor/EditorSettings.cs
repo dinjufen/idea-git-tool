@@ -19,6 +19,7 @@ public static class EditorSettings
     private const string FamilyKey = "editor.fontFamily";
     private const string SizeKey = "editor.fontSize";
     private const string LineSpacingKey = "editor.lineSpacing";
+    private const string InlineBlameKey = "editor.inlineBlame";
 
     public static event Action? Changed;
 
@@ -50,6 +51,17 @@ public static class EditorSettings
         set
         {
             Settings.Set(LineSpacingKey, value);
+            Changed?.Invoke();
+        }
+    }
+
+    /// 在光标所在行的行尾显示该行最近一次提交（与 VSCode / GitLens 的 current line blame 一致），默认开启。
+    public static bool InlineBlame
+    {
+        get => Settings.GetBool(InlineBlameKey, true);
+        set
+        {
+            Settings.Set(InlineBlameKey, value);
             Changed?.Invoke();
         }
     }

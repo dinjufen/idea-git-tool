@@ -9,6 +9,7 @@ namespace GitDeck.Common;
 /// - `-debug.exit`：截图后退出。
 /// - `-debug.confirm`：推送对话框与名称对话框直接按默认值确认（用于验证推送、搁置等流程）。
 /// - `-debug.action history|annotate` 与 `-debug.file <相对路径>`：打开该文件的历史 / 打开文件并显示 Annotate 注释。
+/// - `-debug.action inlineBlame` 与 `-debug.file <相对路径>`、`-debug.line <行号>`：打开文件，光标放到该行并打开行内提交信息的弹窗（加 `-debug.noPopup` 时只显示行尾的提交信息）。
 /// - `-debug.action stash|shelve|stashes|shelf`：打开储藏 / 搁置对话框，或显示储藏 / 搁置标签并展开第一项。
 /// - `-debug.action remotes|submodules|console|worktrees|newTag|reset`：打开对应窗口、标签或对话框；
 ///   `applyPatch` 配合 `-debug.file <补丁路径>`，`cherryPick|revert|rebase` 配合 `-debug.hash <提交>`。

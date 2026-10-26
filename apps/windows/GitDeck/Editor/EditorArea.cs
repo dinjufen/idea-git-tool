@@ -202,7 +202,7 @@ public sealed class EditorArea : Grid
     /// 当前编辑的文件（完整路径）。
     public string? ActivePath => (_active as Document)?.Path;
 
-    public bool IsActiveAnnotated => (_active as Document)?.Editor.Annotations is not null;
+    public bool IsActiveAnnotated => (_active as Document)?.Editor.ShowAnnotations == true;
 
     /// 打开 Diff 页；`key` 相同的 Diff 已打开时直接切换过去。
     public void OpenDiff(string key, string title, string tooltip, Func<DiffView> make)
@@ -248,6 +248,7 @@ public sealed class EditorArea : Grid
         document.Editor.AnnotationClicked += hash => ShowCommit?.Invoke(hash);
         document.Editor.ReviewMarkerClicked += index => ShowFinding?.Invoke(index);
         document.Editor.GutterContextRequested += point => ShowGutterMenu(document, point);
+        document.Editor.CommitDetailsProvider = hash => document.Owner.Repository.CommitDetails(hash);
         document.Editor.CaretChanged += (line, column) =>
         {
             if (document == _active) CaretInfoChanged?.Invoke($"{line}:{column}    {document.Editor.LineEnding}    UTF-8");
@@ -255,6 +256,7 @@ public sealed class EditorArea : Grid
         _tabs.Add(document);
         Activate(document);
         LoadBase(document);
+        LoadBlame(document);
         UpdateReviewMarkers(document);
     }
 
@@ -278,8 +280,8 @@ public sealed class EditorArea : Grid
             document.IsModified = false;
             RebuildTabs();
             document.Owner.Refresh();
-            // 保存后重新 blame，使注释与文件内容对应。
-            if (document.Editor.Annotations is not null) LoadBlame(document);
+            // 保存后重新 blame，使注释与行内提交信息与文件内容对应。
+            LoadBlame(document);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -314,7 +316,7 @@ public sealed class EditorArea : Grid
             document.Editor.ReplaceText(text);
             document.IsReloading = false;
             UpdateLineStatus(document, TimeSpan.Zero);
-            if (document.Editor.Annotations is not null) LoadBlame(document);
+            LoadBlame(document);
         }
     }
 
@@ -350,7 +352,7 @@ public sealed class EditorArea : Grid
             document.Owner = owner;
             document.RelativePath = relativePath;
             LoadBase(document);
-            if (document.Editor.Annotations is not null) LoadBlame(document);
+            LoadBlame(document);
         }
     }
 
@@ -444,7 +446,7 @@ public sealed class EditorArea : Grid
             foreach (var document in Documents.Where(d => d.Owner == model).ToList())
             {
                 LoadBase(document);
-                if (document.Editor.Annotations is not null) LoadBlame(document);
+                LoadBlame(document);
             }
         }
     }
@@ -497,12 +499,24 @@ public sealed class EditorArea : Grid
     /// 打开或关闭当前文件的 Annotate 列。
     public void ToggleAnnotations()
     {
-        if (_active is not Document document) return;
-        if (document.Editor.Annotations is not null) document.Editor.Annotations = null;
-        else LoadBlame(document);
+        if (_active is Document document) ToggleAnnotations(document);
     }
 
-    private void LoadBlame(Document document)
+    private void ToggleAnnotations(Document document)
+    {
+        if (document.Editor.ShowAnnotations)
+        {
+            document.Editor.ShowAnnotations = false;
+            return;
+        }
+        document.Editor.ShowAnnotations = true;
+        // 打开文件时已在后台 blame；尚未完成（或失败）时重新 blame，失败时提示。
+        if (document.Editor.Blame is null) LoadBlame(document, reportFailure: true);
+    }
+
+    /// 后台 blame 文件：结果同时用于 Annotate 注释列与光标行的行内提交信息。
+    /// 打开文件时自动进行（未跟踪的文件会失败，此时不提示），只有主动打开 Annotate 时才提示失败。
+    private void LoadBlame(Document document, bool reportFailure = false)
     {
         if (document.RelativePath is not { } path) return;
         var repository = document.Owner.Repository;
@@ -511,17 +525,23 @@ public sealed class EditorArea : Grid
         {
             // blame 针对磁盘上的文件；同时读出该内容作为行号映射的基准。
             var blame = repository.Blame(path, null);
-            return (blame, TryRead(file, out var text, out _) ? text : null);
+            return (blame, TryRead(file, out var text, out _) ? text : null, repository.UserEmail());
         }).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
         {
             if (task.IsFaulted)
             {
-                Message?.Invoke(L10n.Tr("annotate.failed", document.Title), true);
+                document.Editor.Blame = null;
+                if (reportFailure || document.Editor.ShowAnnotations)
+                {
+                    document.Editor.ShowAnnotations = false;
+                    Message?.Invoke(L10n.Tr("annotate.failed", document.Title), true);
+                }
                 return;
             }
-            var (blame, text) = task.Result;
+            var (blame, text, email) = task.Result;
             document.BlameText = text;
-            document.Editor.Annotations = blame;
+            document.Editor.UserEmail = email;
+            document.Editor.Blame = blame;
             UpdateAnnotationMap(document);
         }), TaskScheduler.Default);
     }
@@ -530,7 +550,7 @@ public sealed class EditorArea : Grid
     private void UpdateAnnotationMap(Document document)
     {
         document.AnnotationCancel?.Cancel();
-        if (document.Editor.Annotations is null || document.BlameText is not { } baseText)
+        if (document.Editor.Blame is null || document.BlameText is not { } baseText)
         {
             document.Editor.AnnotationLineMap = null;
             return;
@@ -569,14 +589,10 @@ public sealed class EditorArea : Grid
         var menu = new MenuFlyout();
         var annotate = new MenuFlyoutItem
         {
-            Text = document.Editor.Annotations is null ? L10n.Tr("git.action.annotate") : L10n.Tr("git.action.closeAnnotations"),
+            Text = document.Editor.ShowAnnotations ? L10n.Tr("git.action.closeAnnotations") : L10n.Tr("git.action.annotate"),
             IsEnabled = document.RelativePath is not null,
         };
-        annotate.Click += (_, _) =>
-        {
-            if (document.Editor.Annotations is not null) document.Editor.Annotations = null;
-            else LoadBlame(document);
-        };
+        annotate.Click += (_, _) => ToggleAnnotations(document);
         var history = new MenuFlyoutItem { Text = L10n.Tr("git.action.showHistory"), IsEnabled = document.RelativePath is not null };
         history.Click += (_, _) =>
         {

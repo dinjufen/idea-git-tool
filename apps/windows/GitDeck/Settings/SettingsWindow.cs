@@ -304,6 +304,10 @@ public sealed class SettingsWindow : Window
         EditorSettings.Changed += UpdatePreview;
         preview.Unloaded += (_, _) => EditorSettings.Changed -= UpdatePreview;
         form.Add("settings.editor.preview", preview);
+
+        var inlineBlame = new CheckBox { Content = L10n.Tr("settings.editor.inlineBlame"), IsChecked = EditorSettings.InlineBlame };
+        inlineBlame.Click += (_, _) => EditorSettings.InlineBlame = inlineBlame.IsChecked == true;
+        form.Add(null, inlineBlame);
         return form;
     }
 
