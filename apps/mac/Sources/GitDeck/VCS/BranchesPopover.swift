@@ -339,7 +339,7 @@ private final class BranchRowView: NSView {
         let detailLabel = NSTextField.label(detail ?? "", font: Theme.smallFont, color: Theme.secondaryText)
         detailLabel.alignment = .right
         label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        let indicator = IncomingOutgoingIndicator()
+        let indicator = IncomingOutgoingIndicator(showCounts: true)
         indicator.translatesAutoresizingMaskIntoConstraints = false
         if let (ahead, behind) = aheadBehind { indicator.set(ahead: ahead, behind: behind) }
         for view in [icon, label, indicator, detailLabel] as [NSView] { addSubview(view) }

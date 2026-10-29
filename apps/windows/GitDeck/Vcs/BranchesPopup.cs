@@ -252,7 +252,7 @@ public sealed class BranchesPopup
         if (row is BranchRow { Branch: { Kind: BranchKind.Local } local } && (local.Ahead > 0 || local.Behind > 0))
         {
             // 本地分支名后的传入 / 传出箭头（IDEA 分支弹窗中的小箭头）。
-            var indicator = new Controls.IncomingOutgoingIndicator();
+            var indicator = new Controls.IncomingOutgoingIndicator(showCounts: true);
             indicator.Set(local.Ahead, local.Behind);
             name.TextTrimming = TextTrimming.CharacterEllipsis;
             var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { name, indicator } };

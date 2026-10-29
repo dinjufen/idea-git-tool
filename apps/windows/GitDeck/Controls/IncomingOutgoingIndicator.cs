@@ -14,25 +14,44 @@ public sealed class IncomingOutgoingIndicator : StackPanel
 
     private readonly FrameworkElement _incoming = Icons.Create(Icon.Update, 12, new SolidColorBrush(IncomingColor));
     private readonly FrameworkElement _outgoing = Icons.Create(Icon.Push, 12, new SolidColorBrush(OutgoingColor));
+    private readonly TextBlock _incomingCount = Count(IncomingColor);
+    private readonly TextBlock _outgoingCount = Count(OutgoingColor);
+    private readonly bool _showCounts;
+    private readonly StackPanel _incomingGroup;
+    private readonly StackPanel _outgoingGroup;
 
-    public IncomingOutgoingIndicator()
+    /// `showCounts`：箭头后显示提交数（分支弹窗中与 IDEA 一致；顶部分支组件只显示箭头）。
+    public IncomingOutgoingIndicator(bool showCounts = false)
     {
+        _showCounts = showCounts;
         Orientation = Orientation.Horizontal;
-        Spacing = 1;
+        Spacing = 6;
         VerticalAlignment = VerticalAlignment.Center;
-        Children.Add(_incoming);
-        Children.Add(_outgoing);
+        _incomingGroup = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Children = { _incoming, _incomingCount } };
+        _outgoingGroup = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Children = { _outgoing, _outgoingCount } };
+        Children.Add(_incomingGroup);
+        Children.Add(_outgoingGroup);
         Set(0, 0);
     }
+
+    private static TextBlock Count(Windows.UI.Color color) => new()
+    {
+        FontSize = 12,
+        VerticalAlignment = VerticalAlignment.Center,
+        Foreground = new SolidColorBrush(color),
+    };
 
     /// `ahead`：本地领先上游的提交数（传出）；`behind`：落后上游的提交数（传入）。
     public void Set(uint ahead, uint behind)
     {
-        _incoming.Visibility = behind > 0 ? Visibility.Visible : Visibility.Collapsed;
-        _outgoing.Visibility = ahead > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _incomingGroup.Visibility = behind > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _outgoingGroup.Visibility = ahead > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _incomingCount.Text = behind.ToString(System.Globalization.CultureInfo.CurrentCulture);
+        _outgoingCount.Text = ahead.ToString(System.Globalization.CultureInfo.CurrentCulture);
+        _incomingCount.Visibility = _outgoingCount.Visibility = _showCounts ? Visibility.Visible : Visibility.Collapsed;
         Visibility = ahead > 0 || behind > 0 ? Visibility.Visible : Visibility.Collapsed;
-        ToolTipService.SetToolTip(_incoming, behind > 0 ? L10n.Tr("branches.incoming", behind) : null);
-        ToolTipService.SetToolTip(_outgoing, ahead > 0 ? L10n.Tr("branches.outgoing", ahead) : null);
+        ToolTipService.SetToolTip(_incomingGroup, behind > 0 ? L10n.Tr("branches.incoming", behind) : null);
+        ToolTipService.SetToolTip(_outgoingGroup, ahead > 0 ? L10n.Tr("branches.outgoing", ahead) : null);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(this, Description(ahead, behind));
     }
 

@@ -70,17 +70,30 @@ final class IconButton: NSControl {
 /// 分支的传入 / 传出提示（IDEA 分支名后的小箭头）：上游有本地没有的提交时显示蓝色 ↙，
 /// 本地有尚未推送的提交时显示绿色 ↗；两者都有时都显示。数据来自最近一次 Fetch 后的 ahead / behind。
 final class IncomingOutgoingIndicator: NSStackView {
-    private let incoming = NSImageView()
-    private let outgoing = NSImageView()
+    private let incoming = NSStackView()
+    private let outgoing = NSStackView()
+    private let incomingCount = NSTextField.label("", font: Theme.smallFont, color: NSColor(hex: 0x3574F0))
+    private let outgoingCount = NSTextField.label("", font: Theme.smallFont, color: NSColor(hex: 0x5FB865))
+    private let showCounts: Bool
 
-    init() {
+    /// `showCounts`：箭头后显示提交数（分支弹窗中与 IDEA 一致；顶部分支组件只显示箭头）。
+    init(showCounts: Bool = false) {
+        self.showCounts = showCounts
         super.init(frame: .zero)
-        spacing = 1
-        for (view, symbol, color) in [(incoming, "arrow.down.left", NSColor(hex: 0x3574F0)), (outgoing, "arrow.up.right", NSColor(hex: 0x5FB865))] {
-            view.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+        spacing = 6
+        for (group, count, symbol, color) in [
+            (incoming, incomingCount, "arrow.down.left", NSColor(hex: 0x3574F0)),
+            (outgoing, outgoingCount, "arrow.up.right", NSColor(hex: 0x5FB865)),
+        ] {
+            let arrow = NSImageView()
+            arrow.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
                 .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
-            view.contentTintColor = color
-            addArrangedSubview(view)
+            arrow.contentTintColor = color
+            group.spacing = 2
+            group.addArrangedSubview(arrow)
+            group.addArrangedSubview(count)
+            count.isHidden = !showCounts
+            addArrangedSubview(group)
         }
         set(ahead: 0, behind: 0)
     }
@@ -92,6 +105,8 @@ final class IncomingOutgoingIndicator: NSStackView {
     func set(ahead: UInt32, behind: UInt32) {
         incoming.isHidden = behind == 0
         outgoing.isHidden = ahead == 0
+        incomingCount.stringValue = "\(behind)"
+        outgoingCount.stringValue = "\(ahead)"
         isHidden = ahead == 0 && behind == 0
         incoming.toolTip = behind > 0 ? tr("branches.incoming", "\(behind)") : nil
         outgoing.toolTip = ahead > 0 ? tr("branches.outgoing", "\(ahead)") : nil
