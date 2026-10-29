@@ -32,6 +32,17 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/GitDeck" "$APP/Contents/MacOS/$PRODUCT_NAME"
 cp -R "$BIN/GitDeck_GitDeck.bundle" "$APP/Contents/Resources/"
+# 文案：SwiftPM 只有在工具链带有 xcstringstool 时才会把 Localizable.xcstrings 编译为各语言的 .lproj，
+# 否则资源包里只有原始的 .xcstrings，界面显示的全是键名（GitHub Actions 的 Xcode 正式版即是如此）。
+RES_BUNDLE="$APP/Contents/Resources/GitDeck_GitDeck.bundle"
+if ! ls "$RES_BUNDLE"/*.lproj/Localizable.strings >/dev/null 2>&1; then
+  XCSTRINGS="$PKG/Sources/GitDeck/Resources/Localizable.xcstrings"
+  echo "==> 编译文案：${XCSTRINGS}"
+  if ! xcrun xcstringstool compile "$XCSTRINGS" --output-directory "$RES_BUNDLE" 2>/dev/null      || ! ls "$RES_BUNDLE"/*.lproj/Localizable.strings >/dev/null 2>&1; then
+    python3 "$ROOT/scripts/xcstrings-to-strings.py" "$XCSTRINGS" "$RES_BUNDLE"
+  fi
+  rm -f "$RES_BUNDLE/Localizable.xcstrings"
+fi
 # 主包声明支持的语言，系统“设置 > 语言与地区 > App”中才会列出本应用。
 for lang in en zh-Hans; do
   mkdir -p "$APP/Contents/Resources/$lang.lproj"
