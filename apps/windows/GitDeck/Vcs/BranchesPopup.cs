@@ -244,6 +244,7 @@ public sealed class BranchesPopup
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
         var name = new TextBlock { Text = title, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal };
         var secondary = new TextBlock { Text = detail, Style = (Style)Application.Current.Resources["SecondaryTextStyle"], VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 180 };
         Grid.SetColumn(name, 1);
@@ -264,6 +265,15 @@ public sealed class BranchesPopup
             content.Children.Add(name);
         }
         content.Children.Add(secondary);
+        if (row is BranchRow or TagRow)
+        {
+            // 分支与标签行右侧的 ›：点击展开操作子菜单（与 IDEA 一致）。
+            var chevron = Icons.Create(Common.Icon.ChevronRight, 12);
+            chevron.Opacity = 0.7;
+            chevron.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(chevron, 3);
+            content.Children.Add(chevron);
+        }
         var item = new ListViewItem { Content = content, Tag = row, MinHeight = 28, HorizontalContentAlignment = HorizontalAlignment.Stretch };
         if (row is BranchRow branchRow) ToolTipService.SetToolTip(item, branchRow.Branch.Subject);
         _list.Items.Add(item);

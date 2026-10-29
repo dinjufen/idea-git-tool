@@ -300,7 +300,7 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
         case let .action(title, symbol, shortcut, _):
             return BranchRowView(symbol: symbol, title: title, detail: shortcut, enabled: true)
         case let .tag(tag):
-            let view = BranchRowView(symbol: "tag", title: tag.name, detail: tag.message ?? String(tag.target.prefix(8)), enabled: true)
+            let view = BranchRowView(symbol: "tag", title: tag.name, detail: tag.message ?? String(tag.target.prefix(8)), enabled: true, hasSubmenu: true)
             view.toolTip = tag.message
             return view
         case let .branch(branch):
@@ -310,7 +310,7 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
             if branch.upstreamGone { detail.append(tr("branches.upstreamGone")) }
             let symbol = branch.isCurrent ? "tag.fill" : "arrow.triangle.branch"
             let view = BranchRowView(symbol: symbol, title: branch.name, detail: detail.joined(separator: "  "), enabled: true,
-                                     aheadBehind: branch.kind == .local ? (branch.ahead, branch.behind) : nil)
+                                     aheadBehind: branch.kind == .local ? (branch.ahead, branch.behind) : nil, hasSubmenu: true)
             view.toolTip = branch.subject
             return view
         }
@@ -329,7 +329,8 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
 
 private final class BranchRowView: NSView {
     /// `aheadBehind`：本地分支的领先 / 落后提交数，在分支名后显示传入 / 传出箭头。
-    init(symbol: String, title: String, detail: String?, enabled: Bool, aheadBehind: (UInt32, UInt32)? = nil) {
+    /// `hasSubmenu`：分支与标签行右侧显示 ›，点击展开操作子菜单（与 IDEA 一致）。
+    init(symbol: String, title: String, detail: String?, enabled: Bool, aheadBehind: (UInt32, UInt32)? = nil, hasSubmenu: Bool = false) {
         super.init(frame: .zero)
         let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 11, weight: .regular)) ?? NSImage())
@@ -342,8 +343,15 @@ private final class BranchRowView: NSView {
         let indicator = IncomingOutgoingIndicator(showCounts: true)
         indicator.translatesAutoresizingMaskIntoConstraints = false
         if let (ahead, behind) = aheadBehind { indicator.set(ahead: ahead, behind: behind) }
-        for view in [icon, label, indicator, detailLabel] as [NSView] { addSubview(view) }
+        let chevron = NSImageView(image: NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold)) ?? NSImage())
+        chevron.contentTintColor = Theme.secondaryText
+        chevron.translatesAutoresizingMaskIntoConstraints = false
+        chevron.isHidden = !hasSubmenu
+        for view in [icon, label, indicator, detailLabel, chevron] as [NSView] { addSubview(view) }
         NSLayoutConstraint.activate([
+            chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            chevron.centerYAnchor.constraint(equalTo: centerYAnchor),
             indicator.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 6),
             indicator.centerYAnchor.constraint(equalTo: centerYAnchor),
             icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
@@ -352,7 +360,7 @@ private final class BranchRowView: NSView {
             label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
             detailLabel.leadingAnchor.constraint(greaterThanOrEqualTo: label.trailingAnchor, constant: 8),
-            detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            detailLabel.trailingAnchor.constraint(equalTo: hasSubmenu ? chevron.leadingAnchor : trailingAnchor, constant: hasSubmenu ? -6 : -12),
             detailLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
