@@ -36,6 +36,48 @@ pub enum MergeOutcome {
 
 #[uniffi::export]
 impl Repository {
+    /// 最近签出过的本地分支，最近的在前，当前分支排第一（IDEA 分支弹窗的 “Recent” 分组）。
+    /// 按 HEAD 的 reflog 中 `checkout: moving from A to B` 记录排序，只保留仍然存在的本地分支，最多 `max_count` 个。
+    pub fn recent_branches(&self, max_count: u32) -> Vec<String> {
+        let limit = max_count.max(1) as usize;
+        let local: std::collections::HashSet<String> = self
+            .git
+            .run(
+                &self.root,
+                ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+            )
+            .map(|out| {
+                String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let reflog = self
+            .git
+            .run(
+                &self.root,
+                ["reflog", "show", "--format=%gs", "-n", "2000", "HEAD", "--"],
+            )
+            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+            .unwrap_or_default();
+        let mut names: Vec<String> = Vec::new();
+        let mut push = |name: &str| {
+            if local.contains(name) && !names.iter().any(|n| n == name) {
+                names.push(name.to_owned());
+            }
+        };
+        if let Some(current) = self.current_branch() {
+            push(&current);
+        }
+        for (from, to) in reflog.lines().filter_map(parse_checkout_entry) {
+            push(to);
+            push(from);
+        }
+        names.truncate(limit);
+        names
+    }
+
     /// 分支名是否合法（`git check-ref-format --branch`）。
     pub fn is_valid_branch_name(&self, name: String) -> bool {
         !name.is_empty()
@@ -377,4 +419,11 @@ pub(crate) fn map_overwrite(err: CoreError) -> CoreError {
         }
         other => other,
     }
+}
+
+/// reflog 中的签出记录：`checkout: moving from <from> to <to>`。
+fn parse_checkout_entry(line: &str) -> Option<(&str, &str)> {
+    let rest = line.strip_prefix("checkout: moving from ")?;
+    let (from, to) = rest.rsplit_once(" to ")?;
+    Some((from, to))
 }

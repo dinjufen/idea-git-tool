@@ -54,7 +54,7 @@ public sealed class ProjectModel
     public string CurrentBranchTitle =>
         Status.Branch.Head ?? (Status.Branch.Oid is { } oid ? oid[..Math.Min(8, oid.Length)] : L10n.Tr("vcs.noBranch"));
 
-    /// VCS 分支组件标题：分支名 + 进行中的操作 + 与上游的差异（例如 `main ↑1 ↓2`）。
+    /// VCS 分支组件标题：分支名 + 进行中的操作。与上游的差异由标题后的传入 / 传出箭头表示（与 IDEA 一致）。
     public string BranchWidgetTitle
     {
         get
@@ -67,8 +67,6 @@ public sealed class ProjectModel
                 case RepositoryState.CherryPicking: parts.Add(L10n.Tr("vcs.state.cherryPicking")); break;
                 case RepositoryState.Reverting: parts.Add(L10n.Tr("vcs.state.reverting")); break;
             }
-            if (Status.Branch.Ahead > 0) parts.Add($"↑{Status.Branch.Ahead}");
-            if (Status.Branch.Behind > 0) parts.Add($"↓{Status.Branch.Behind}");
             return string.Join(" ", parts);
         }
     }

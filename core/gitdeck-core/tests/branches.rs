@@ -322,3 +322,22 @@ fn merge_refuses_to_overwrite_local_changes() {
         other => panic!("unexpected: {other:?}"),
     }
 }
+
+#[test]
+fn recent_branches_follow_checkout_order() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    new_repo(dir);
+    let main = current_branch(dir);
+    for name in ["a", "b", "c"] {
+        git(dir, &["branch", name]);
+    }
+    for name in ["a", "b", "a", "c"] {
+        git(dir, &["checkout", "-q", name]);
+    }
+    git(dir, &["branch", "-D", "b"]);
+    let recent = open(dir).recent_branches(5);
+    // 当前分支在前，其后按最近签出排序；已删除的分支不出现。
+    assert_eq!(recent, ["c", "a", main.as_str()]);
+    assert_eq!(open(dir).recent_branches(2), ["c", "a"]);
+}

@@ -562,6 +562,7 @@ public sealed class ProjectWindow : Window
     private void WorkspaceChanged()
     {
         _vcsWidget.Title = _workspace.BranchWidgetTitle;
+        UpdateIncomingOutgoing();
         _statusBar.SetBusy(_workspace.IsRefreshing || _operations.IsRunning || _workspaceOperations.IsRunning);
         _banner.Show(_workspace.Candidates);
         // 其他仓库的操作结果显示在状态栏（主仓库的由 ModelChanged 处理）。
@@ -909,9 +910,22 @@ public sealed class ProjectWindow : Window
 
     // MARK: - 模型变化
 
+    /// 分支组件的传入 / 传出箭头；多仓库项目中任一仓库有传入或传出提交时显示（与 IDEA 一致）。
+    private void UpdateIncomingOutgoing()
+    {
+        uint ahead = 0, behind = 0;
+        foreach (var model in _workspace.Models)
+        {
+            ahead += model.Status.Branch.Ahead;
+            behind += model.Status.Branch.Behind;
+        }
+        _vcsWidget.SetIncomingOutgoing(ahead, behind);
+    }
+
     private void ModelChanged()
     {
         _vcsWidget.Title = Model.BranchWidgetTitle;
+        UpdateIncomingOutgoing();
         _statusBar.SetBusy(Model.IsRefreshing || _operations.IsRunning);
         if (Model.LastError is { } error) _statusBar.SetMessage(error, isError: true);
         else if (Model.Notification is { } notification) _statusBar.SetMessage(notification.Text, notification.IsError);

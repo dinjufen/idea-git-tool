@@ -19,6 +19,8 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
     private let search = NSSearchField()
     private let table = NSTableView()
     private var rows: [Row] = []
+    /// 最近签出过的本地分支（“最近”分组），打开弹窗时在后台读取。
+    private var recent: [String] = []
 
     init(model: ProjectModel, operations: GitOperations, onCommit: @escaping @MainActor () -> Void) {
         self.model = model
@@ -49,6 +51,11 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
         table.action = #selector(rowClicked)
         table.setAccessibilityLabel(tr("git.action.branches"))
 
+        // 搜索框右侧的 Fetch 按钮（与 IDEA 分支弹窗一致），用于刷新传入 / 传出提示。
+        let fetch = IconButton(symbol: "arrow.down.left", tooltip: tr("git.action.fetch"), size: 26, pointSize: 12)
+        fetch.target = self
+        fetch.action = #selector(fetchClicked)
+
         let scroll = NSScrollView()
         scroll.documentView = table
         scroll.hasVerticalScroller = true
@@ -56,11 +63,14 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
         root.addSubview(search)
+        root.addSubview(fetch)
         root.addSubview(scroll)
         NSLayoutConstraint.activate([
             search.topAnchor.constraint(equalTo: root.topAnchor, constant: 10),
             search.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 10),
-            search.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -10),
+            search.trailingAnchor.constraint(equalTo: fetch.leadingAnchor, constant: -4),
+            fetch.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
+            fetch.centerYAnchor.constraint(equalTo: search.centerYAnchor),
             scroll.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 8),
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -68,6 +78,23 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
         ])
         view = root
         rebuild()
+        loadRecent()
+    }
+
+    @objc private func fetchClicked() {
+        popover?.close()
+        operations.fetch()
+    }
+
+    /// 后台读取最近签出过的分支，读到后刷新列表。
+    private func loadRecent() {
+        let repository = model.repository
+        Task { [weak self] in
+            let names = await Task.detached { repository.recentBranches(maxCount: 5) }.value
+            guard let self else { return }
+            recent = names
+            rebuild()
+        }
     }
 
     override func viewDidAppear() {
@@ -115,6 +142,14 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
                 .action(title: tr("branches.action.new"), symbol: "plus", shortcut: "⌥⌘N", run: { ops.newBranch() }),
                 .action(title: tr("branches.action.checkoutRevision"), symbol: "tag", shortcut: nil, run: { ops.checkoutRevisionDialog() }),
             ]
+        }
+        // “最近”分组：最近签出过的本地分支（只有当前分支时不显示），与 IDEA 一致只在未搜索时显示。
+        if query.isEmpty {
+            let recentBranches = recent.compactMap { name in model.branches.first { $0.kind == .local && $0.name == name } }
+            if recentBranches.count > 1 {
+                rows.append(.section(tr("branches.section.recent")))
+                rows += recentBranches.map(Row.branch)
+            }
         }
         let local = model.branches.filter { $0.kind == .local && matches($0) }
         let remote = model.branches.filter { $0.kind == .remote && matches($0) }
@@ -269,13 +304,13 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
             view.toolTip = tag.message
             return view
         case let .branch(branch):
+            // 与 IDEA 一致只显示上游分支；领先 / 落后改由分支名后的箭头表示（悬停显示提交数）。
             var detail: [String] = []
-            if branch.ahead > 0 { detail.append("↑\(branch.ahead)") }
-            if branch.behind > 0 { detail.append("↓\(branch.behind)") }
             if let upstream = branch.upstream { detail.append(upstream) }
             if branch.upstreamGone { detail.append(tr("branches.upstreamGone")) }
             let symbol = branch.isCurrent ? "tag.fill" : "arrow.triangle.branch"
-            let view = BranchRowView(symbol: symbol, title: branch.name, detail: detail.joined(separator: "  "), enabled: true)
+            let view = BranchRowView(symbol: symbol, title: branch.name, detail: detail.joined(separator: "  "), enabled: true,
+                                     aheadBehind: branch.kind == .local ? (branch.ahead, branch.behind) : nil)
             view.toolTip = branch.subject
             return view
         }
@@ -293,7 +328,8 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
 }
 
 private final class BranchRowView: NSView {
-    init(symbol: String, title: String, detail: String?, enabled: Bool) {
+    /// `aheadBehind`：本地分支的领先 / 落后提交数，在分支名后显示传入 / 传出箭头。
+    init(symbol: String, title: String, detail: String?, enabled: Bool, aheadBehind: (UInt32, UInt32)? = nil) {
         super.init(frame: .zero)
         let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 11, weight: .regular)) ?? NSImage())
@@ -303,8 +339,13 @@ private final class BranchRowView: NSView {
         let detailLabel = NSTextField.label(detail ?? "", font: Theme.smallFont, color: Theme.secondaryText)
         detailLabel.alignment = .right
         label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        for view in [icon, label, detailLabel] as [NSView] { addSubview(view) }
+        let indicator = IncomingOutgoingIndicator()
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        if let (ahead, behind) = aheadBehind { indicator.set(ahead: ahead, behind: behind) }
+        for view in [icon, label, indicator, detailLabel] as [NSView] { addSubview(view) }
         NSLayoutConstraint.activate([
+            indicator.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 6),
+            indicator.centerYAnchor.constraint(equalTo: centerYAnchor),
             icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             icon.widthAnchor.constraint(equalToConstant: 16),
             icon.centerYAnchor.constraint(equalTo: centerYAnchor),

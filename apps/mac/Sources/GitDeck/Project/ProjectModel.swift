@@ -40,7 +40,7 @@ final class ProjectModel {
         return tr("vcs.noBranch")
     }
 
-    /// VCS 分支组件标题：分支名 + 进行中的操作 + 与上游的差异（IDEA 样式，例如 `main ↑1 ↓2`）。
+    /// VCS 分支组件标题：分支名 + 进行中的操作。与上游的差异由标题后的传入 / 传出箭头表示（与 IDEA 一致）。
     var branchWidgetTitle: String {
         var parts = [currentBranchTitle]
         switch status.state {
@@ -50,8 +50,6 @@ final class ProjectModel {
         case .cherryPicking: parts.append(tr("vcs.state.cherryPicking"))
         case .reverting: parts.append(tr("vcs.state.reverting"))
         }
-        if status.branch.ahead > 0 { parts.append("↑\(status.branch.ahead)") }
-        if status.branch.behind > 0 { parts.append("↓\(status.branch.behind)") }
         return parts.joined(separator: " ")
     }
 

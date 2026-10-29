@@ -25,6 +25,10 @@ public sealed class BranchesPopup
     private readonly Flyout _flyout = new() { ShouldConstrainToRootBounds = true };
     private readonly TextBox _search = new() { PlaceholderText = L10n.Tr("branches.search.placeholder") };
     private readonly ListView _list = new() { SelectionMode = ListViewSelectionMode.Single, IsItemClickEnabled = true };
+    private readonly Controls.IconButton _fetch = new(Common.Icon.Update, L10n.Tr("git.action.fetch"), 30, 14);
+    /// 最近签出过的本地分支（“最近”分组），打开弹窗时在后台读取。
+    private string[] _recent = [];
+    private int _recentToken;
 
     public BranchesPopup(Workspace workspace, Func<ProjectModel, GitOperations> operationsFor, Action commit)
     {
@@ -49,12 +53,25 @@ public sealed class BranchesPopup
             if (_loadingRepositories || _repositories.SelectedIndex < 0) return;
             _model = _workspace.Models[_repositories.SelectedIndex];
             _operations = _operationsFor(_model);
+            LoadRecent();
             Rebuild();
         };
-        Grid.SetRow(_search, 1);
+        // 搜索框右侧的 Fetch 按钮（与 IDEA 分支弹窗一致），用于刷新传入 / 传出提示。
+        var searchRow = new Grid { ColumnSpacing = 4 };
+        searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(_fetch, 1);
+        searchRow.Children.Add(_search);
+        searchRow.Children.Add(_fetch);
+        _fetch.Click += (_, _) =>
+        {
+            _flyout.Hide();
+            _ = _operations.Fetch();
+        };
+        Grid.SetRow(searchRow, 1);
         Grid.SetRow(_list, 2);
         root.Children.Add(_header);
-        root.Children.Add(_search);
+        root.Children.Add(searchRow);
         root.Children.Add(_list);
         _flyout.Content = root;
         var presenter = new Style(typeof(FlyoutPresenter));
@@ -112,8 +129,24 @@ public sealed class BranchesPopup
             _loadingRepositories = false;
         }
         _search.Text = "";
+        _recent = [];
+        LoadRecent();
         Rebuild();
         _flyout.ShowAt(anchor, new FlyoutShowOptions { Placement = FlyoutPlacementMode.BottomEdgeAlignedLeft });
+    }
+
+    /// 后台读取最近签出过的分支，读到后刷新列表。
+    private void LoadRecent()
+    {
+        var token = ++_recentToken;
+        var model = _model;
+        var repository = model.Repository;
+        Task.Run(() => repository.RecentBranches(5)).ContinueWith(task => _list.DispatcherQueue.TryEnqueue(() =>
+        {
+            if (token != _recentToken || model != _model || task.IsFaulted) return;
+            _recent = task.Result;
+            Rebuild();
+        }), TaskScheduler.Default);
     }
 
     private abstract record Row;
@@ -161,6 +194,16 @@ public sealed class BranchesPopup
             Add(new ActionRow(L10n.Tr("branches.action.new"), Common.Icon.Branch, "Ctrl+Alt+N", () => ops.NewBranch()));
             Add(new ActionRow(L10n.Tr("branches.action.checkoutRevision"), Common.Icon.Commit, null, ops.CheckoutRevisionDialog));
         }
+        // “最近”分组：最近签出过的本地分支（只有当前分支时不显示），与 IDEA 一致只在未搜索时显示。
+        if (query.Length == 0)
+        {
+            var recent = _recent.Select(name => _model.Branches.FirstOrDefault(b => b.Kind == BranchKind.Local && b.Name == name)).OfType<BranchRef>().ToList();
+            if (recent.Count > 1)
+            {
+                Section(L10n.Tr("branches.section.recent"));
+                foreach (var branch in recent) Add(new BranchRow(branch));
+            }
+        }
         var local = _model.Branches.Where(b => b.Kind == BranchKind.Local && Matches(b.Name)).OrderByDescending(b => b.IsCurrent).ToList();
         var remote = _model.Branches.Where(b => b.Kind == BranchKind.Remote && Matches(b.Name)).ToList();
         var tags = _model.Tags.Where(t => Matches(t.Name)).ToList();
@@ -206,7 +249,20 @@ public sealed class BranchesPopup
         Grid.SetColumn(name, 1);
         Grid.SetColumn(secondary, 2);
         content.Children.Add(Icons.Create(icon, 14));
-        content.Children.Add(name);
+        if (row is BranchRow { Branch: { Kind: BranchKind.Local } local } && (local.Ahead > 0 || local.Behind > 0))
+        {
+            // 本地分支名后的传入 / 传出箭头（IDEA 分支弹窗中的小箭头）。
+            var indicator = new Controls.IncomingOutgoingIndicator();
+            indicator.Set(local.Ahead, local.Behind);
+            name.TextTrimming = TextTrimming.CharacterEllipsis;
+            var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { name, indicator } };
+            Grid.SetColumn(label, 1);
+            content.Children.Add(label);
+        }
+        else
+        {
+            content.Children.Add(name);
+        }
         content.Children.Add(secondary);
         var item = new ListViewItem { Content = content, Tag = row, MinHeight = 28, HorizontalContentAlignment = HorizontalAlignment.Stretch };
         if (row is BranchRow branchRow) ToolTipService.SetToolTip(item, branchRow.Branch.Subject);
@@ -215,9 +271,8 @@ public sealed class BranchesPopup
 
     private static string BranchDetail(BranchRef branch)
     {
+        // 与 IDEA 一致只显示上游分支；领先 / 落后改由分支名后的箭头表示（悬停显示提交数）。
         var parts = new List<string>();
-        if (branch.Ahead > 0) parts.Add($"↑{branch.Ahead}");
-        if (branch.Behind > 0) parts.Add($"↓{branch.Behind}");
         if (branch.Upstream is { } upstream) parts.Add(upstream);
         if (branch.UpstreamGone) parts.Add(L10n.Tr("branches.upstreamGone"));
         return string.Join("  ", parts);

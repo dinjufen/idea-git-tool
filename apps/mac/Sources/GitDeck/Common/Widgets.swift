@@ -67,10 +67,51 @@ final class IconButton: NSControl {
     }
 }
 
+/// 分支的传入 / 传出提示（IDEA 分支名后的小箭头）：上游有本地没有的提交时显示蓝色 ↙，
+/// 本地有尚未推送的提交时显示绿色 ↗；两者都有时都显示。数据来自最近一次 Fetch 后的 ahead / behind。
+final class IncomingOutgoingIndicator: NSStackView {
+    private let incoming = NSImageView()
+    private let outgoing = NSImageView()
+
+    init() {
+        super.init(frame: .zero)
+        spacing = 1
+        for (view, symbol, color) in [(incoming, "arrow.down.left", NSColor(hex: 0x3574F0)), (outgoing, "arrow.up.right", NSColor(hex: 0x5FB865))] {
+            view.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
+            view.contentTintColor = color
+            addArrangedSubview(view)
+        }
+        set(ahead: 0, behind: 0)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// `ahead`：本地领先上游的提交数（传出）；`behind`：落后上游的提交数（传入）。
+    func set(ahead: UInt32, behind: UInt32) {
+        incoming.isHidden = behind == 0
+        outgoing.isHidden = ahead == 0
+        isHidden = ahead == 0 && behind == 0
+        incoming.toolTip = behind > 0 ? tr("branches.incoming", "\(behind)") : nil
+        outgoing.toolTip = ahead > 0 ? tr("branches.outgoing", "\(ahead)") : nil
+    }
+
+    /// 提示文字（分支组件的工具提示）。
+    static func description(ahead: UInt32, behind: UInt32) -> String {
+        var parts: [String] = []
+        if behind > 0 { parts.append(tr("branches.incoming", "\(behind)")) }
+        if ahead > 0 { parts.append(tr("branches.outgoing", "\(ahead)")) }
+        return parts.joined(separator: ", ")
+    }
+}
+
 /// 顶部主工具栏中的下拉组件（项目组件、VCS 分支组件）。
 final class ToolbarWidget: NSControl {
     private let iconView = NSImageView()
     private let label = NSTextField(labelWithString: "")
+    private let indicator = IncomingOutgoingIndicator()
+    private let baseTooltip: String
     private let chevron = NSImageView()
     private var isHovered = false {
         didSet { needsDisplay = true }
@@ -82,6 +123,7 @@ final class ToolbarWidget: NSControl {
     }
 
     init(symbol: String?, tooltip: String) {
+        baseTooltip = tooltip
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         toolTip = tooltip
@@ -95,7 +137,7 @@ final class ToolbarWidget: NSControl {
             .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
         chevron.contentTintColor = Theme.secondaryText
 
-        let stack = NSStackView(views: [label, chevron])
+        let stack = NSStackView(views: [label, indicator, chevron])
         if let symbol {
             iconView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
                 .withSymbolConfiguration(.init(pointSize: 13, weight: .regular))
@@ -126,6 +168,13 @@ final class ToolbarWidget: NSControl {
     override func mouseEntered(with event: NSEvent) { isHovered = true }
     override func mouseExited(with event: NSEvent) { isHovered = false }
     override func mouseDown(with event: NSEvent) { sendAction(action, to: target) }
+
+    /// VCS 分支组件：标题后显示传入 / 传出箭头，工具提示中附上提交数。
+    func setIncomingOutgoing(ahead: UInt32, behind: UInt32) {
+        indicator.set(ahead: ahead, behind: behind)
+        let detail = IncomingOutgoingIndicator.description(ahead: ahead, behind: behind)
+        toolTip = detail.isEmpty ? baseTooltip : baseTooltip + "\n" + detail
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         guard isHovered else { return }

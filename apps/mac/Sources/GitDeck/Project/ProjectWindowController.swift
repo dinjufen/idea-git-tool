@@ -506,6 +506,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         }
         #endif
         toolbar.vcsWidget.title = workspace.branchWidgetTitle
+        updateIncomingOutgoing()
         statusBar.setBusy(model.isRefreshing)
         if let error = model.lastError {
             statusBar.setMessage(error, isError: true)
@@ -703,10 +704,18 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
 
     private var allOperations: [GitOperations] { workspace.models.map(operations(for:)) }
 
+    /// 分支组件的传入 / 传出箭头；多仓库项目中任一仓库有传入或传出提交时显示（与 IDEA 一致）。
+    private func updateIncomingOutgoing() {
+        let ahead = workspace.models.reduce(UInt32(0)) { $0 + $1.status.branch.ahead }
+        let behind = workspace.models.reduce(UInt32(0)) { $0 + $1.status.branch.behind }
+        toolbar.vcsWidget.setIncomingOutgoing(ahead: ahead, behind: behind)
+    }
+
     /// 仓库列表或任一仓库状态变化：更新分支组件与提示条。
     private func workspaceChanged() {
         if editor.workspace == nil { editor.workspace = workspace }
         toolbar.vcsWidget.title = workspace.branchWidgetTitle
+        updateIncomingOutgoing()
         statusBar.setBusy(workspace.isRefreshing || operations.isRunning || workspaceOperations.isRunning)
         banner.show(workspace.candidates)
     }

@@ -1973,6 +1973,23 @@
         }
       }
     },
+    "branches.incoming": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ incoming commits"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 个传入提交"
+          }
+        }
+      }
+    },
     "branches.menu.aiReview": {
       "extractionState": "manual",
       "localizations": {
@@ -2194,6 +2211,23 @@
         }
       }
     },
+    "branches.outgoing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ outgoing commits"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 个传出提交"
+          }
+        }
+      }
+    },
     "branches.search.placeholder": {
       "extractionState": "manual",
       "localizations": {
@@ -2224,6 +2258,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "本地"
+          }
+        }
+      }
+    },
+    "branches.section.recent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最近"
           }
         }
       }
