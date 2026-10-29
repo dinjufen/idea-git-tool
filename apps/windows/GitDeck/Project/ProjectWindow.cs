@@ -273,6 +273,10 @@ public sealed class ProjectWindow : Window
     {
         _stripe.Toggled += Toggle;
         _rightStripe.Toggled += Toggle;
+        // 左下角的全局设置入口。
+        var settingsButton = new IconButton(Icon.Gear, L10n.Tr("menu.app.settings") + " (Ctrl+Alt+S)");
+        settingsButton.Click += (_, _) => SettingsWindow.Show();
+        _stripe.AddFooterButton(settingsButton);
         _menuButton.Click += (_, _) => ShowMainMenu();
         _projectWidget.Click += (_, _) => ShowProjectMenu();
         _vcsWidget.Click += (_, _) => ShowBranches();

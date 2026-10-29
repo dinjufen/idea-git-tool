@@ -173,6 +173,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     private func wireActions() {
         stripe.onToggle = { [weak self] id in self?.toggle(id) }
         rightStripe.onToggle = { [weak self] id in self?.toggle(id) }
+        // 左下角的全局设置入口。
+        let settingsButton = IconButton(symbol: "gearshape", tooltip: tr("menu.app.settings") + " (⌘,)")
+        settingsButton.target = NSApp.delegate
+        settingsButton.action = #selector(AppDelegate.showSettings(_:))
+        stripe.addFooterButton(settingsButton)
         toolbar.vcsWidget.target = self
         toolbar.vcsWidget.action = #selector(showBranchesPopup(_:))
         toolbar.projectWidget.target = self

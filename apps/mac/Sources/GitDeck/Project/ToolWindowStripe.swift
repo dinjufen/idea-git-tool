@@ -43,6 +43,7 @@ final class ToolWindowStripe: ColoredView {
 
     var onToggle: ((ToolWindowID) -> Void)?
     private var buttons: [ToolWindowID: IconButton] = [:]
+    private var bottomStack: NSStackView?
 
     init(top: [ToolWindowID], bottom: [ToolWindowID]) {
         super.init(Theme.toolWindowBackground)
@@ -56,6 +57,7 @@ final class ToolWindowStripe: ColoredView {
             stack.translatesAutoresizingMaskIntoConstraints = false
             addSubview(stack)
         }
+        self.bottomStack = bottomStack
         NSLayoutConstraint.activate([
             widthAnchor.constraint(equalToConstant: Self.width),
             topStack.topAnchor.constraint(equalTo: topAnchor, constant: 6),
@@ -63,6 +65,11 @@ final class ToolWindowStripe: ColoredView {
             bottomStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
             bottomStack.centerXAnchor.constraint(equalTo: centerXAnchor),
         ])
+    }
+
+    /// 在图标条最下方加一个按钮（左下角的设置入口）。
+    func addFooterButton(_ button: IconButton) {
+        bottomStack?.addArrangedSubview(button)
     }
 
     func setActive(_ ids: Set<ToolWindowID>) {

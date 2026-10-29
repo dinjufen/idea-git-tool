@@ -63,6 +63,7 @@ public sealed class ToolWindowStripe : Grid
     public const double StripeWidth = 40;
 
     private readonly Dictionary<ToolWindowId, IconButton> _buttons = [];
+    private readonly StackPanel _bottomStack;
 
     public event Action<ToolWindowId>? Toggled;
 
@@ -76,7 +77,11 @@ public sealed class ToolWindowStripe : Grid
         foreach (var id in bottom) bottomStack.Children.Add(MakeButton(id));
         Children.Add(topStack);
         Children.Add(bottomStack);
+        _bottomStack = bottomStack;
     }
+
+    /// 在图标条最下方加一个按钮（左下角的设置入口）。
+    public void AddFooterButton(IconButton button) => _bottomStack.Children.Add(button);
 
     public IReadOnlyDictionary<ToolWindowId, IconButton> Buttons => _buttons;
 
