@@ -424,6 +424,7 @@ final class DiffView: NSView {
 
     private func newSideLine() -> Int {
         if isUnified, let unifiedEditor {
+            if !unifiedEditor.hasUserCaret, let first = blocks.first { return Int(first.change.start) }
             let rows = unified.rows
             // 删除的行在新版本中没有对应：取其后第一个有新版本行号的行。
             var index = min(unifiedEditor.caretLine, rows.count - 1)
@@ -433,8 +434,12 @@ final class DiffView: NSView {
             }
             return max(0, unified.maxNew - 1)
         }
-        if window?.firstResponder === leftEditor.textView {
+        if window?.firstResponder === leftEditor.textView, leftEditor.hasUserCaret {
             return Self.mapLine(blocks.map { $0.change }, leftEditor.caretLine, fromBase: true)
+        }
+        // 还没有放置过光标时与 IDEA 一样定位到第一处差异。
+        if !rightEditor.hasUserCaret, !leftEditor.hasUserCaret, let first = blocks.first {
+            return Int(first.change.start)
         }
         return rightEditor.caretLine
     }

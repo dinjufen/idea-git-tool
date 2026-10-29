@@ -110,6 +110,9 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
     private var findIndex: Int?
     private var observers: [NSObjectProtocol] = []
 
+    /// 用户放置过光标（点击，或跳转到差异时由程序放置）；Diff 的“跳转到源码”据此判断是否使用光标行。
+    var hasUserCaret = false
+
     init(text: String, language: String?, isEditable: Bool = true) {
         self.language = language
         textView = TextView(
@@ -126,6 +129,12 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
         annotationView = AnnotationGutterView(textView: textView, scrollView: scrollView)
         super.init(frame: .zero)
         textView.delegate = self
+        if !isEditable {
+            // CodeEditTextView 在只读模式下单击不会移动光标；Diff 等只读视图需要光标行（跳转到源码、当前行高亮），这里补上。
+            let click = NSClickGestureRecognizer(target: self, action: #selector(readOnlyClick(_:)))
+            click.delaysPrimaryMouseButtonEvents = false
+            textView.addGestureRecognizer(click)
+        }
         buildLayout()
         applyColors()
         observe()
@@ -134,6 +143,13 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func readOnlyClick(_ recognizer: NSClickGestureRecognizer) {
+        guard recognizer.state == .ended,
+              let offset = textView.layoutManager.textOffsetAtPoint(recognizer.location(in: textView)) else { return }
+        hasUserCaret = true
+        textView.selectionManager.setSelectedRange(NSRange(location: offset, length: 0))
+    }
 
     isolated deinit {
         observers.forEach(NotificationCenter.default.removeObserver)

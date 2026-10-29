@@ -52,6 +52,8 @@ public sealed class DiffView : Grid
     private readonly ComboBox _whitespace = new() { MinWidth = 0 };
     private CodeEditor? _unifiedEditor;
     private CodeEditor? _focusedEditor;
+    /// 用户点击过某一侧或跳转过差异；之前“跳转到源码”与 IDEA 一样定位到第一处差异。
+    private bool _hasCaret;
     private readonly IconButton _jumpToSource = new(Icon.Edit, L10n.Tr("diff.jumpToSource"), 26, 13);
     private UnifiedModel _unified = UnifiedModel.Empty;
     private IReadOnlyList<DiffBlock> _blocks = [];
@@ -70,8 +72,8 @@ public sealed class DiffView : Grid
         Themed.Background(this, "EditorBackgroundBrush");
         BuildLayout();
 
-        _leftEditor.GotFocus += (_, _) => _focusedEditor = _leftEditor;
-        _rightEditor.GotFocus += (_, _) => _focusedEditor = _rightEditor;
+        _leftEditor.GotFocus += (_, _) => (_focusedEditor, _hasCaret) = (_leftEditor, true);
+        _rightEditor.GotFocus += (_, _) => (_focusedEditor, _hasCaret) = (_rightEditor, true);
         // F4：跳转到源码（IDEA 的 Jump to Source）。
         AddHandler(KeyDownEvent, new Microsoft.UI.Xaml.Input.KeyEventHandler((_, e) =>
         {
@@ -157,6 +159,7 @@ public sealed class DiffView : Grid
 
     private int NewSideLine()
     {
+        if (!_hasCaret && _blocks.Count > 0) return (int)_blocks[0].Change.Start;
         if (IsUnified && _unifiedEditor is not null)
         {
             var row = _unifiedEditor.CaretLine;
@@ -522,7 +525,7 @@ public sealed class DiffView : Grid
             };
         }
         _unifiedEditor = editor;
-        editor.GotFocus += (_, _) => _focusedEditor = editor;
+        editor.GotFocus += (_, _) => (_focusedEditor, _hasCaret) = (editor, true);
         _unifiedContainer.Children.Add(editor);
         UpdateDecorations();
     }
@@ -626,6 +629,7 @@ public sealed class DiffView : Grid
     private void Go(int index)
     {
         _currentBlock = index;
+        _hasCaret = true;
         if (IsUnified && _unifiedEditor is not null && index < _unified.BlockRows.Count)
         {
             _unifiedEditor.Reveal(_unified.BlockRows[index]);

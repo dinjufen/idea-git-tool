@@ -73,5 +73,6 @@ extension CodeEditorView {
         guard let position = storage.getLine(atIndex: line) ?? storage.last else { return }
         scroll(toY: position.yPos - scrollView.contentView.bounds.height / 3)
         textView.selectionManager.setSelectedRange(NSRange(location: position.range.location, length: 0))
+        hasUserCaret = true
     }
 }
