@@ -22,6 +22,7 @@ public sealed class IconButton : Button
         ToolTipService.SetToolTip(this, tooltip);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(this, tooltip);
         ActualThemeChanged += (_, _) => UpdateBackground();
+        FastToolTip.Attach(this);
     }
 
     public bool IsSelected

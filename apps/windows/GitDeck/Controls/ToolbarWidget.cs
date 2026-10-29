@@ -22,6 +22,7 @@ public sealed class ToolbarWidget : Button
         stack.Children.Add(_indicator);
         stack.Children.Add(Icons.Create(Icon.ChevronDown, 12));
         _tooltip = tooltip;
+        FastToolTip.Attach(this);
         Content = stack;
         ToolTipService.SetToolTip(this, tooltip);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(this, tooltip);
