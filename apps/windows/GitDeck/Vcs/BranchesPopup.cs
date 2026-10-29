@@ -5,6 +5,7 @@ using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Media;
 
 namespace GitDeck.Vcs;
 
@@ -93,6 +94,14 @@ public sealed class BranchesPopup
         _list.KeyDown += (_, e) =>
         {
             if (e.Key == Windows.System.VirtualKey.Enter) Activate(_list.SelectedItem as ListViewItem);
+            // 右方向键展开、左方向键收起（与文件树一致）。
+            else if (e.Key is Windows.System.VirtualKey.Right or Windows.System.VirtualKey.Left
+                     && _list.SelectedItem is ListViewItem { Tag: TreeRow { Node.IsExpandable: true } row }
+                     && (e.Key == Windows.System.VirtualKey.Right) != IsExpanded(row.Node.Key))
+            {
+                Toggle(row.Node.Key);
+                e.Handled = true;
+            }
         };
         _flyout.Opened += (_, _) => _search.Focus(FocusState.Programmatic);
     }
@@ -153,9 +162,18 @@ public sealed class BranchesPopup
 
     private sealed record ActionRow(string Title, Common.Icon Icon, string? Shortcut, Func<Task> Run) : Row;
 
-    private sealed record BranchRow(BranchRef Branch) : Row;
+    /// 分支树中的一行：分组、文件夹、分支或标签（与 IDEA 分支弹窗一样可以展开、收起）。
+    private sealed record TreeRow(BranchTreeNode Node, int Depth) : Row;
 
-    private sealed record TagRow(TagInfo Tag) : Row;
+    /// 展开的分组与文件夹：默认展开“最近”和“本地”，远程、标签与文件夹收起（与 IDEA 一致）；在本次运行中保持。
+    private static readonly HashSet<string> Expanded = ["recent", "local"];
+
+    /// 收起的“最近”分组内的文件夹（这些文件夹默认展开，因为“最近”只列出少量分支）。
+    private static readonly HashSet<string> CollapsedRecent = [];
+
+    private static bool IsExpanded(string key) => key.StartsWith("recent/", StringComparison.Ordinal) ? !CollapsedRecent.Contains(key) : Expanded.Contains(key);
+
+    private static readonly Windows.UI.Color Yellow = Editor.SyntaxTheme.Rgb(0xE2A93C);
 
     private void Rebuild()
     {
@@ -194,94 +212,137 @@ public sealed class BranchesPopup
             Add(new ActionRow(L10n.Tr("branches.action.new"), Common.Icon.Branch, "Ctrl+Alt+N", () => ops.NewBranch()));
             Add(new ActionRow(L10n.Tr("branches.action.checkoutRevision"), Common.Icon.Commit, null, ops.CheckoutRevisionDialog));
         }
-        // “最近”分组：最近签出过的本地分支（只有当前分支时不显示），与 IDEA 一致只在未搜索时显示。
-        if (query.Length == 0)
+
+        var favorites = BranchFavorites.Get(_model);
+        var roots = new List<BranchTreeNode>();
+        // “最近”分组：最近签出过的本地分支，同样按 `/` 分文件夹，保持签出顺序；搜索时只保留匹配项（与 IDEA 一致）。
+        // 未搜索且只有当前分支时不显示。
+        var recent = _recent.Select(name => _model.Branches.FirstOrDefault(b => b.Kind == BranchKind.Local && b.Name == name)).OfType<BranchRef>().ToList();
+        if (query.Length == 0 ? recent.Count > 1 : recent.Any(b => Matches(b.Name)))
         {
-            var recent = _recent.Select(name => _model.Branches.FirstOrDefault(b => b.Kind == BranchKind.Local && b.Name == name)).OfType<BranchRef>().ToList();
-            if (recent.Count > 1)
-            {
-                Section(L10n.Tr("branches.section.recent"));
-                foreach (var branch in recent) Add(new BranchRow(branch));
-            }
+            var group = new BranchTreeNode(BranchTreeNode.NodeKind.Group, L10n.Tr("branches.section.recent"), "recent");
+            BranchTree.AddBranches(group, recent.Where(b => Matches(b.Name)), favorites, keepOrder: true);
+            roots.Add(group);
         }
-        var local = _model.Branches.Where(b => b.Kind == BranchKind.Local && Matches(b.Name)).OrderByDescending(b => b.IsCurrent).ToList();
-        var remote = _model.Branches.Where(b => b.Kind == BranchKind.Remote && Matches(b.Name)).ToList();
-        var tags = _model.Tags.Where(t => Matches(t.Name)).ToList();
-        if (local.Count > 0)
+        foreach (var (kind, key, title) in new[] { (BranchKind.Local, "local", L10n.Tr("branches.section.local")), (BranchKind.Remote, "remote", L10n.Tr("branches.section.remote")) })
         {
-            Section(L10n.Tr("branches.section.local"));
-            foreach (var branch in local) Add(new BranchRow(branch));
+            var group = new BranchTreeNode(BranchTreeNode.NodeKind.Group, title, key);
+            BranchTree.AddBranches(group, _model.Branches.Where(b => b.Kind == kind && Matches(b.Name)), favorites);
+            if (group.Children.Count > 0) roots.Add(group);
         }
-        if (remote.Count > 0)
+        var tags = new BranchTreeNode(BranchTreeNode.NodeKind.Group, L10n.Tr("branches.section.tags"), "tags");
+        BranchTree.AddTags(tags, _model.Tags.Where(t => Matches(t.Name)));
+        if (tags.Children.Count > 0) roots.Add(tags);
+
+        foreach (var (node, depth) in BranchTree.Flatten(roots, n => IsExpanded(n.Key), expandAll: query.Length > 0))
         {
-            Section(L10n.Tr("branches.section.remote"));
-            foreach (var branch in remote) Add(new BranchRow(branch));
-        }
-        if (tags.Count > 0)
-        {
-            Section(L10n.Tr("branches.section.tags"));
-            foreach (var tag in tags) Add(new TagRow(tag));
+            Add(new TreeRow(node, depth), favorites);
         }
     }
 
-    private void Section(string title) => _list.Items.Add(new ListViewItem
+    private void Add(Row row, ISet<string>? favorites = null)
     {
-        IsEnabled = false,
-        MinHeight = 26,
-        Content = new TextBlock { Text = title, FontSize = 11, FontWeight = FontWeights.SemiBold, Style = (Style)Application.Current.Resources["SecondaryTextStyle"] },
-    });
-
-    private void Add(Row row)
-    {
-        var (icon, title, detail, bold) = row switch
-        {
-            ActionRow a => (a.Icon, a.Title, a.Shortcut ?? "", false),
-            BranchRow b => (Common.Icon.Branch, b.Branch.Name, BranchDetail(b.Branch), b.Branch.IsCurrent),
-            TagRow t => (Common.Icon.Commit, t.Tag.Name, t.Tag.Message ?? t.Tag.Target[..Math.Min(8, t.Tag.Target.Length)], false),
-            _ => (Common.Icon.File, "", "", false),
-        };
         var content = new Grid { ColumnSpacing = 8 };
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
-        var name = new TextBlock { Text = title, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal };
-        var secondary = new TextBlock { Text = detail, Style = (Style)Application.Current.Resources["SecondaryTextStyle"], VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 180 };
-        Grid.SetColumn(name, 1);
+        var name = new TextBlock { TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        var secondary = new TextBlock { Style = (Style)Application.Current.Resources["SecondaryTextStyle"], VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 180 };
         Grid.SetColumn(secondary, 2);
-        content.Children.Add(Icons.Create(icon, 14));
-        if (row is BranchRow { Branch: { Kind: BranchKind.Local } local } && (local.Ahead > 0 || local.Behind > 0))
+        var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { name } };
+        Grid.SetColumn(label, 1);
+        FrameworkElement leading;
+        switch (row)
         {
-            // 本地分支名后的传入 / 传出箭头（IDEA 分支弹窗中的小箭头）。
-            var indicator = new Controls.IncomingOutgoingIndicator(showCounts: true);
-            indicator.Set(local.Ahead, local.Behind);
-            name.TextTrimming = TextTrimming.CharacterEllipsis;
-            var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { name, indicator } };
-            Grid.SetColumn(label, 1);
-            content.Children.Add(label);
+            case ActionRow action:
+                leading = Icons.Create(action.Icon, 14);
+                name.Text = action.Title;
+                secondary.Text = action.Shortcut ?? "";
+                break;
+            case TreeRow { Node: var node, Depth: var depth }:
+            {
+                // 缩进 + 展开箭头 + 图标，与编辑器的文件树一样。
+                var chevronArea = new Grid { Width = 12, Height = 14 };
+                if (node.IsExpandable)
+                {
+                    var chevron = Icons.Create(Common.Icon.ChevronDown, 11);
+                    chevron.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
+                    chevron.RenderTransform = new RotateTransform { Angle = IsExpanded(node.Key) || _search.Text.Trim().Length > 0 ? 0 : -90 };
+                    chevronArea.Children.Add(chevron);
+                }
+                var yellow = new SolidColorBrush(Yellow);
+                FrameworkElement? icon = node.Kind switch
+                {
+                    BranchTreeNode.NodeKind.Folder => Icons.Create(Common.Icon.Folder, 14),
+                    BranchTreeNode.NodeKind.Branch when node.Branch!.IsCurrent => Icons.Create(Common.Icon.Tag, 14, yellow),
+                    BranchTreeNode.NodeKind.Branch when favorites?.Contains(node.Branch!.FullRef) == true => Icons.Create(Common.Icon.Star, 14, yellow),
+                    BranchTreeNode.NodeKind.Branch => Icons.Create(Common.Icon.Branch, 14),
+                    BranchTreeNode.NodeKind.Tag => Icons.Create(Common.Icon.Tag, 14),
+                    _ => null,
+                };
+                var lead = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(depth * 14, 0, 0, 0), Children = { chevronArea } };
+                if (icon is not null) lead.Children.Add(icon);
+                leading = lead;
+                SetHighlighted(name, node.Title, node.Kind == BranchTreeNode.NodeKind.Group ? "" : _search.Text.Trim());
+                name.FontWeight = node.Kind == BranchTreeNode.NodeKind.Group || node.Branch?.IsCurrent == true ? FontWeights.SemiBold : FontWeights.Normal;
+                if (node.Branch is { } branch)
+                {
+                    secondary.Text = BranchDetail(branch);
+                    if (branch.Kind == BranchKind.Local && (branch.Ahead > 0 || branch.Behind > 0))
+                    {
+                        // 本地分支名后的传入 / 传出箭头与数量（IDEA 分支弹窗中的小箭头）。
+                        var indicator = new Controls.IncomingOutgoingIndicator(showCounts: true);
+                        indicator.Set(branch.Ahead, branch.Behind);
+                        label.Children.Add(indicator);
+                    }
+                }
+                else if (node.Tag is { } tag)
+                {
+                    secondary.Text = tag.Message ?? tag.Target[..Math.Min(8, tag.Target.Length)];
+                }
+                if (node.Kind is BranchTreeNode.NodeKind.Branch or BranchTreeNode.NodeKind.Tag)
+                {
+                    // 分支与标签行右侧的 ›：点击展开操作子菜单（与 IDEA 一致）。
+                    var arrow = Icons.Create(Common.Icon.ChevronRight, 12);
+                    arrow.Opacity = 0.7;
+                    arrow.VerticalAlignment = VerticalAlignment.Center;
+                    Grid.SetColumn(arrow, 3);
+                    content.Children.Add(arrow);
+                }
+                break;
+            }
+            default:
+                return;
         }
-        else
-        {
-            content.Children.Add(name);
-        }
+        content.Children.Add(leading);
+        content.Children.Add(label);
         content.Children.Add(secondary);
-        if (row is BranchRow or TagRow)
-        {
-            // 分支与标签行右侧的 ›：点击展开操作子菜单（与 IDEA 一致）。
-            var chevron = Icons.Create(Common.Icon.ChevronRight, 12);
-            chevron.Opacity = 0.7;
-            chevron.VerticalAlignment = VerticalAlignment.Center;
-            Grid.SetColumn(chevron, 3);
-            content.Children.Add(chevron);
-        }
         var item = new ListViewItem { Content = content, Tag = row, MinHeight = 28, HorizontalContentAlignment = HorizontalAlignment.Stretch };
-        if (row is BranchRow branchRow) ToolTipService.SetToolTip(item, branchRow.Branch.Subject);
+        if (row is TreeRow { Node.Branch: { } tipBranch }) ToolTipService.SetToolTip(item, tipBranch.Subject);
         _list.Items.Add(item);
+    }
+
+    /// 显示文字并高亮其中与搜索内容匹配的部分（与 IDEA 一样以黄色底色标出）。
+    private static void SetHighlighted(TextBlock block, string text, string query)
+    {
+        block.Text = text;
+        block.TextHighlighters.Clear();
+        if (query.Length == 0) return;
+        var highlighter = new Microsoft.UI.Xaml.Documents.TextHighlighter
+        {
+            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x90, 0xE2, 0xA9, 0x3C)),
+        };
+        for (var index = text.IndexOf(query, StringComparison.OrdinalIgnoreCase); index >= 0; index = text.IndexOf(query, index + query.Length, StringComparison.OrdinalIgnoreCase))
+        {
+            highlighter.Ranges.Add(new Microsoft.UI.Xaml.Documents.TextRange { StartIndex = index, Length = query.Length });
+        }
+        if (highlighter.Ranges.Count > 0) block.TextHighlighters.Add(highlighter);
     }
 
     private static string BranchDetail(BranchRef branch)
     {
-        // 与 IDEA 一致只显示上游分支；领先 / 落后改由分支名后的箭头表示（悬停显示提交数）。
+        // 与 IDEA 一致只显示上游分支；领先 / 落后由分支名后的箭头表示（悬停显示提交数）。
         var parts = new List<string>();
         if (branch.Upstream is { } upstream) parts.Add(upstream);
         if (branch.UpstreamGone) parts.Add(L10n.Tr("branches.upstreamGone"));
@@ -296,13 +357,26 @@ public sealed class BranchesPopup
                 _flyout.Hide();
                 _ = action.Run();
                 break;
-            case BranchRow branch:
-                BranchMenu(branch.Branch).ShowAt(item, new FlyoutShowOptions { Placement = FlyoutPlacementMode.RightEdgeAlignedTop });
+            case TreeRow { Node.IsExpandable: true } group:
+                Toggle(group.Node.Key);
                 break;
-            case TagRow tag:
-                TagMenu(tag.Tag).ShowAt(item, new FlyoutShowOptions { Placement = FlyoutPlacementMode.RightEdgeAlignedTop });
+            case TreeRow { Node.Branch: { } branch }:
+                BranchMenu(branch).ShowAt(item, new FlyoutShowOptions { Placement = FlyoutPlacementMode.RightEdgeAlignedTop });
+                break;
+            case TreeRow { Node.Tag: { } tag }:
+                TagMenu(tag).ShowAt(item, new FlyoutShowOptions { Placement = FlyoutPlacementMode.RightEdgeAlignedTop });
                 break;
         }
+    }
+
+    /// 展开或收起分组 / 文件夹（搜索中全部展开，不改变保存的状态），之后保持选中该行以便继续用键盘操作。
+    private void Toggle(string key)
+    {
+        if (_search.Text.Trim().Length > 0) return;
+        var set = key.StartsWith("recent/", StringComparison.Ordinal) ? CollapsedRecent : Expanded;
+        if (!set.Remove(key)) set.Add(key);
+        Rebuild();
+        _list.SelectedItem = _list.Items.OfType<ListViewItem>().FirstOrDefault(i => i.Tag is TreeRow r && r.Node.Key == key);
     }
 
     private MenuFlyoutItem Item(string text, Func<Task>? action, bool enabled = true)
@@ -319,43 +393,8 @@ public sealed class BranchesPopup
         return item;
     }
 
-    /// 分支操作菜单，项目与 IDEA 的分支子菜单一致；暂未实现的项显示为禁用。
-    private MenuFlyout BranchMenu(BranchRef branch)
-    {
-        var name = branch.Name;
-        var current = _model.CurrentBranchTitle;
-        var isCurrent = branch.IsCurrent;
-        var ops = _operations;
-        var local = branch.Kind == BranchKind.Local;
-        var menu = new MenuFlyout();
-        menu.Items.Add(Item(L10n.Tr("branches.menu.checkout"),
-            () => ops.Checkout(local ? GitOperations.TargetKind.Local : GitOperations.TargetKind.Remote, name), !isCurrent));
-        menu.Items.Add(Item(L10n.Tr("branches.menu.newFrom", name), () => ops.NewBranch(name)));
-        menu.Items.Add(Item(L10n.Tr("branches.menu.checkoutAndRebase", current), () => ops.CheckoutAndRebase(name), local && !isCurrent));
-        menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(Item(L10n.Tr("branches.menu.compare", current), () => ops.CompareWithCurrent(name), !isCurrent));
-        menu.Items.Add(Item(L10n.Tr("branches.menu.showDiff"), () => ops.ShowDiffWithWorkingTree(name)));
-        var model = _model;
-        menu.Items.Add(Item(L10n.Tr("branches.menu.aiReview", current, name), ReviewBranch is { } review ? () => review(model, name) : null, !isCurrent));
-        menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(Item(L10n.Tr("branches.menu.rebaseOnto", current, name), () => ops.Rebase(name), !isCurrent));
-        menu.Items.Add(Item(L10n.Tr("branches.menu.mergeInto", name, current), () => ops.Merge(name), !isCurrent));
-        menu.Items.Add(new MenuFlyoutSeparator());
-        if (local)
-        {
-            menu.Items.Add(Item(L10n.Tr("branches.menu.update"), () => ops.UpdateBranch(name), branch.Upstream is not null));
-            menu.Items.Add(Item(L10n.Tr("branches.menu.push"), ops.Push, isCurrent));
-            menu.Items.Add(new MenuFlyoutSeparator());
-            menu.Items.Add(Item(L10n.Tr("branches.menu.rename"), () => ops.Rename(name)));
-            menu.Items.Add(Item(L10n.Tr("branches.menu.delete"), () => ops.Delete(name), !isCurrent));
-        }
-        else
-        {
-            menu.Items.Add(Item(L10n.Tr("branches.menu.pull", name, current), () => ops.Merge(name)));
-            menu.Items.Add(Item(L10n.Tr("branches.menu.delete"), () => ops.DeleteRemoteBranch(name)));
-        }
-        return menu;
-    }
+    /// 分支操作菜单（与 Git 日志左侧分支面板的右键菜单共用）。
+    private MenuFlyout BranchMenu(BranchRef branch) => BranchMenus.ForBranch(branch, _model, _operations, _flyout.Hide, ReviewBranch);
 
     private MenuFlyout TagMenu(TagInfo tag)
     {

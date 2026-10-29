@@ -482,14 +482,17 @@ final class GitOperations {
     }
 
     /// 打开 Push 对话框：先在后台读取推送目标与待推送提交。
-    func push() {
+    /// 打开 Push 对话框；`branch` 为要推送的本地分支，默认为当前分支（IDEA 的分支菜单可以推送任意本地分支）。
+    func push(branch: String? = nil) {
         guard !isRunning else {
             NSSound.beep()
             return
         }
         let repository = model.repository
         Task {
-            let result = await Task.detached { Result { (try repository.pushTarget(), try repository.remotes()) } }.value
+            let result = await Task.detached {
+                Result { (try branch.map { try repository.pushTargetFor(branch: $0) } ?? repository.pushTarget(), try repository.remotes()) }
+            }.value
             switch result {
             case let .success((target, remotes)):
                 PushDialog(target: target, remotes: remotes.map(\.name), projectName: model.projectName)

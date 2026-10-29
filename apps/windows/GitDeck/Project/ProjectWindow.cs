@@ -283,6 +283,7 @@ public sealed class ProjectWindow : Window
         _refreshButton.Click += (_, _) => _workspace.RefreshAll();
         // AI 评审分支（批次 C 中改为评审所选仓库）。
         _branchesPopup.ReviewBranch = (model, name) => _aiReview.ReviewBranch(name, model);
+        _gitWindow.Log.ReviewBranch = (model, name) => _aiReview.ReviewBranch(name, model);
         _aiReview.Workspace = _workspace;
         _banner.AddClicked += () => _workspace.Add([.. _workspace.Candidates.Select(c => c.Path)]);
         _banner.IgnoreClicked += () => _workspace.Ignore([.. _workspace.Candidates.Select(c => c.Path)]);

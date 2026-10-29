@@ -55,6 +55,7 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
     private let datePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let table = NSTableView()
     private let details = CommitDetailsView()
+    private let branchesPane = BranchesPane()
     private let statusLabel = NSTextField.label("", font: Theme.smallFont, color: Theme.secondaryText)
 
     private var commits: [LogCommit] = []
@@ -154,18 +155,25 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
         tableScroll.hasVerticalScroller = true
         tableScroll.drawsBackground = false
 
+        // 左侧分支面板（按钮列在分隔视图外，分支树可拖动调整宽度）| 提交列表 | 提交详情（与 IDEA 的 Log 标签页布局一致）。
         let split = NSSplitView()
         split.isVertical = true
         split.dividerStyle = .thin
+        split.addArrangedSubview(branchesPane.tree)
         split.addArrangedSubview(tableScroll)
         split.addArrangedSubview(details)
-        split.setHoldingPriority(.defaultLow, forSubviewAt: 0)
-        split.setHoldingPriority(.defaultHigh, forSubviewAt: 1)
+        split.setHoldingPriority(.defaultHigh, forSubviewAt: 0)
+        split.setHoldingPriority(.defaultLow, forSubviewAt: 1)
+        split.setHoldingPriority(.defaultHigh, forSubviewAt: 2)
         split.translatesAutoresizingMaskIntoConstraints = false
         details.translatesAutoresizingMaskIntoConstraints = false
+        branchesPane.onFilter = { [weak self] revision in self?.filterBranch(revision) }
+        branchesPane.onNavigate = { [weak self] hash in self?.reveal(hash) }
+        branchesPane.onCollapsedChange = { split.adjustSubviews() }
 
         let divider = SeparatorLine(.horizontal)
-        for view in [filterBar, divider, split] as [NSView] { addSubview(view) }
+        let paneToolbar = branchesPane.toolbar
+        for view in [filterBar, divider, paneToolbar, split] as [NSView] { addSubview(view) }
         NSLayoutConstraint.activate([
             filterBar.topAnchor.constraint(equalTo: topAnchor, constant: 4),
             filterBar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
@@ -175,8 +183,11 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
             divider.topAnchor.constraint(equalTo: filterBar.bottomAnchor, constant: 4),
             divider.leadingAnchor.constraint(equalTo: leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: trailingAnchor),
+            paneToolbar.topAnchor.constraint(equalTo: divider.bottomAnchor),
+            paneToolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            paneToolbar.bottomAnchor.constraint(equalTo: bottomAnchor),
             split.topAnchor.constraint(equalTo: divider.bottomAnchor),
-            split.leadingAnchor.constraint(equalTo: leadingAnchor),
+            split.leadingAnchor.constraint(equalTo: paneToolbar.trailingAnchor),
             split.trailingAnchor.constraint(equalTo: trailingAnchor),
             split.bottomAnchor.constraint(equalTo: bottomAnchor),
             details.widthAnchor.constraint(greaterThanOrEqualToConstant: 260),
@@ -221,6 +232,9 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
         let selected = branchPopup.selectedItem?.representedObject as? String
         branchPopup.removeAllItems()
         branchPopup.addItem(withTitle: tr("log.filter.branch.all"))
+        let head = NSMenuItem(title: tr("log.filter.branch.value", "HEAD"), action: nil, keyEquivalent: "")
+        head.representedObject = "HEAD"
+        branchPopup.menu?.addItem(head)
         let groups: [(BranchKind, String)] = [(.local, tr("branches.section.local")), (.remote, tr("branches.section.remote"))]
         for (kind, title) in groups {
             let branches = model.branches.filter { $0.kind == kind }
@@ -240,6 +254,13 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
         } else {
             branchPopup.selectItem(at: 0)
         }
+    }
+
+    /// 按分支筛选（左侧分支面板选中分支时）：`revision` 为完整引用名或 `HEAD`，nil 表示不按分支筛选。
+    func filterBranch(_ revision: String?) {
+        let item = revision.flatMap { r in branchPopup.itemArray.first { $0.representedObject as? String == r } }
+        if let item { branchPopup.select(item) } else { branchPopup.selectItem(at: 0) }
+        filterChanged()
     }
 
     private func rebuildUserPopup() {
@@ -377,6 +398,7 @@ final class LogView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearc
         guard signature != lastSignature else { return }
         lastSignature = signature
         rebuildBranchPopup()
+        branchesPane.update(model: model, operations: operations(for: model))
         reload()
     }
 

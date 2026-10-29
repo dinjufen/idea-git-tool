@@ -193,6 +193,17 @@ impl Repository {
     /// 当前分支的推送目标与待推送提交。
     pub fn push_target(&self) -> std::result::Result<PushTarget, CoreError> {
         let branch = self.current_branch().ok_or(CoreError::DetachedHead)?;
+        self.push_target_for(branch)
+    }
+
+    /// 某个本地分支的推送目标与待推送提交（IDEA 分支菜单中可以推送非当前分支）。
+    pub fn push_target_for(&self, branch: String) -> std::result::Result<PushTarget, CoreError> {
+        if branch.starts_with('-') {
+            return Err(CoreError::Parse {
+                detail: format!("invalid branch: {branch:?}"),
+            });
+        }
+        let upstream_spec = format!("{branch}@{{upstream}}");
         let upstream_remote = self.config(&format!("branch.{branch}.remote"));
         let upstream_merge = self.config(&format!("branch.{branch}.merge"));
         let has_upstream = upstream_remote.is_some()
@@ -200,7 +211,7 @@ impl Repository {
                 .git
                 .run(
                     &self.root,
-                    ["rev-parse", "--verify", "--quiet", "@{upstream}"],
+                    ["rev-parse", "--verify", "--quiet", upstream_spec.as_str()],
                 )
                 .is_ok();
 

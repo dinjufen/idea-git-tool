@@ -47,6 +47,9 @@ public enum Icon
     ClearAll,
     Edit,
     ChevronRight,
+    Tag,
+    Star,
+    Target,
 }
 
 public static class Icons
@@ -86,6 +89,9 @@ public static class Icons
         Icon.Tray => "M2,9.5 L2,13.5 L14,13.5 L14,9.5 L10.5,9.5 L9.8,11 L6.2,11 L5.5,9.5 Z M2,9.5 L3.8,3 L12.2,3 L14,9.5",
         Icon.Unstash => "M2,9.5 L2,13.5 L14,13.5 L14,9.5 M8,10.5 L8,2.5 M5,5.5 L8,2.5 L11,5.5",
         Icon.Pop => "M3.5,1.5 L9.5,1.5 L12.5,4.5 L12.5,14.5 L3.5,14.5 Z M8,12 L8,6.5 M5.8,8.7 L8,6.5 L10.2,8.7",
+        Icon.Tag => "M2.5,2.5 L8,2.5 L13.5,8 L8,13.5 L2.5,8 Z M5.5,4.7 A0.8,0.8 0 1 1 5.49,4.7 Z",
+        Icon.Star => "M8,2 L9.8,6 L14,6.4 L10.8,9.2 L11.7,13.4 L8,11.2 L4.3,13.4 L5.2,9.2 L2,6.4 L6.2,6 Z",
+        Icon.Target => "M8,3.5 A4.5,4.5 0 1 1 7.99,3.5 Z M8,1 L8,5 M8,11 L8,15 M1,8 L5,8 M11,8 L15,8",
         Icon.ChevronRight => "M6.5,4 L10.5,8 L6.5,12",
         Icon.Edit => "M10.5,2.5 L13.5,5.5 L5.5,13.5 L2.5,13.5 L2.5,10.5 Z M9,4 L12,7",
         Icon.Trash => "M2.5,4.5 L13.5,4.5 M6,4.5 L6,2.5 L10,2.5 L10,4.5 M4,4.5 L4.8,13.5 L11.2,13.5 L12,4.5",

@@ -199,6 +199,13 @@ fn push_target_and_push_new_branch_with_upstream() {
         "origin/feature"
     );
     assert!(repo.push_target().unwrap().commits.is_empty());
+
+    // 非当前分支的推送目标：main 有上游，列出它尚未推送的两个提交。
+    let main = repo.push_target_for("main".into()).unwrap();
+    assert!(main.has_upstream);
+    assert_eq!(main.local_branch, "main");
+    assert_eq!(main.remote_branch, "main");
+    assert_eq!(main.commits.len(), 2);
 }
 
 #[test]

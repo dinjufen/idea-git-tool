@@ -5,9 +5,17 @@ import GitDeckCore
 final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     private enum Row {
         case action(title: String, symbol: String, shortcut: String?, run: @MainActor () -> Void)
-        case section(String)
-        case branch(BranchRef)
-        case tag(TagInfo)
+        /// 分支树中的一行：分组、文件夹、分支或标签（与 IDEA 分支弹窗一样可以展开、收起）。
+        case node(BranchTreeNode, depth: Int)
+    }
+
+    /// 展开的分组与文件夹：默认展开“最近”和“本地”，远程、标签与文件夹收起（与 IDEA 一致）；在本次运行中保持。
+    private static var expanded: Set<String> = ["recent", "local"]
+    /// 收起的“最近”分组内的文件夹（这些文件夹默认展开，因为“最近”只列出少量分支）。
+    private static var collapsedRecent: Set<String> = []
+
+    private static func isExpanded(_ key: String) -> Bool {
+        key.hasPrefix("recent/") ? !collapsedRecent.contains(key) : expanded.contains(key)
     }
 
     /// 弹窗所在的 popover；执行操作前先关闭，使后续对话框附着在项目窗口上。
@@ -19,6 +27,7 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
     private let search = NSSearchField()
     private let table = NSTableView()
     private var rows: [Row] = []
+    private var favorites: Set<String> = []
     /// 最近签出过的本地分支（“最近”分组），打开弹窗时在后台读取。
     private var recent: [String] = []
 
@@ -143,30 +152,27 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
                 .action(title: tr("branches.action.checkoutRevision"), symbol: "tag", shortcut: nil, run: { ops.checkoutRevisionDialog() }),
             ]
         }
-        // “最近”分组：最近签出过的本地分支（只有当前分支时不显示），与 IDEA 一致只在未搜索时显示。
-        if query.isEmpty {
-            let recentBranches = recent.compactMap { name in model.branches.first { $0.kind == .local && $0.name == name } }
-            if recentBranches.count > 1 {
-                rows.append(.section(tr("branches.section.recent")))
-                rows += recentBranches.map(Row.branch)
-            }
+        let favorites = BranchFavorites.get(model)
+        var roots: [BranchTreeNode] = []
+        // “最近”分组：最近签出过的本地分支，同样按 `/` 分文件夹，保持签出顺序；搜索时只保留匹配项（与 IDEA 一致）。
+        // 未搜索且只有当前分支时不显示。
+        let recentBranches = recent.compactMap { name in model.branches.first { $0.kind == .local && $0.name == name } }
+        if query.isEmpty ? recentBranches.count > 1 : recentBranches.contains(where: matches) {
+            let group = BranchTreeNode(.group, tr("branches.section.recent"), key: "recent")
+            BranchTree.addBranches(group, recentBranches.filter(matches), favorites: favorites, keepOrder: true)
+            roots.append(group)
         }
-        let local = model.branches.filter { $0.kind == .local && matches($0) }
-        let remote = model.branches.filter { $0.kind == .remote && matches($0) }
-        if !local.isEmpty {
-            rows.append(.section(tr("branches.section.local")))
-            // 当前分支置顶，与 IDEA 一致。
-            rows += local.sorted { $0.isCurrent && !$1.isCurrent }.map(Row.branch)
+        for (kind, key, title) in [(BranchKind.local, "local", tr("branches.section.local")), (.remote, "remote", tr("branches.section.remote"))] {
+            let group = BranchTreeNode(.group, title, key: key)
+            BranchTree.addBranches(group, model.branches.filter { $0.kind == kind && matches($0) }, favorites: favorites)
+            if !group.children.isEmpty { roots.append(group) }
         }
-        if !remote.isEmpty {
-            rows.append(.section(tr("branches.section.remote")))
-            rows += remote.map(Row.branch)
-        }
-        let tags = model.tags.filter { query.isEmpty || $0.name.lowercased().contains(query) }
-        if !tags.isEmpty {
-            rows.append(.section(tr("branches.section.tags")))
-            rows += tags.map(Row.tag)
-        }
+        let tags = BranchTreeNode(.group, tr("branches.section.tags"), key: "tags")
+        BranchTree.addTags(tags, model.tags.filter { query.isEmpty || $0.name.lowercased().contains(query) })
+        if !tags.children.isEmpty { roots.append(tags) }
+        let searching = !query.isEmpty
+        rows += BranchTree.flatten(roots, isExpanded: { Self.isExpanded($0.key) }, expandAll: searching).map { Row.node($0.node, depth: $0.depth) }
+        self.favorites = favorites
         table.reloadData()
     }
 
@@ -177,73 +183,38 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
         case let .action(_, _, _, run):
             popover?.close()
             run()
-        case let .branch(branch):
+        case let .node(node, _) where node.isExpandable:
+            toggle(node.key)
+        case let .node(node, _):
             guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) else { return }
-            branchMenu(for: branch).popUp(positioning: nil, at: NSPoint(x: cell.bounds.maxX - 20, y: cell.bounds.midY), in: cell)
-        case let .tag(tag):
-            guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) else { return }
-            tagMenu(for: tag).popUp(positioning: nil, at: NSPoint(x: cell.bounds.maxX - 20, y: cell.bounds.midY), in: cell)
-        case .section:
-            break
+            let point = NSPoint(x: cell.bounds.maxX - 20, y: cell.bounds.midY)
+            if let branch = node.branch {
+                branchMenu(for: branch).popUp(positioning: nil, at: point, in: cell)
+            } else if let tag = node.tag {
+                tagMenu(for: tag).popUp(positioning: nil, at: point, in: cell)
+            }
         }
     }
 
-    /// 分支操作菜单，项目与 IDEA 的分支子菜单一致；暂未实现的项显示为禁用。
+    /// 展开或收起分组 / 文件夹（搜索中全部展开，不改变保存的状态），之后保持选中该行。
+    private func toggle(_ key: String) {
+        guard search.stringValue.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        if key.hasPrefix("recent/") {
+            if Self.collapsedRecent.contains(key) { Self.collapsedRecent.remove(key) } else { Self.collapsedRecent.insert(key) }
+        } else if Self.expanded.contains(key) {
+            Self.expanded.remove(key)
+        } else {
+            Self.expanded.insert(key)
+        }
+        rebuild()
+        if let index = rows.firstIndex(where: { if case let .node(node, _) = $0 { return node.key == key }; return false }) {
+            table.selectRowIndexes([index], byExtendingSelection: false)
+        }
+    }
+
+    /// 分支操作菜单（与 Git 日志左侧分支面板的右键菜单共用）。
     private func branchMenu(for branch: BranchRef) -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        let name = branch.name
-        let current = model.currentBranchTitle
-        let isCurrent = branch.isCurrent
-        let ops = operations
-
-        func add(_ title: String, enabled: Bool = true, _ action: (@MainActor () -> Void)?) {
-            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            if let action, enabled {
-                let handler = MenuAction { [weak self] in
-                    self?.popover?.close()
-                    action()
-                }
-                item.target = handler
-                item.action = #selector(MenuAction.invoke)
-                item.representedObject = handler
-            } else {
-                item.isEnabled = false
-                if action == nil { item.toolTip = tr("common.notImplemented") }
-            }
-            menu.addItem(item)
-        }
-
-        if branch.kind == .local {
-            add(tr("branches.menu.checkout"), enabled: !isCurrent) { ops.checkout(.local(name)) }
-        } else {
-            add(tr("branches.menu.checkout")) { ops.checkout(.remote(name)) }
-        }
-        add(tr("branches.menu.newFrom", name)) { ops.newBranch(from: name) }
-        add(tr("branches.menu.checkoutAndRebase", current), enabled: branch.kind == .local && !isCurrent) {
-            ops.checkoutAndRebase(name)
-        }
-        menu.addItem(.separator())
-        add(tr("branches.menu.compare", current), enabled: !isCurrent) { ops.compareWithCurrent(name) }
-        add(tr("branches.menu.showDiff")) { ops.showDiffWithWorkingTree(name) }
-        add(tr("branches.menu.aiReview", current, name), enabled: !isCurrent && ops.aiReview != nil) {
-            ops.aiReview?.reviewBranch(against: name, in: ops.model)
-        }
-        menu.addItem(.separator())
-        add(tr("branches.menu.rebaseOnto", current, name), enabled: !isCurrent) { ops.rebase(onto: name) }
-        add(tr("branches.menu.mergeInto", name, current), enabled: !isCurrent) { ops.merge(name) }
-        menu.addItem(.separator())
-        if branch.kind == .local {
-            add(tr("branches.menu.update"), enabled: branch.upstream != nil) { ops.updateBranch(name) }
-            add(tr("branches.menu.push"), enabled: isCurrent) { ops.push() }
-            menu.addItem(.separator())
-            add(tr("branches.menu.rename")) { ops.rename(name) }
-            add(tr("branches.menu.delete"), enabled: !isCurrent) { ops.delete(name) }
-        } else {
-            add(tr("branches.menu.pull", name, current)) { ops.merge(name) }
-            add(tr("branches.menu.delete")) { ops.deleteRemoteBranch(name) }
-        }
-        return menu
+        BranchMenus.menu(for: branch, model: model, operations: operations) { [weak self] in self?.popover?.close() }
     }
 
     /// 标签操作菜单。
@@ -282,87 +253,117 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
-    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        if case .section = rows[row] { return 26 }
-        return 24
-    }
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat { 24 }
 
-    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-        if case .section = rows[row] { return false }
-        return true
-    }
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { true }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         switch rows[row] {
-        case let .section(title):
-            let label = NSTextField.label(title, font: Theme.font(ofSize: 11, weight: .semibold), color: Theme.secondaryText)
-            return wrap(label, leading: 12)
         case let .action(title, symbol, shortcut, _):
-            return BranchRowView(symbol: symbol, title: title, detail: shortcut, enabled: true)
-        case let .tag(tag):
-            let view = BranchRowView(symbol: "tag", title: tag.name, detail: tag.message ?? String(tag.target.prefix(8)), enabled: true, hasSubmenu: true)
-            view.toolTip = tag.message
-            return view
-        case let .branch(branch):
-            // 与 IDEA 一致只显示上游分支；领先 / 落后改由分支名后的箭头表示（悬停显示提交数）。
-            var detail: [String] = []
-            if let upstream = branch.upstream { detail.append(upstream) }
-            if branch.upstreamGone { detail.append(tr("branches.upstreamGone")) }
-            let symbol = branch.isCurrent ? "tag.fill" : "arrow.triangle.branch"
-            let view = BranchRowView(symbol: symbol, title: branch.name, detail: detail.joined(separator: "  "), enabled: true,
-                                     aheadBehind: branch.kind == .local ? (branch.ahead, branch.behind) : nil, hasSubmenu: true)
-            view.toolTip = branch.subject
-            return view
+            return BranchRowView(symbol: symbol, title: title, detail: shortcut)
+        case let .node(node, depth):
+            let searching = !search.stringValue.trimmingCharacters(in: .whitespaces).isEmpty
+            let disclosure: Bool? = node.isExpandable ? (searching || Self.isExpanded(node.key)) : nil
+            let highlight = searching ? search.stringValue.trimmingCharacters(in: .whitespaces) : ""
+            let indent = CGFloat(depth) * 14
+            switch node.kind {
+            case .group:
+                return BranchRowView(symbol: nil, title: node.title, detail: nil, bold: true, indent: indent, disclosure: disclosure)
+            case .folder:
+                return BranchRowView(symbol: "folder", title: node.title, detail: nil, indent: indent, disclosure: disclosure, highlight: highlight)
+            case .tag:
+                let view = BranchRowView(symbol: "tag", title: node.title, detail: node.tag.map { $0.message ?? String($0.target.prefix(8)) },
+                                         indent: indent, hasSubmenu: true, highlight: highlight)
+                view.toolTip = node.tag?.message
+                return view
+            case .branch, .head:
+                guard let branch = node.branch else { return nil }
+                // 与 IDEA 一致只显示上游分支；领先 / 落后由分支名后的箭头与数量表示。
+                var detail: [String] = []
+                if let upstream = branch.upstream { detail.append(upstream) }
+                if branch.upstreamGone { detail.append(tr("branches.upstreamGone")) }
+                let symbol = branch.isCurrent ? "tag.fill" : favorites.contains(branch.fullRef) ? "star.fill" : "arrow.triangle.branch"
+                let tint = branch.isCurrent || favorites.contains(branch.fullRef) ? NSColor(hex: 0xE2A93C) : Theme.text
+                let view = BranchRowView(symbol: symbol, tint: tint, title: node.title, detail: detail.joined(separator: "  "), bold: branch.isCurrent,
+                                         indent: indent, aheadBehind: branch.kind == .local ? (branch.ahead, branch.behind) : nil, hasSubmenu: true,
+                                         highlight: highlight)
+                view.toolTip = branch.subject
+                return view
+            }
         }
-    }
-
-    private func wrap(_ view: NSView, leading: CGFloat) -> NSView {
-        let container = NSView()
-        container.addSubview(view)
-        NSLayoutConstraint.activate([
-            view.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: leading),
-            view.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-        ])
-        return container
     }
 }
 
 private final class BranchRowView: NSView {
-    /// `aheadBehind`：本地分支的领先 / 落后提交数，在分支名后显示传入 / 传出箭头。
+    /// `indent`：树的缩进；`disclosure`：分组 / 文件夹的展开箭头（true 展开、false 收起、nil 不显示）。
+    /// `aheadBehind`：本地分支的领先 / 落后提交数，在分支名后显示传入 / 传出箭头与数量。
     /// `hasSubmenu`：分支与标签行右侧显示 ›，点击展开操作子菜单（与 IDEA 一致）。
-    init(symbol: String, title: String, detail: String?, enabled: Bool, aheadBehind: (UInt32, UInt32)? = nil, hasSubmenu: Bool = false) {
+    init(symbol: String?, tint: NSColor = Theme.text, title: String, detail: String?, bold: Bool = false, indent: CGFloat = 0,
+         disclosure: Bool? = nil, aheadBehind: (UInt32, UInt32)? = nil, hasSubmenu: Bool = false, highlight: String = "") {
         super.init(frame: .zero)
-        let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 11, weight: .regular)) ?? NSImage())
-        icon.contentTintColor = enabled ? Theme.text : Theme.secondaryText
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        let label = NSTextField.label(title, color: enabled ? Theme.text : Theme.secondaryText)
+        var leading: [NSView] = []
+        if let disclosure {
+            let arrow = NSImageView(image: NSImage(systemSymbolName: disclosure ? "chevron.down" : "chevron.right", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold)) ?? NSImage())
+            arrow.contentTintColor = Theme.secondaryText
+            arrow.widthAnchor.constraint(equalToConstant: 10).isActive = true
+            leading.append(arrow)
+        } else if indent > 0 || symbol == nil {
+            // 与分组 / 文件夹的展开箭头对齐。
+            let spacer = NSView()
+            spacer.widthAnchor.constraint(equalToConstant: 10).isActive = true
+            leading.append(spacer)
+        }
+        if let symbol {
+            let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 11, weight: .regular)) ?? NSImage())
+            icon.contentTintColor = tint
+            icon.widthAnchor.constraint(equalToConstant: 16).isActive = true
+            leading.append(icon)
+        }
+        let label = NSTextField.label(title, font: bold ? Theme.font(ofSize: 13, weight: .semibold) : Theme.uiFont)
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        if !highlight.isEmpty {
+            // 高亮与搜索内容匹配的部分（与 IDEA 一样以黄色底色标出）。
+            let text = NSMutableAttributedString(string: title, attributes: [.font: label.font as Any, .foregroundColor: Theme.text])
+            var searchRange = title.startIndex..<title.endIndex
+            while let found = title.range(of: highlight, options: .caseInsensitive, range: searchRange) {
+                text.addAttribute(.backgroundColor, value: NSColor(hex: 0xE2A93C).withAlphaComponent(0.55), range: NSRange(found, in: title))
+                searchRange = found.upperBound..<title.endIndex
+            }
+            label.attributedStringValue = text
+        }
+        leading.append(label)
+        if let (ahead, behind) = aheadBehind, ahead > 0 || behind > 0 {
+            let indicator = IncomingOutgoingIndicator(showCounts: true)
+            indicator.set(ahead: ahead, behind: behind)
+            leading.append(indicator)
+        }
+        let stack = NSStackView(views: leading)
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
         let detailLabel = NSTextField.label(detail ?? "", font: Theme.smallFont, color: Theme.secondaryText)
         detailLabel.alignment = .right
-        label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        let indicator = IncomingOutgoingIndicator(showCounts: true)
-        indicator.translatesAutoresizingMaskIntoConstraints = false
-        if let (ahead, behind) = aheadBehind { indicator.set(ahead: ahead, behind: behind) }
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
         let chevron = NSImageView(image: NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold)) ?? NSImage())
         chevron.contentTintColor = Theme.secondaryText
         chevron.translatesAutoresizingMaskIntoConstraints = false
         chevron.isHidden = !hasSubmenu
-        for view in [icon, label, indicator, detailLabel, chevron] as [NSView] { addSubview(view) }
+        for view in [stack, detailLabel, chevron] as [NSView] { addSubview(view) }
         NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10 + indent),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
             chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             chevron.centerYAnchor.constraint(equalTo: centerYAnchor),
-            indicator.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 6),
-            indicator.centerYAnchor.constraint(equalTo: centerYAnchor),
-            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            icon.widthAnchor.constraint(equalToConstant: 16),
-            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            detailLabel.leadingAnchor.constraint(greaterThanOrEqualTo: label.trailingAnchor, constant: 8),
+            detailLabel.leadingAnchor.constraint(greaterThanOrEqualTo: stack.trailingAnchor, constant: 8),
             detailLabel.trailingAnchor.constraint(equalTo: hasSubmenu ? chevron.leadingAnchor : trailingAnchor, constant: hasSubmenu ? -6 : -12),
             detailLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
+        setAccessibilityLabel(title)
     }
 
     @available(*, unavailable)

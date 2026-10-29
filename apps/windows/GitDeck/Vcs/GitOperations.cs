@@ -367,8 +367,10 @@ public sealed partial class GitOperations
             () => Done(L10n.Tr("ops.updateBranch.done", branch)), error => ShowError(L10n.Tr("ops.updateBranch.failed", branch), error));
     }
 
-    /// 打开 Push 对话框：先在后台读取推送目标与待推送提交。
-    public async Task Push()
+    /// 打开 Push 对话框：先在后台读取推送目标与待推送提交。`branch` 为要推送的本地分支，默认为当前分支。
+    public Task Push() => Push(null);
+
+    public async Task Push(string? branch)
     {
         if (IsRunning || Root is not { } root) return;
         var repository = _model.Repository;
@@ -376,7 +378,7 @@ public sealed partial class GitOperations
         Remote[] remotes;
         try
         {
-            (target, remotes) = await Task.Run(() => (repository.PushTarget(), repository.Remotes()));
+            (target, remotes) = await Task.Run(() => (branch is null ? repository.PushTarget() : repository.PushTargetFor(branch), repository.Remotes()));
         }
         catch (CoreException error)
         {

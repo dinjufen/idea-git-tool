@@ -48,6 +48,7 @@ public sealed class LogView : Grid
     private readonly TextBlock _status = new() { VerticalAlignment = VerticalAlignment.Center };
     private readonly ListView _list = new() { SelectionMode = ListViewSelectionMode.Extended };
     private readonly CommitDetailsView _details = new();
+    private readonly BranchesPane _branchesPane = new();
     private readonly DispatcherTimer _searchDebounce = new() { Interval = TimeSpan.FromMilliseconds(300) };
 
     private LogCommit[] _commits = [];
@@ -78,6 +79,13 @@ public sealed class LogView : Grid
 
     /// 打开历史提交中某个文件的 Diff：提交哈希、第一个父提交、文件、提交所在的仓库。
     public event Action<string, string?, ChangedFile, ProjectModel>? ShowCommitDiff;
+
+    /// AI 评审某个分支相对当前分支的改动（左侧分支面板的右键菜单）。
+    public Func<ProjectModel, string, Task>? ReviewBranch
+    {
+        get => _branchesPane.ReviewBranch;
+        set => _branchesPane.ReviewBranch = value;
+    }
 
     /// 多仓库：取得某个仓库的操作对象（右键菜单作用于提交所在的仓库）。
     public Func<ProjectModel, GitOperations>? OperationsFor { get; set; }
@@ -175,18 +183,31 @@ public sealed class LogView : Grid
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_list, L10n.Tr("git.tab.log"));
         Themed.Background(_list, "EditorBackgroundBrush");
 
+        // 左侧分支面板 | 分隔条 | 提交列表 | 分隔条 | 提交详情（与 IDEA 的 Log 标签页布局一致）。
         var split = new Grid();
+        split.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        split.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 200 });
         split.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(360), MinWidth = 260 });
+        var paneSplitter = new Splitter(vertical: true);
+        paneSplitter.Dragged += delta => _branchesPane.ContentWidth += delta;
+        paneSplitter.Visibility = _branchesPane.IsCollapsed ? Visibility.Collapsed : Visibility.Visible;
+        _branchesPane.CollapsedChanged += () => paneSplitter.Visibility = _branchesPane.IsCollapsed ? Visibility.Collapsed : Visibility.Visible;
+        _branchesPane.FilterRequested += FilterBranch;
+        _branchesPane.NavigateRequested += hash => Reveal(hash);
         var splitter = new Splitter(vertical: true);
         splitter.Dragged += delta =>
         {
-            var column = split.ColumnDefinitions[2];
+            var column = split.ColumnDefinitions[4];
             column.Width = new GridLength(Math.Clamp(column.ActualWidth - delta, 260, Math.Max(260, split.ActualWidth - 260)));
         };
-        SetColumn(splitter, 1);
-        SetColumn(_details, 2);
+        SetColumn(paneSplitter, 1);
+        SetColumn(_list, 2);
+        SetColumn(splitter, 3);
+        SetColumn(_details, 4);
+        split.Children.Add(_branchesPane);
+        split.Children.Add(paneSplitter);
         split.Children.Add(_list);
         split.Children.Add(splitter);
         split.Children.Add(_details);
@@ -202,6 +223,7 @@ public sealed class LogView : Grid
         var selected = (_branch.SelectedItem as ComboBoxItem)?.Tag as string;
         _branch.Items.Clear();
         _branch.Items.Add(new ComboBoxItem { Content = L10n.Tr("log.filter.branch.all") });
+        _branch.Items.Add(new ComboBoxItem { Content = L10n.Tr("log.filter.branch.value", "HEAD"), Tag = "HEAD" });
         foreach (var (kind, title) in new[] { (BranchKind.Local, L10n.Tr("branches.section.local")), (BranchKind.Remote, L10n.Tr("branches.section.remote")) })
         {
             var branches = _model.Branches.Where(b => b.Kind == kind).ToList();
@@ -214,6 +236,13 @@ public sealed class LogView : Grid
         }
         _branch.SelectedItem = _branch.Items.OfType<ComboBoxItem>().FirstOrDefault(i => i.Tag as string == selected && selected is not null) ?? _branch.Items[0];
         _updatingFilters = false;
+    }
+
+    /// 按分支筛选（左侧分支面板选中分支时）：`revision` 为完整引用名或 `HEAD`，null 表示不按分支筛选。
+    public void FilterBranch(string? revision)
+    {
+        var item = _branch.Items.OfType<ComboBoxItem>().FirstOrDefault(i => revision is not null && i.Tag as string == revision) ?? _branch.Items[0];
+        if (_branch.SelectedItem != item) _branch.SelectedItem = item;
     }
 
     private void RebuildUserFilter()
@@ -339,6 +368,7 @@ public sealed class LogView : Grid
         if (signature == _lastSignature) return;
         _lastSignature = signature;
         RebuildBranchFilter();
+        _branchesPane.Update(_model, OperationsOf(_model));
         Reload();
     }
 
