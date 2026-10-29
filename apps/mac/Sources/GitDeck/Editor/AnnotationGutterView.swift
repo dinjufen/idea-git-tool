@@ -132,9 +132,14 @@ final class AnnotationGutterView: NSView {
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
-        trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
+        // 只替换自己的跟踪区域：toolTip 也依赖 AppKit 内部的跟踪区域，全部移除会让悬停提示失效。
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
     }
+
+    private var hoverArea: NSTrackingArea?
 
     override func mouseMoved(with event: NSEvent) {
         let line = line(at: convert(event.locationInWindow, from: nil))

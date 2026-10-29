@@ -7,6 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var projects: [ProjectWindowController] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 系统默认约 1～2 秒后才显示悬停提示；纯图标按钮依赖提示说明用途，缩短为 0.4 秒（只影响本应用）。
+        UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 400])
         AppearanceSetting.current.apply()
         UIFonts.start()
         // git / ssh 需要凭据时调用本程序弹出输入框（见 AskPass）。

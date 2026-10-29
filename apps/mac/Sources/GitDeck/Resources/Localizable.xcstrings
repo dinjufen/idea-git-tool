@@ -568,13 +568,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Go to Source"
+            "value": "Jump to Source"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "跳转到源码"
+            "value": "跳到源"
           }
         }
       }
