@@ -62,6 +62,9 @@ public sealed class GitToolWindow : Grid
     /// 文件历史中双击修订：打开该修订的完整 Diff。
     public event Action<string, string?, ChangedFile, ProjectModel>? OpenHistoryDiff;
 
+    /// 设置文件历史预览中的 Diff：Diff、文件所属的仓库与文件的当前路径。
+    public Action<Diff.DiffView, ProjectModel, string>? ConfigureHistoryDiff { get; set; }
+
     /// 打开（或替换）文件历史标签页；多仓库项目中 `model` 为文件所属的仓库。
     public void ShowHistory(string path, ProjectModel? model = null)
     {
@@ -69,6 +72,7 @@ public sealed class GitToolWindow : Grid
         var owner = model ?? _model;
         var view = new FileHistoryView(owner, path);
         view.OpenDiff += (hash, parent, file) => OpenHistoryDiff?.Invoke(hash, parent, file, owner);
+        view.ConfigurePreview = diff => ConfigureHistoryDiff?.Invoke(diff, owner, path);
         SetRow(view, 1);
         Children.Add(view);
         _history = view;

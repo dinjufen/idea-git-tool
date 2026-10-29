@@ -285,6 +285,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             guard let self else { return }
             self.diffOpener(for: repository).showLocalChange(change, selectionKey: key)
         }
+        gitToolWindow.configureHistoryDiff = { [weak self] diff, owner, path in
+            self?.diffOpener(for: owner).attachSource(diff, path: path, rightIsWorkingTree: false)
+        }
         gitToolWindow.onShowCommitDiff = { [weak self] hash, parent, file in
             self?.diffOpener.showCommitFile(hash: hash, parent: parent, file: file)
         }
@@ -652,6 +655,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     @objc func showReplaceBar(_ sender: Any?) { editor.activeEditor?.showFindBar(replace: true) }
     @objc func nextDifference(_ sender: Any?) { editor.activeDiff?.nextDifference() }
     @objc func previousDifference(_ sender: Any?) { editor.activeDiff?.previousDifference() }
+    @objc func jumpToSource(_ sender: Any?) { editor.activeDiff?.jumpToSource() }
     @objc func findNext(_ sender: Any?) { editor.activeEditor?.findNext() }
     @objc func findPrevious(_ sender: Any?) { editor.activeEditor?.findPrevious() }
 
@@ -813,6 +817,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             editor.activeEditor != nil
         case #selector(nextDifference(_:)), #selector(previousDifference(_:)):
             editor.activeDiff != nil
+        case #selector(jumpToSource(_:)):
+            editor.activeDiff?.source != nil
         default:
             true
         }

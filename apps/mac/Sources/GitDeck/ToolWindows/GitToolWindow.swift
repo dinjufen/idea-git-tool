@@ -33,6 +33,9 @@ final class GitToolWindow: NSView {
         didSet { logView.onShowRepositoryCommitDiff = onShowRepositoryCommitDiff }
     }
 
+    /// 设置文件历史预览中的 Diff：Diff、文件所属的仓库与文件的当前路径。
+    var configureHistoryDiff: ((DiffView, ProjectModel, String) -> Void)?
+
     var onShowCommitDiff: ((String, String?, ChangedFile) -> Void)? {
         didSet {
             logView.onShowCommitDiff = onShowCommitDiff
@@ -158,6 +161,8 @@ final class GitToolWindow: NSView {
         historyView?.removeFromSuperview()
         let view = FileHistoryView(model: repository ?? model, path: path)
         view.onOpenDiff = onOpenDiff ?? onShowCommitDiff
+        let owner = repository ?? model
+        view.configurePreview = { [weak self] diff in self?.configureHistoryDiff?(diff, owner, path) }
         view.translatesAutoresizingMaskIntoConstraints = false
         addSubview(view)
         NSLayoutConstraint.activate([

@@ -30,6 +30,13 @@ enum LineMapping {
 }
 
 extension CodeEditorView {
+    /// 光标所在行（从 0 开始）。
+    var caretLine: Int {
+        guard let location = textView.selectionManager.textSelections.first?.range.location,
+              let line = textView.layoutManager.textLineForOffset(location) else { return 0 }
+        return line.index
+    }
+
     /// 视口顶部所在的行（带小数部分）。
     var topVisibleLine: Double {
         let y = scrollView.contentView.bounds.minY

@@ -6,6 +6,9 @@ final class FileHistoryView: NSView, NSTableViewDataSource, NSTableViewDelegate 
     /// 在编辑器中打开某个修订的完整 Diff：提交哈希、第一个父提交、文件。
     var onOpenDiff: ((String, String?, ChangedFile) -> Void)?
 
+    /// 设置预览中的 Diff（例如接上“跳转到源码”）。
+    var configurePreview: ((DiffView) -> Void)?
+
     let path: String
     private let model: ProjectModel
     private let table = NSTableView()
@@ -121,6 +124,7 @@ final class FileHistoryView: NSView, NSTableViewDataSource, NSTableViewDelegate 
                 right: DiffSide(title: String(revision.hash.prefix(8)), text: text),
                 path: revision.path
             )
+            configurePreview?(diff)
             preview.addSubview(diff)
             diff.pinEdges(to: preview)
         }

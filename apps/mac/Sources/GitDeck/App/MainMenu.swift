@@ -100,6 +100,9 @@ enum MainMenu {
         let f7 = String(UnicodeScalar(UInt16(NSF7FunctionKey)).map(Character.init) ?? " ")
         menu.addItem(item(tr("diff.next"), #selector(ProjectWindowController.nextDifference(_:)), f7, []))
         menu.addItem(item(tr("diff.previous"), #selector(ProjectWindowController.previousDifference(_:)), f7, [.shift]))
+        // F4：从 Diff 跳转到源码（IDEA 的 Jump to Source）。
+        let f4 = String(UnicodeScalar(UInt16(NSF4FunctionKey)).map(Character.init) ?? " ")
+        menu.addItem(item(tr("diff.jumpToSource"), #selector(ProjectWindowController.jumpToSource(_:)), f4, []))
         menu.addItem(.separator())
         menu.addItem(item(tr("menu.view.fullScreen"), #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]))
         return menu

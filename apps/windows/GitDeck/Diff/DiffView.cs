@@ -13,6 +13,9 @@ namespace GitDeck.Diff;
 /// 一侧的内容。`Text` 为 null 表示该版本中文件不存在。
 public sealed record DiffSide(string Title, string? Text);
 
+/// 跳转到源码的目标：工作区中的文件（完整路径），以及右侧是否就是工作区版本（否则跳转时把行号映射到当前文件）。
+public sealed record DiffSource(string FullPath, bool RightIsWorkingTree);
+
 /// 本地改动的 Diff 可以选择要提交的改动块 / 行（部分提交）。
 public sealed record DiffInclusion(LineSelectionStore Store, string Path);
 
@@ -48,6 +51,8 @@ public sealed class DiffView : Grid
     private readonly ComboBox _viewer = new() { MinWidth = 0 };
     private readonly ComboBox _whitespace = new() { MinWidth = 0 };
     private CodeEditor? _unifiedEditor;
+    private CodeEditor? _focusedEditor;
+    private readonly IconButton _jumpToSource = new(Icon.Edit, L10n.Tr("diff.jumpToSource"), 26, 13);
     private UnifiedModel _unified = UnifiedModel.Empty;
     private IReadOnlyList<DiffBlock> _blocks = [];
     private int? _currentBlock;
@@ -65,6 +70,15 @@ public sealed class DiffView : Grid
         Themed.Background(this, "EditorBackgroundBrush");
         BuildLayout();
 
+        _leftEditor.GotFocus += (_, _) => _focusedEditor = _leftEditor;
+        _rightEditor.GotFocus += (_, _) => _focusedEditor = _rightEditor;
+        // F4：跳转到源码（IDEA 的 Jump to Source）。
+        AddHandler(KeyDownEvent, new Microsoft.UI.Xaml.Input.KeyEventHandler((_, e) =>
+        {
+            if (e.Key != Windows.System.VirtualKey.F4 || Source is null) return;
+            JumpToSource();
+            e.Handled = true;
+        }), true);
         _leftEditor.Scrolled += () => SyncScroll(_leftEditor);
         _rightEditor.Scrolled += () => SyncScroll(_rightEditor);
         _leftEditor.SizeChanged += (_, _) => DrawConnector();
@@ -103,6 +117,89 @@ public sealed class DiffView : Grid
 
     private WhitespaceMode Whitespace => WhitespaceModes[Math.Max(0, _whitespace.SelectedIndex)].Mode;
 
+    /// 跳转到源码的目标；为 null 时不显示铅笔按钮（例如 AI 建议的预览）。
+    public DiffSource? Source
+    {
+        get => _source;
+        set
+        {
+            _source = value;
+            UpdateJumpToSource();
+        }
+    }
+
+    private DiffSource? _source;
+
+    /// 请求在编辑器中打开文件：完整路径与行（从 0 开始）。
+    public event Action<string, int>? JumpToSourceRequested;
+
+    /// 读取文件当前的内容（编辑器中未保存的内容优先）；右侧不是工作区版本时用于映射行号。
+    public Func<string, string?>? CurrentText { get; set; }
+
+    private void UpdateJumpToSource()
+    {
+        _jumpToSource.Visibility = _source is null ? Visibility.Collapsed : Visibility.Visible;
+        // 文件在工作区中已不存在（例如已删除）时不能跳转。
+        _jumpToSource.IsEnabled = _source is { } source && File.Exists(source.FullPath);
+    }
+
+    /// 跳转到源码：取最近获得焦点的一侧的光标行，换算为新版本中的行；右侧不是工作区版本时再映射到当前文件。
+    public void JumpToSource()
+    {
+        if (_source is not { } source || !File.Exists(source.FullPath)) return;
+        var line = NewSideLine();
+        if (!source.RightIsWorkingTree && _right.Text is { } rightText && (CurrentText?.Invoke(source.FullPath) ?? ReadFile(source.FullPath)) is { } current)
+        {
+            line = MapLine(CoreApi.LineChanges(rightText, current), line, fromBase: true);
+        }
+        JumpToSourceRequested?.Invoke(source.FullPath, Math.Max(0, line));
+    }
+
+    private int NewSideLine()
+    {
+        if (IsUnified && _unifiedEditor is not null)
+        {
+            var row = _unifiedEditor.CaretLine;
+            var rows = _unified.Rows;
+            // 删除的行在新版本中没有对应：取其后第一个有新版本行号的行。
+            for (var i = Math.Min(row, rows.Count - 1); i >= 0 && i < rows.Count; i++)
+            {
+                if (rows[i].New is { } n) return n;
+            }
+            return _unified.MaxNew > 0 ? _unified.MaxNew - 1 : 0;
+        }
+        if (_focusedEditor == _leftEditor) return MapLine(_blocks.Select(b => b.Change), _leftEditor.CaretLine, fromBase: true);
+        return _rightEditor.CaretLine;
+    }
+
+    /// 按行变更把一侧的行换算到另一侧：变更段之前按偏移平移，落在变更段内时取对应段的起始行（与 IDEA 一致）。
+    public static int MapLine(IEnumerable<LineChange> changes, int line, bool fromBase)
+    {
+        var delta = 0;
+        foreach (var c in changes)
+        {
+            var (fromStart, fromCount, toStart, toCount) = fromBase
+                ? ((int)c.BaseStart, (int)c.BaseCount, (int)c.Start, (int)c.Count)
+                : ((int)c.Start, (int)c.Count, (int)c.BaseStart, (int)c.BaseCount);
+            if (line < fromStart) break;
+            if (line < fromStart + fromCount) return toStart + Math.Min(line - fromStart, Math.Max(0, toCount - 1));
+            delta = toStart + toCount - (fromStart + fromCount);
+        }
+        return line + delta;
+    }
+
+    private static string? ReadFile(string path)
+    {
+        try
+        {
+            return System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(path));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     /// 可以勾选要提交的改动（只在逐字比较空白时，块与提交内容一致）。
     private bool IsSelectable => _inclusion is not null && Whitespace == WhitespaceMode.Compare;
 
@@ -127,6 +224,8 @@ public sealed class DiffView : Grid
         previous.Click += (_, _) => PreviousDifference();
         var next = new IconButton(Icon.ArrowDown, L10n.Tr("diff.next"), 26, 13);
         next.Click += (_, _) => NextDifference();
+        _jumpToSource.Click += (_, _) => JumpToSource();
+        UpdateJumpToSource();
         _viewer.Items.Add(L10n.Tr("diff.viewer.sideBySide"));
         _viewer.Items.Add(L10n.Tr("diff.viewer.unified"));
         _viewer.SelectedIndex = Settings.GetBool(UnifiedKey) ? 1 : 0;
@@ -145,7 +244,7 @@ public sealed class DiffView : Grid
         toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        toolbar.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { previous, next, _viewer, _whitespace } });
+        toolbar.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { previous, next, _jumpToSource, _viewer, _whitespace } });
         SetColumn(_count, 2);
         toolbar.Children.Add(_count);
         Children.Add(toolbar);
@@ -423,6 +522,7 @@ public sealed class DiffView : Grid
             };
         }
         _unifiedEditor = editor;
+        editor.GotFocus += (_, _) => _focusedEditor = editor;
         _unifiedContainer.Children.Add(editor);
         UpdateDecorations();
     }

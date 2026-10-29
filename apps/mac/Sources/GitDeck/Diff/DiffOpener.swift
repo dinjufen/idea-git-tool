@@ -27,12 +27,12 @@ struct DiffOpener {
                 title: change.fileName,
                 tooltip: tr("diff.tooltip.local", change.path)
             ) {
-                DiffView(
+                attachSource(DiffView(
                     left: DiffSide(title: headTitle, text: base),
                     right: DiffSide(title: tr("diff.title.local"), text: text),
                     path: change.path,
                     inclusion: change.conflict == nil ? lineSelections.map { DiffInclusion(store: $0, path: selectionKey ?? change.path) } : nil
-                )
+                ), path: change.path, rightIsWorkingTree: true)
             }
         }
     }
@@ -53,11 +53,11 @@ struct DiffOpener {
                 title: (file.path as NSString).lastPathComponent,
                 tooltip: tr("diff.tooltip.revision", file.path, revision)
             ) {
-                DiffView(
+                attachSource(DiffView(
                     left: DiffSide(title: revision, text: base),
                     right: DiffSide(title: tr("diff.title.local"), text: text),
                     path: file.path
-                )
+                ), path: file.path, rightIsWorkingTree: true)
             }
         }
     }
@@ -78,11 +78,11 @@ struct DiffOpener {
                 title: (path as NSString).lastPathComponent,
                 tooltip: tr("diff.tooltip.shelf", path, entry.name)
             ) {
-                DiffView(
+                attachSource(DiffView(
                     left: DiffSide(title: tr("diff.title.shelfBase"), text: versions.base),
                     right: DiffSide(title: tr("diff.title.shelved", entry.name), text: versions.text),
                     path: path
-                )
+                ), path: path, rightIsWorkingTree: false)
             }
         }
     }
@@ -103,11 +103,11 @@ struct DiffOpener {
                 title: name,
                 tooltip: tr("diff.tooltip.commit", file.path, String(hash.prefix(8)))
             ) {
-                let view = DiffView(
+                let view = attachSource(DiffView(
                     left: DiffSide(title: parent.map { String($0.prefix(8)) } ?? tr("diff.title.empty"), text: base),
                     right: DiffSide(title: String(hash.prefix(8)), text: text),
                     path: file.path
-                )
+                ), path: file.path, rightIsWorkingTree: false)
                 if let revealLine {
                     DispatchQueue.main.async { view.reveal(line: revealLine) }
                 }
@@ -132,13 +132,23 @@ struct DiffOpener {
                 title: (file.path as NSString).lastPathComponent,
                 tooltip: tr("diff.tooltip.stash", file.path, stash.message)
             ) {
-                DiffView(
+                attachSource(DiffView(
                     left: DiffSide(title: tr("diff.title.stashBase"), text: base),
                     right: DiffSide(title: tr("diff.title.stash", stash.message), text: text),
                     path: file.path
-                )
+                ), path: file.path, rightIsWorkingTree: false)
             }
         }
+    }
+
+    /// Diff 工具栏的“跳转到源码”（F4）：在编辑器中打开本仓库中的 `path`（相对路径）并定位到对应的行。
+    @discardableResult
+    func attachSource(_ view: DiffView, path: String, rightIsWorkingTree: Bool) -> DiffView {
+        let editor = editor
+        view.source = DiffSource(url: model.rootURL.appendingPathComponent(path), rightIsWorkingTree: rightIsWorkingTree)
+        view.currentText = { editor.text(of: $0) }
+        view.onJumpToSource = { url, line in editor.open(url, line: line) }
+        return view
     }
 
     /// 读取工作区文件；非 UTF-8 内容按有损方式解码，与核心读取历史版本的处理一致。

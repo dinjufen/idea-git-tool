@@ -36,6 +36,9 @@ public sealed class FileHistoryView : Grid
 
     public string Path { get; }
 
+    /// 设置预览中的 Diff（例如接上“跳转到源码”）。
+    public Action<DiffView>? ConfigurePreview { get; set; }
+
     private void BuildLayout()
     {
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(560), MinWidth = 480 });
@@ -138,10 +141,12 @@ public sealed class FileHistoryView : Grid
         {
             if (token != _previewToken) return;
             var (baseText, text) = task.Result;
-            _preview.Children.Add(new DiffView(
+            var diff = new DiffView(
                 new DiffSide(parent is null ? L10n.Tr("diff.title.empty") : parent[..Math.Min(8, parent.Length)], baseText),
                 new DiffSide(revision.Hash[..Math.Min(8, revision.Hash.Length)], text),
-                revision.Path));
+                revision.Path);
+            ConfigurePreview?.Invoke(diff);
+            _preview.Children.Add(diff);
         }), TaskScheduler.Default);
     }
 

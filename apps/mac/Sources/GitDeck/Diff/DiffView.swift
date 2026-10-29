@@ -8,6 +8,12 @@ struct DiffSide {
     var text: String?
 }
 
+/// 跳转到源码的目标：工作区中的文件，以及右侧是否就是工作区版本（否则跳转时把行号映射到当前文件）。
+struct DiffSource {
+    let url: URL
+    let rightIsWorkingTree: Bool
+}
+
 /// 本地改动的 Diff 可以选择要提交的改动块 / 行（部分提交）。
 struct DiffInclusion {
     let store: LineSelectionStore
@@ -47,6 +53,18 @@ final class DiffView: NSView {
     private var isSyncingScroll = false
     private var observers: [NSObjectProtocol] = []
     private var diffTask: Task<Void, Never>?
+    private var jumpButton: IconButton!
+
+    /// 跳转到源码的目标；为 nil 时不显示铅笔按钮（例如 AI 建议的预览）。
+    var source: DiffSource? {
+        didSet { updateJumpToSource() }
+    }
+
+    /// 在编辑器中打开文件：文件与行（从 0 开始）。
+    var onJumpToSource: ((URL, Int) -> Void)?
+
+    /// 读取文件当前的内容（编辑器中未保存的内容优先）；右侧不是工作区版本时用于映射行号。
+    var currentText: ((URL) -> String?)?
 
     private static let whitespaceModes: [(WhitespaceMode, String)] = [
         (.compare, "diff.whitespace.compare"),
@@ -146,9 +164,12 @@ final class DiffView: NSView {
         viewerPopup.selectItem(at: Self.prefersUnified ? 1 : 0)
         viewerPopup.action = #selector(viewerChanged)
 
+        jumpButton = button("pencil", tr("diff.jumpToSource"), #selector(jumpToSource))
+        updateJumpToSource()
         let toolbar = NSStackView(views: [
             button("arrow.up", tr("diff.previous"), #selector(previousDifference)),
             button("arrow.down", tr("diff.next"), #selector(nextDifference)),
+            jumpButton,
             viewerPopup, whitespacePopup, NSView(), countLabel,
         ])
         toolbar.spacing = 4
@@ -379,6 +400,57 @@ final class DiffView: NSView {
         let tooltip = isSelectable ? tr("diff.include.tooltip") : nil
         [leftEditor, rightEditor, unifiedEditor].forEach { $0?.toolTip = nil }
         connector.toolTip = tooltip
+    }
+
+    // MARK: - 跳转到源码（IDEA 的 Jump to Source，F4）
+
+    private func updateJumpToSource() {
+        guard let jumpButton else { return }
+        jumpButton.isHidden = source == nil
+        // 文件在工作区中已不存在（例如已删除）时不能跳转。
+        jumpButton.isEnabled = source.map { FileManager.default.fileExists(atPath: $0.url.path) } ?? false
+    }
+
+    /// 取有焦点的一侧的光标行，换算为新版本中的行；右侧不是工作区版本时再映射到当前文件。
+    @objc func jumpToSource() {
+        guard let source, FileManager.default.fileExists(atPath: source.url.path) else { return }
+        var line = newSideLine()
+        if !source.rightIsWorkingTree, let rightText = right.text,
+           let current = currentText?(source.url) ?? (try? String(contentsOf: source.url, encoding: .utf8)) {
+            line = Self.mapLine(GitDeckCore.lineChanges(base: rightText, text: current), line, fromBase: true)
+        }
+        onJumpToSource?(source.url, max(0, line))
+    }
+
+    private func newSideLine() -> Int {
+        if isUnified, let unifiedEditor {
+            let rows = unified.rows
+            // 删除的行在新版本中没有对应：取其后第一个有新版本行号的行。
+            var index = min(unifiedEditor.caretLine, rows.count - 1)
+            while index >= 0, index < rows.count {
+                if let new = rows[index].new { return new }
+                index += 1
+            }
+            return max(0, unified.maxNew - 1)
+        }
+        if window?.firstResponder === leftEditor.textView {
+            return Self.mapLine(blocks.map { $0.change }, leftEditor.caretLine, fromBase: true)
+        }
+        return rightEditor.caretLine
+    }
+
+    /// 按行变更把一侧的行换算到另一侧：变更段之前按偏移平移，落在变更段内时取对应段的起始行（与 IDEA 一致）。
+    static func mapLine(_ changes: [LineChange], _ line: Int, fromBase: Bool) -> Int {
+        var delta = 0
+        for c in changes {
+            let (fromStart, fromCount, toStart, toCount) = fromBase
+                ? (Int(c.baseStart), Int(c.baseCount), Int(c.start), Int(c.count))
+                : (Int(c.start), Int(c.count), Int(c.baseStart), Int(c.baseCount))
+            if line < fromStart { break }
+            if line < fromStart + fromCount { return toStart + min(line - fromStart, max(0, toCount - 1)) }
+            delta = toStart + toCount - (fromStart + fromCount)
+        }
+        return line + delta
     }
 
     // MARK: - 跳转

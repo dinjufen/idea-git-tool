@@ -323,6 +323,7 @@ public sealed class ProjectWindow : Window
         };
         _editor.ShowHistory += ShowFileHistory;
         _commitWindow.ShowHistory += (model, path) => ShowFileHistory(path, model);
+        _gitWindow.ConfigureHistoryDiff = (diff, model, path) => WithSource(diff, model, path, rightIsWorkingTree: false);
         _commitWindow.ShelveRequested += async (groups, name) =>
         {
             foreach (var (model, paths) in groups) await OperationsFor(model).Shelve(paths, name);
@@ -765,10 +766,10 @@ public sealed class ProjectWindow : Window
         }).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
         {
             var (baseText, text) = task.Result;
-            _editor.OpenDiff($"stash:{stash.Hash}:{file.Path}", Path.GetFileName(file.Path), L10n.Tr("diff.tooltip.stash", file.Path, stash.Message), () => new DiffView(
+            _editor.OpenDiff($"stash:{stash.Hash}:{file.Path}", Path.GetFileName(file.Path), L10n.Tr("diff.tooltip.stash", file.Path, stash.Message), () => WithSource(new DiffView(
                 new DiffSide(L10n.Tr("diff.title.stashBase"), baseText),
                 new DiffSide(L10n.Tr("diff.title.stash", stash.Message), text),
-                file.Path));
+                file.Path), model, file.Path, rightIsWorkingTree: false));
         }), TaskScheduler.Default);
     }
 
@@ -780,10 +781,10 @@ public sealed class ProjectWindow : Window
         {
             if (task.IsFaulted) return;
             var versions = task.Result;
-            _editor.OpenDiff($"shelf:{entry.Id}:{path}", Path.GetFileName(path), L10n.Tr("diff.tooltip.shelf", path, entry.Name), () => new DiffView(
+            _editor.OpenDiff($"shelf:{entry.Id}:{path}", Path.GetFileName(path), L10n.Tr("diff.tooltip.shelf", path, entry.Name), () => WithSource(new DiffView(
                 new DiffSide(L10n.Tr("diff.title.shelfBase"), versions.Base),
                 new DiffSide(L10n.Tr("diff.title.shelved", entry.Name), versions.Text),
-                path));
+                path), model, path, rightIsWorkingTree: false));
         }), TaskScheduler.Default);
     }
 
@@ -805,10 +806,10 @@ public sealed class ProjectWindow : Window
         {
             var (baseText, text) = task.Result;
             var shortHash = hash[..Math.Min(8, hash.Length)];
-            _editor.OpenDiff($"commit:{hash}:{file.Path}", Path.GetFileName(file.Path), L10n.Tr("diff.tooltip.commit", file.Path, shortHash), () => new DiffView(
+            _editor.OpenDiff($"commit:{hash}:{file.Path}", Path.GetFileName(file.Path), L10n.Tr("diff.tooltip.commit", file.Path, shortHash), () => WithSource(new DiffView(
                 new DiffSide(parent is null ? L10n.Tr("diff.title.empty") : parent[..Math.Min(8, parent.Length)], baseText),
                 new DiffSide(shortHash, text),
-                file.Path));
+                file.Path), model ?? Model, file.Path, rightIsWorkingTree: false));
         }), TaskScheduler.Default);
     }
 
@@ -826,11 +827,20 @@ public sealed class ProjectWindow : Window
         }).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
         {
             var (baseText, text) = task.Result;
-            _editor.OpenDiff($"revision:{revision}:{file.Path}", Path.GetFileName(file.Path), L10n.Tr("diff.tooltip.revision", file.Path, revision), () => new DiffView(
+            _editor.OpenDiff($"revision:{revision}:{file.Path}", Path.GetFileName(file.Path), L10n.Tr("diff.tooltip.revision", file.Path, revision), () => WithSource(new DiffView(
                 new DiffSide(revision, baseText),
                 new DiffSide(L10n.Tr("diff.title.local"), text),
-                file.Path));
+                file.Path), Model, file.Path, rightIsWorkingTree: true));
         }), TaskScheduler.Default);
+    }
+
+    /// Diff 工具栏的“跳转到源码”（F4）：在编辑器中打开 `owner` 仓库中的 `path`（相对路径）并定位到对应的行。
+    private DiffView WithSource(DiffView view, ProjectModel owner, string path, bool rightIsWorkingTree)
+    {
+        view.Source = new DiffSource(Path.GetFullPath(Path.Combine(owner.RootPath, path)), rightIsWorkingTree);
+        view.CurrentText = _editor.TextOf;
+        view.JumpToSourceRequested += (file, line) => _editor.Open(file, line);
+        return view;
     }
 
     private static string? TryRead(Func<string?> read)
@@ -870,11 +880,11 @@ public sealed class ProjectWindow : Window
         }).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
         {
             var (baseText, text) = task.Result;
-            _editor.OpenDiff("local:" + selectionKey, Path.GetFileName(change.Path), L10n.Tr("diff.tooltip.local", selectionKey), () => new DiffView(
+            _editor.OpenDiff("local:" + selectionKey, Path.GetFileName(change.Path), L10n.Tr("diff.tooltip.local", selectionKey), () => WithSource(new DiffView(
                 new DiffSide(headTitle, baseText),
                 new DiffSide(L10n.Tr("diff.title.local"), text),
                 change.Path,
-                change.Conflict is null ? new DiffInclusion(_lineSelections, selectionKey) : null));
+                change.Conflict is null ? new DiffInclusion(_lineSelections, selectionKey) : null), owner, change.Path, rightIsWorkingTree: true));
         }), TaskScheduler.Default);
     }
 
@@ -1164,6 +1174,14 @@ public sealed class ProjectWindow : Window
                                           && diffModel.ChangesByPath.TryGetValue(diffRelative, out var diffChange):
                         ShowCommit();
                         ShowLocalDiff(diffChange, diffModel, diffModel == Model ? null : diffPath.Replace('\\', '/'));
+                        break;
+                    case "commitDiff" when DebugOptions.Get("debug.file") is { } commitDiffPath:
+                        // 最新提交中该文件的 Diff（验证历史版本跳转到源码时的行号映射）。
+                        var head = Model.Repository.CommitDetails(Model.Status.Branch.Oid ?? "HEAD");
+                        if (head.Files.FirstOrDefault(f => f.Path == commitDiffPath.Replace('\\', '/')) is { } headFile)
+                        {
+                            ShowCommitFile(head.Hash, head.Parents.FirstOrDefault(), headFile);
+                        }
                         break;
                     case "aiReviewPick":
                         // 多仓库：勾选的改动跨多个仓库时先选择仓库。
