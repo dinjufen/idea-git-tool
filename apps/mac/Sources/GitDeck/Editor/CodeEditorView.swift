@@ -72,21 +72,39 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
         textView.replaceCharacters(in: range, with: replacement)
     }
 
-    /// Annotate（git blame）结果；`nil` 时隐藏注释列。
-    var annotations: BlameResult? {
-        get { annotationView.blame }
-        set {
-            annotationView.blame = newValue
-            annotationWidth.constant = newValue == nil ? 0 : AnnotationGutterView.width
-            annotationView.isHidden = newValue == nil
+    /// git blame 结果：Annotate 注释列与光标行的行内提交信息共用。
+    var blame: BlameResult? {
+        didSet {
+            inlineBlame.blame = blame
+            applyAnnotationColumn()
         }
+    }
+
+    /// 显示 Annotate 注释列（需要 `blame`）。
+    var showAnnotations = false {
+        didSet { applyAnnotationColumn() }
+    }
+
+    private func applyAnnotationColumn() {
+        let shown = showAnnotations && blame != nil
+        annotationView.blame = shown ? blame : nil
+        annotationWidth.constant = shown ? AnnotationGutterView.width : 0
+        annotationView.isHidden = !shown
+        // 注释列改变了编辑区宽度：重新计算行内提交信息的截断宽度。
+        inlineBlame?.relayout()
     }
 
     /// 编辑后注释的行号映射（见 [`AnnotationGutterView.lineMap`]）。
     var annotationLineMap: [Int?]? {
         get { annotationView.lineMap }
-        set { annotationView.lineMap = newValue }
+        set {
+            annotationView.lineMap = newValue
+            inlineBlame.lineMap = newValue
+        }
     }
+
+    /// 光标行的行内提交信息。
+    private(set) var inlineBlame: InlineBlameController!
 
     /// 点击注释列中的提交。
     var onAnnotationClick: ((String) -> Void)? {
@@ -129,6 +147,7 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
         annotationView = AnnotationGutterView(textView: textView, scrollView: scrollView)
         super.init(frame: .zero)
         textView.delegate = self
+        inlineBlame = InlineBlameController(textView: textView, scrollView: scrollView)
         if !isEditable {
             // CodeEditTextView 在只读模式下单击不会移动光标；Diff 等只读视图需要光标行（跳转到源码、当前行高亮），这里补上。
             let click = NSClickGestureRecognizer(target: self, action: #selector(readOnlyClick(_:)))
@@ -208,6 +227,14 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
         }
         observers = [
             center.addObserver(forName: NSView.boundsDidChangeNotification, object: scrollView.contentView, queue: .main, using: redrawGutter),
+            // 编辑区宽度变化（窗口缩放、打开注释列）时重新计算行内提交信息的截断宽度。
+            center.addObserver(forName: NSView.frameDidChangeNotification, object: scrollView, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.inlineBlame.relayout() }
+            },
+            // 滚动时关闭行内提交信息的弹窗（与 Windows 端一致）。
+            center.addObserver(forName: NSView.boundsDidChangeNotification, object: scrollView.contentView, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.inlineBlame.closePopover() }
+            },
             center.addObserver(forName: NSView.frameDidChangeNotification, object: textView, queue: .main, using: redrawGutter),
             center.addObserver(forName: TextSelectionManager.selectionChangedNotification, object: textView.selectionManager, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.selectionChanged() }
@@ -263,6 +290,7 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
             storage.endEditing()
         }
         _ = textView.updateFrameIfNeeded()
+        inlineBlame.relayout()
     }
 
     // MARK: - 语法高亮
@@ -318,6 +346,7 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
     func textView(_ textView: TextView, didReplaceContentsIn range: NSRange, with string: String) {
         onDidReplace?(range, string)
         revision += 1
+        inlineBlame.update(force: true)
         // 输入时稍作停顿再重新高亮，避免每个按键都触发完整解析。
         scheduleHighlight(delay: .milliseconds(120))
         gutter.lineCountChanged()
@@ -327,6 +356,7 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
 
     private func selectionChanged() {
         gutter.needsDisplay = true
+        inlineBlame.update(force: false)
         guard let location = textView.selectionManager.textSelections.first?.range.location,
               let line = textView.layoutManager.textLineForOffset(location) else { return }
         onCaretChange?(line.index + 1, location - line.range.location + 1)

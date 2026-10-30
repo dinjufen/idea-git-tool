@@ -17,7 +17,6 @@ public sealed partial class CodeEditor
     private const int StyleInlineBlame = StyleAnnotationPlain + 1;
     /// 行尾与提交信息之间的空隙。
     private const string InlineBlameGap = "    ";
-    private const int InlineBlameMinChars = 24;
 
     private int _inlineLine = -1;
     private string? _inlineText;
@@ -49,6 +48,8 @@ public sealed partial class CodeEditor
         _control.AddHandler(PointerExitedEvent, new PointerEventHandler((_, _) => InlineBlamePointerLeft()), true);
         _control.AddHandler(PointerPressedEvent, new PointerEventHandler((_, _) => HideInlineBlamePopup()), true);
         _control.AddHandler(KeyDownEvent, new KeyEventHandler((_, _) => HideInlineBlamePopup()), true);
+        // 编辑区宽度变化（窗口缩放、打开注释列）时重新计算截断宽度。
+        _control.SizeChanged += (_, _) => UpdateInlineBlame(force: true);
         // 编辑器组件加载后 DispatcherQueueTimer 会停止触发（WinUIEdit 的问题），这里用 XAML 的 DispatcherTimer。
         _blameShowTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         _blameShowTimer.Tick += (_, _) =>
@@ -124,8 +125,7 @@ public sealed partial class CodeEditor
         if (available <= 0 || editor.TextWidth(StyleInlineBlame, full) <= available) return full;
         var keep = summary.Length;
         while (keep > 0 && editor.TextWidth(StyleInlineBlame, prefix + summary[..keep] + "…") > available) keep--;
-        // 空间不足时至少保留一部分标题（与 VSCode 一样允许超出视口，可横向滚动查看）。
-        keep = Math.Max(keep, Math.Min(summary.Length, InlineBlameMinChars));
+        // 按可见宽度截断标题（与 mac 端一致）；连作者和时间都放不下时只显示到此为止。
         return keep >= summary.Length ? full : prefix + summary[..keep].TrimEnd() + "…";
     }
 

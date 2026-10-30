@@ -14,6 +14,7 @@ enum EditorSettings {
         static let family = "editor.fontFamily"
         static let size = "editor.fontSize"
         static let lineSpacing = "editor.lineSpacing"
+        static let inlineBlame = "editor.inlineBlame"
     }
 
     /// 字体族；为空时使用系统等宽字体（SF Mono）。
@@ -43,6 +44,15 @@ enum EditorSettings {
         }
         set {
             UserDefaults.standard.set(newValue, forKey: Key.lineSpacing)
+            post()
+        }
+    }
+
+    /// 在光标所在行的行尾显示该行最近一次提交（与 VSCode / GitLens 的 current line blame 一致），默认开启。
+    static var inlineBlame: Bool {
+        get { UserDefaults.standard.object(forKey: Key.inlineBlame) as? Bool ?? true }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Key.inlineBlame)
             post()
         }
     }

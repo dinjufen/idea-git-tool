@@ -296,6 +296,8 @@ public sealed partial class CodeEditor : Grid
         {
             _showAnnotations = value;
             ApplyAnnotations();
+            // 注释列改变了文本区宽度：重新计算行内提交信息的截断宽度。
+            UpdateInlineBlame(force: true);
         }
     }
 

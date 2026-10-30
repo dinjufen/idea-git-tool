@@ -7,6 +7,7 @@ final class EditorSettingsPane: NSViewController {
     private let sizeStepper = NSStepper()
     private let spacingPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let preview = NSTextField.label("")
+    private let inlineBlame = NSButton(checkboxWithTitle: tr("settings.editor.inlineBlame"), target: nil, action: nil)
     /// 等宽字体族；第一项（`nil`）为系统等宽字体。
     private var families: [String?] = []
     private var observer: NSObjectProtocol?
@@ -51,12 +52,15 @@ final class EditorSettingsPane: NSViewController {
         spacingPopup.target = self
         spacingPopup.action = #selector(spacingChanged)
 
+        inlineBlame.target = self
+        inlineBlame.action = #selector(inlineBlameChanged)
         preview.stringValue = "fn main() { println!(\"GitDeck 0123456789\"); }"
         SettingsForm.install([
             [SettingsForm.label("settings.editor.font"), fontPopup],
             [SettingsForm.label("settings.editor.size"), sizeRow],
             [SettingsForm.label("settings.editor.lineSpacing"), spacingPopup],
             [SettingsForm.label("settings.editor.preview"), preview],
+            [NSGridCell.emptyContentView, inlineBlame],
         ], in: view)
         SettingsForm.fitPreferredSize(self)
         // 通过菜单（⌘+ / ⌘-）修改字体时同步显示。
@@ -76,6 +80,11 @@ final class EditorSettingsPane: NSViewController {
         sizeStepper.integerValue = Int(EditorSettings.fontSize)
         spacingPopup.selectItem(at: EditorSettings.lineSpacingOptions.firstIndex(of: EditorSettings.lineSpacing) ?? 1)
         preview.font = EditorSettings.font
+        inlineBlame.state = EditorSettings.inlineBlame ? .on : .off
+    }
+
+    @objc private func inlineBlameChanged() {
+        EditorSettings.inlineBlame = inlineBlame.state == .on
     }
 
     @objc private func fontChanged() {

@@ -162,35 +162,53 @@ final class EditorAreaView: NSView {
     /// 当前编辑的文件。
     var activeFileURL: URL? { (active as? Document)?.url }
 
-    var isActiveAnnotated: Bool { activeEditor?.annotations != nil }
+    var isActiveAnnotated: Bool { activeEditor?.showAnnotations == true }
 
     // MARK: - Annotate
 
     /// 打开或关闭当前文件的 Annotate 列。
     func toggleAnnotations() {
         guard let doc = active as? Document else { return }
-        if doc.editor.annotations != nil {
-            doc.editor.annotations = nil
-        } else {
-            loadBlame(doc)
-        }
+        toggleAnnotations(doc)
     }
 
-    private func loadBlame(_ doc: Document) {
+    private func toggleAnnotations(_ doc: Document) {
+        if doc.editor.showAnnotations {
+            doc.editor.showAnnotations = false
+            return
+        }
+        doc.editor.showAnnotations = true
+        // 打开文件时已在后台 blame；尚未完成（或失败）时重新 blame，失败时提示。
+        if doc.editor.blame == nil { loadBlame(doc, reportFailure: true) }
+    }
+
+    /// 后台 blame 文件：结果同时用于 Annotate 注释列与光标行的行内提交信息。
+    /// 打开文件时自动进行（未跟踪的文件会失败，此时不提示），只有主动打开 Annotate 时才提示失败。
+    private func loadBlame(_ doc: Document) { loadBlame(doc, reportFailure: false) }
+
+    private func loadBlame(_ doc: Document, reportFailure: Bool) {
         guard let path = doc.relativePath else { return }
         let repository = (doc.owner ?? model).repository
         let fileURL = doc.url
         Task {
             let result = await Task.detached {
                 // blame 针对磁盘上的文件；同时读出该内容作为行号映射的基准。
-                Result { (try repository.blame(path: path, revision: nil), try? String(contentsOf: fileURL, encoding: .utf8)) }
+                Result {
+                    (try repository.blame(path: path, revision: nil), try? String(contentsOf: fileURL, encoding: .utf8), repository.userEmail())
+                }
             }.value
             switch result {
-            case let .success((blame, text)):
-                doc.editor.annotations = blame
+            case let .success((blame, text, email)):
                 doc.blameText = text
+                doc.editor.inlineBlame.userEmail = email
+                doc.editor.blame = blame
                 self.updateAnnotationMap(doc)
-            case .failure: model.post(tr("annotate.failed", doc.url.lastPathComponent), isError: true)
+            case .failure:
+                doc.editor.blame = nil
+                if reportFailure || doc.editor.showAnnotations {
+                    doc.editor.showAnnotations = false
+                    model.post(tr("annotate.failed", doc.url.lastPathComponent), isError: true)
+                }
             }
         }
     }
@@ -198,12 +216,12 @@ final class EditorAreaView: NSView {
     private func gutterMenu(for doc: Document) -> NSMenu {
         let menu = NSMenu()
         let annotate = NSMenuItem(
-            title: doc.editor.annotations == nil ? tr("git.action.annotate") : tr("git.action.closeAnnotations"),
+            title: doc.editor.showAnnotations ? tr("git.action.closeAnnotations") : tr("git.action.annotate"),
             action: #selector(MenuAction.invoke), keyEquivalent: ""
         )
         let annotateAction = MenuAction { [weak self, weak doc] in
             guard let self, let doc else { return }
-            if doc.editor.annotations != nil { doc.editor.annotations = nil } else { self.loadBlame(doc) }
+            self.toggleAnnotations(doc)
         }
         annotate.target = annotateAction
         annotate.representedObject = annotateAction
@@ -280,6 +298,12 @@ final class EditorAreaView: NSView {
             return self.gutterMenu(for: document)
         }
         document.editor.onAnnotationClick = { [weak self] hash in self?.onShowCommit?(hash) }
+        document.editor.inlineBlame.onShowCommit = { [weak self] hash in self?.onShowCommit?(hash) }
+        document.editor.inlineBlame.commitDetails = { [weak self, weak document] hash in
+            guard let self, let document else { return nil }
+            let repository = (document.owner ?? self.model).repository
+            return await Task.detached { try? repository.commitDetails(hash: hash) }.value
+        }
         document.editor.onCaretChange = { [weak self] line, column in
             self?.onCaretChange?("\(line):\(column)    LF    UTF-8")
         }
@@ -287,6 +311,7 @@ final class EditorAreaView: NSView {
         tabs.append(document)
         activate(document)
         loadBase(document)
+        loadBlame(document)
         updateReviewMarkers(document)
     }
 
@@ -311,6 +336,7 @@ final class EditorAreaView: NSView {
             document.editor.replaceText(with: text)
             document.isReloading = false
             updateLineStatus(document, delay: .zero)
+            loadBlame(document)
         }
     }
 
@@ -351,8 +377,8 @@ final class EditorAreaView: NSView {
         try doc.editor.text.write(to: doc.url, atomically: true, encoding: .utf8)
         doc.isModified = false
         rebuildTabs()
-        // 保存后重新 blame，使注释与文件内容对应。
-        if doc.editor.annotations != nil { loadBlame(doc) }
+        // 保存后重新 blame，使注释与行内提交信息与文件内容对应。
+        loadBlame(doc)
     }
 
     func closeActive() {
@@ -386,7 +412,7 @@ final class EditorAreaView: NSView {
                 doc.owner = owner
                 doc.relativePath = relative
                 loadBase(doc)
-                if doc.editor.annotations != nil { loadBlame(doc) }
+                loadBlame(doc)
             }
         }
         for repository in workspace.models {
@@ -399,7 +425,7 @@ final class EditorAreaView: NSView {
             let owned = documents.filter { $0.owner === repository }
             owned.forEach(loadBase)
             // 提交、签出后注释可能已过期。
-            owned.filter { $0.editor.annotations != nil }.forEach(loadBlame)
+            owned.forEach(loadBlame)
         }
         updateReviewMarkers()
     }
@@ -418,7 +444,7 @@ final class EditorAreaView: NSView {
     /// 文件被编辑后，把注释映射到当前行：未改动的行沿用原注释，新增与修改的行不显示注释。
     private func updateAnnotationMap(_ doc: Document) {
         doc.annotationTask?.cancel()
-        guard doc.editor.annotations != nil, let base = doc.blameText else {
+        guard doc.editor.blame != nil, let base = doc.blameText else {
             doc.editor.annotationLineMap = nil
             return
         }
@@ -484,7 +510,7 @@ final class EditorAreaView: NSView {
         lastHead = model.status.branch.oid
         documents.forEach(loadBase)
         // 提交、签出后注释可能已过期。
-        documents.filter { $0.editor.annotations != nil }.forEach(loadBlame)
+        documents.forEach(loadBlame)
     }
 
     // MARK: - 标签页
