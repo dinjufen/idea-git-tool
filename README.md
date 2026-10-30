@@ -1,4 +1,4 @@
-# GitDeck（代号）
+# GitDeck
 
 [English](README.en.md) | 简体中文
 
