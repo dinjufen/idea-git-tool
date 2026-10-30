@@ -196,7 +196,8 @@ public sealed class BranchesPane : Grid
 
     // MARK: - 树
 
-    private void Rebuild()
+    /// `incremental`：展开 / 收起时只增删变化的行，其余行保持不动（避免整个列表闪一下）。
+    private void Rebuild(bool incremental = false)
     {
         if (_model is not { } model) return;
         var query = _search.Text.Trim();
@@ -217,8 +218,27 @@ public sealed class BranchesPane : Grid
         var rows = new List<Node>();
         foreach (var root in roots) Collect(root, rows, expandAll: query.Length > 0);
         _rebuilding = true;
-        _list.ItemsSource = rows;
-        if (selectedKey is not null && rows.FirstOrDefault(r => NodeIdentity(r) == selectedKey) is { } again) _list.SelectedItem = again;
+        if (incremental && _list.ItemsSource is System.Collections.ObjectModel.ObservableCollection<Node> current)
+        {
+            string Id(Node n) => NodeIdentity(n) + "@" + n.Depth;
+            var prefix = 0;
+            while (prefix < current.Count && prefix < rows.Count && Id(current[prefix]) == Id(rows[prefix])) prefix++;
+            var suffix = 0;
+            while (suffix < current.Count - prefix && suffix < rows.Count - prefix && Id(current[current.Count - 1 - suffix]) == Id(rows[rows.Count - 1 - suffix])) suffix++;
+            for (var i = current.Count - suffix - 1; i >= prefix; i--) current.RemoveAt(i);
+            for (var i = prefix; i < rows.Count - suffix; i++) current.Insert(i, rows[i]);
+            // 展开箭头的方向变了：刷新已显示的行。
+            for (var i = 0; i < current.Count; i++)
+            {
+                if (_list.ContainerFromIndex(i) is ListViewItem { ContentTemplateRoot: Grid { Children.Count: > 0 } root } && root.Children[0] is RowView view) view.Bind(current[i], favorites);
+            }
+            if (selectedKey is not null && current.FirstOrDefault(r => NodeIdentity(r) == selectedKey) is { } kept) _list.SelectedItem = kept;
+        }
+        else
+        {
+            _list.ItemsSource = new System.Collections.ObjectModel.ObservableCollection<Node>(rows);
+            if (selectedKey is not null && rows.FirstOrDefault(r => NodeIdentity(r) == selectedKey) is { } again) _list.SelectedItem = again;
+        }
         _rebuilding = false;
         UpdateButtons();
     }
@@ -249,7 +269,7 @@ public sealed class BranchesPane : Grid
     private void Toggle(Node node)
     {
         if (!_collapsed.Remove(node.Key)) _collapsed.Add(node.Key);
-        Rebuild();
+        Rebuild(incremental: true);
     }
 
     private void SelectionChanged()

@@ -115,7 +115,9 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
         rebuild()
     }
 
-    private func rebuild() {
+    /// `toggled`：正在展开 / 收起的分组或文件夹；此时只增删变化的行，其余行保持不动（不会整体刷新、闪烁）。
+    private func rebuild(toggled: String? = nil) {
+        let previous = rows
         let query = search.stringValue.trimmingCharacters(in: .whitespaces).lowercased()
         let matches: (BranchRef) -> Bool = { query.isEmpty || $0.name.lowercased().contains(query) }
         rows = []
@@ -173,7 +175,26 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
         let searching = !query.isEmpty
         rows += BranchTree.flatten(roots, isExpanded: { Self.isExpanded($0.key) }, expandAll: searching).map { Row.node($0.node, depth: $0.depth) }
         self.favorites = favorites
-        table.reloadData()
+        guard let toggled else {
+            table.reloadData()
+            return
+        }
+        let keys = rows.map(Self.key), oldKeys = previous.map(Self.key)
+        let toggledKey = rows.compactMap { row -> String? in
+            if case let .node(node, depth) = row, node.key == toggled { return "\(node.key)@\(depth)" }
+            return nil
+        }.first
+        var prefix = 0
+        while prefix < oldKeys.count, prefix < keys.count, oldKeys[prefix] == keys[prefix], keys[prefix] != toggledKey { prefix += 1 }
+        var suffix = 0
+        while suffix < oldKeys.count - prefix, suffix < keys.count - prefix,
+              oldKeys[oldKeys.count - 1 - suffix] == keys[keys.count - 1 - suffix], keys[keys.count - 1 - suffix] != toggledKey {
+            suffix += 1
+        }
+        table.beginUpdates()
+        table.removeRows(at: IndexSet(prefix..<(oldKeys.count - suffix)), withAnimation: [])
+        table.insertRows(at: IndexSet(prefix..<(keys.count - suffix)), withAnimation: [])
+        table.endUpdates()
     }
 
     @objc private func rowClicked() {
@@ -206,9 +227,17 @@ final class BranchesPopover: NSViewController, NSTableViewDataSource, NSTableVie
         } else {
             Self.expanded.insert(key)
         }
-        rebuild()
+        rebuild(toggled: key)
         if let index = rows.firstIndex(where: { if case let .node(node, _) = $0 { return node.key == key }; return false }) {
             table.selectRowIndexes([index], byExtendingSelection: false)
+        }
+    }
+
+    /// 行的标识：用于展开 / 收起时比较前后两次的行。
+    private static func key(_ row: Row) -> String {
+        switch row {
+        case let .action(title, _, _, _): "action:" + title
+        case let .node(node, depth): "\(node.key)@\(depth)"
         }
     }
 

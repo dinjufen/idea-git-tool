@@ -26,6 +26,9 @@ public sealed class BranchesPopup
     private readonly Flyout _flyout = new() { ShouldConstrainToRootBounds = true };
     private readonly TextBox _search = new() { PlaceholderText = L10n.Tr("branches.search.placeholder") };
     private readonly ListView _list = new() { SelectionMode = ListViewSelectionMode.Single, IsItemClickEnabled = true };
+    /// 列表的行（数据绑定、虚拟化：只为可见的行生成界面，分支很多时展开 / 收起也不会卡顿或整块重绘）。
+    private readonly System.Collections.ObjectModel.ObservableCollection<Row> _rows = [];
+    private HashSet<string> _favorites = [];
     private readonly Controls.IconButton _fetch = new(Common.Icon.Update, L10n.Tr("git.action.fetch"), 30, 14);
     /// 最近签出过的本地分支（“最近”分组），打开弹窗时在后台读取。
     private string[] _recent = [];
@@ -55,7 +58,7 @@ public sealed class BranchesPopup
             _model = _workspace.Models[_repositories.SelectedIndex];
             _operations = _operationsFor(_model);
             LoadRecent();
-            Rebuild();
+            Rebuild(full: true);
         };
         // 搜索框右侧的 Fetch 按钮（与 IDEA 分支弹窗一致），用于刷新传入 / 传出提示。
         var searchRow = new Grid { ColumnSpacing = 4 };
@@ -74,6 +77,19 @@ public sealed class BranchesPopup
         root.Children.Add(_header);
         root.Children.Add(searchRow);
         root.Children.Add(_list);
+        _list.ItemsSource = _rows;
+        _list.ItemTemplate = (DataTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load(
+            "<DataTemplate xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\"><Grid /></DataTemplate>");
+        var rowStyle = new Style(typeof(ListViewItem));
+        rowStyle.Setters.Add(new Setter(FrameworkElement.MinHeightProperty, 28.0));
+        rowStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
+        _list.ItemContainerStyle = rowStyle;
+        _list.ContainerContentChanging += (_, args) =>
+        {
+            if (args.InRecycleQueue || args.ItemContainer.ContentTemplateRoot is not Grid cell || args.Item is not Row row) return;
+            Fill(args.ItemContainer, cell, row);
+            args.Handled = true;
+        };
         _flyout.Content = root;
         var presenter = new Style(typeof(FlyoutPresenter));
         presenter.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(8)));
@@ -82,21 +98,19 @@ public sealed class BranchesPopup
         _search.TextChanged += (_, _) => Rebuild();
         _search.KeyDown += (_, e) =>
         {
-            if (e.Key == Windows.System.VirtualKey.Down && _list.Items.Count > 0)
+            if (e.Key == Windows.System.VirtualKey.Down && _rows.Count > 0)
             {
                 _list.Focus(FocusState.Keyboard);
                 e.Handled = true;
             }
         };
-        // 直接放入 ListViewItem 时，ItemClick 的 ClickedItem 是该项的内容而不是 ListViewItem 本身，这里找回所在的项。
-        _list.ItemClick += (_, e) => Activate(e.ClickedItem as ListViewItem
-            ?? _list.Items.OfType<ListViewItem>().FirstOrDefault(i => ReferenceEquals(i.Content, e.ClickedItem)));
+        _list.ItemClick += (_, e) => Activate(e.ClickedItem as Row);
         _list.KeyDown += (_, e) =>
         {
-            if (e.Key == Windows.System.VirtualKey.Enter) Activate(_list.SelectedItem as ListViewItem);
+            if (e.Key == Windows.System.VirtualKey.Enter) Activate(_list.SelectedItem as Row);
             // 右方向键展开、左方向键收起（与文件树一致）。
             else if (e.Key is Windows.System.VirtualKey.Right or Windows.System.VirtualKey.Left
-                     && _list.SelectedItem is ListViewItem { Tag: TreeRow { Node.IsExpandable: true } row }
+                     && _list.SelectedItem is TreeRow { Node.IsExpandable: true } row
                      && (e.Key == Windows.System.VirtualKey.Right) != IsExpanded(row.Node.Key))
             {
                 Toggle(row.Node.Key);
@@ -140,7 +154,7 @@ public sealed class BranchesPopup
         _search.Text = "";
         _recent = [];
         LoadRecent();
-        Rebuild();
+        Rebuild(full: true);
         _flyout.ShowAt(anchor, new FlyoutShowOptions { Placement = FlyoutPlacementMode.BottomEdgeAlignedLeft });
     }
 
@@ -175,11 +189,14 @@ public sealed class BranchesPopup
 
     private static readonly Windows.UI.Color Yellow = Editor.SyntaxTheme.Rgb(0xE2A93C);
 
-    private void Rebuild()
+    /// 重新生成行。`full` 为 true 时（打开弹窗、切换仓库）整体替换；否则只增删前后不同的部分，
+    /// 展开 / 收起时其余的行保持不动（不闪烁、不跳动）。
+    private void Rebuild(bool full = false)
     {
         var query = _search.Text.Trim();
         bool Matches(string name) => query.Length == 0 || name.Contains(query, StringComparison.OrdinalIgnoreCase);
-        _list.Items.Clear();
+        var rows = new List<Row>();
+        void Add(Row row) => rows.Add(row);
         var ops = _operations;
         if (query.Length == 0)
         {
@@ -236,11 +253,44 @@ public sealed class BranchesPopup
 
         foreach (var (node, depth) in BranchTree.Flatten(roots, n => IsExpanded(n.Key), expandAll: query.Length > 0))
         {
-            Add(new TreeRow(node, depth), favorites);
+            Add(new TreeRow(node, depth));
+        }
+        _favorites = favorites;
+        if (full)
+        {
+            _rows.Clear();
+            foreach (var row in rows) _rows.Add(row);
+            return;
+        }
+        var prefix = 0;
+        while (prefix < _rows.Count && prefix < rows.Count && RowKey(_rows[prefix]) == RowKey(rows[prefix])) prefix++;
+        var suffix = 0;
+        while (suffix < _rows.Count - prefix && suffix < rows.Count - prefix && RowKey(_rows[_rows.Count - 1 - suffix]) == RowKey(rows[rows.Count - 1 - suffix])) suffix++;
+        for (var i = _rows.Count - suffix - 1; i >= prefix; i--) _rows.RemoveAt(i);
+        for (var i = prefix; i < rows.Count - suffix; i++) _rows.Insert(i, rows[i]);
+        // 保留下来的行（例如被展开 / 收起的那一行，箭头方向变了；搜索时的高亮）在原来的容器里重新填充。
+        for (var i = 0; i < _rows.Count; i++)
+        {
+            if (_list.ContainerFromIndex(i) is ListViewItem { ContentTemplateRoot: Grid cell } container) Fill(container, cell, _rows[i]);
         }
     }
 
-    private void Add(Row row, ISet<string>? favorites = null)
+    private static string RowKey(Row row) => row switch
+    {
+        ActionRow action => "action:" + action.Title,
+        TreeRow tree => tree.Node.Key + "@" + tree.Depth,
+        _ => "",
+    };
+
+    /// 填充一行的界面（随行容器回收重复使用）。
+    private void Fill(SelectorItem container, Grid cell, Row row)
+    {
+        cell.Children.Clear();
+        cell.Children.Add(Build(row, _favorites));
+        ToolTipService.SetToolTip(container, row is TreeRow { Node.Branch: { } branch } ? branch.Subject : null);
+    }
+
+    private FrameworkElement Build(Row row, ISet<string>? favorites)
     {
         var content = new Grid { ColumnSpacing = 8 };
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -313,14 +363,12 @@ public sealed class BranchesPopup
                 break;
             }
             default:
-                return;
+                return content;
         }
         content.Children.Add(leading);
         content.Children.Add(label);
         content.Children.Add(secondary);
-        var item = new ListViewItem { Content = content, Tag = row, MinHeight = 28, HorizontalContentAlignment = HorizontalAlignment.Stretch };
-        if (row is TreeRow { Node.Branch: { } tipBranch }) ToolTipService.SetToolTip(item, tipBranch.Subject);
-        _list.Items.Add(item);
+        return content;
     }
 
     /// 显示文字并高亮其中与搜索内容匹配的部分（与 IDEA 一样以黄色底色标出）。
@@ -349,9 +397,10 @@ public sealed class BranchesPopup
         return string.Join("  ", parts);
     }
 
-    private void Activate(ListViewItem? item)
+    private void Activate(Row? row)
     {
-        switch (item?.Tag)
+        FrameworkElement target = row is null ? _list : _list.ContainerFromItem(row) as FrameworkElement ?? _list;
+        switch (row)
         {
             case ActionRow action:
                 _flyout.Hide();
@@ -361,10 +410,10 @@ public sealed class BranchesPopup
                 Toggle(group.Node.Key);
                 break;
             case TreeRow { Node.Branch: { } branch }:
-                BranchMenu(branch).ShowAt(item, new FlyoutShowOptions { Placement = FlyoutPlacementMode.RightEdgeAlignedTop });
+                BranchMenu(branch).ShowAt(target, new FlyoutShowOptions { Placement = FlyoutPlacementMode.RightEdgeAlignedTop });
                 break;
             case TreeRow { Node.Tag: { } tag }:
-                TagMenu(tag).ShowAt(item, new FlyoutShowOptions { Placement = FlyoutPlacementMode.RightEdgeAlignedTop });
+                TagMenu(tag).ShowAt(target, new FlyoutShowOptions { Placement = FlyoutPlacementMode.RightEdgeAlignedTop });
                 break;
         }
     }
@@ -376,7 +425,7 @@ public sealed class BranchesPopup
         var set = key.StartsWith("recent/", StringComparison.Ordinal) ? CollapsedRecent : Expanded;
         if (!set.Remove(key)) set.Add(key);
         Rebuild();
-        _list.SelectedItem = _list.Items.OfType<ListViewItem>().FirstOrDefault(i => i.Tag is TreeRow r && r.Node.Key == key);
+        _list.SelectedItem = _rows.FirstOrDefault(r => r is TreeRow t && t.Node.Key == key);
     }
 
     private MenuFlyoutItem Item(string text, Func<Task>? action, bool enabled = true)

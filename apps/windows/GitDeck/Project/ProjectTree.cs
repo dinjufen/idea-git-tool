@@ -116,17 +116,29 @@ public sealed partial class ProjectTree
             node.Repository = RepositoryRootedAt(node);
             node.Detail = Detail(node);
         }
-        // 行没有增减时（例如检出、提交后只是状态颜色变化）只刷新已显示的行：重设 ItemsSource 会重新生成所有行，文件树会闪一下。
-        if (_list.ItemsSource is List<FileNode> current && current.SequenceEqual(rows))
+        // 重设 ItemsSource 会重新生成所有行，文件树会闪一下、滚动位置也会变：只增删前后不同的部分
+        // （展开 / 收起目录时插入或移除其子项，检出后颜色变化时一行都不增删），再刷新已显示的行。
+        if (_list.ItemsSource is not System.Collections.ObjectModel.ObservableCollection<FileNode> current)
         {
-            for (var i = 0; i < current.Count; i++)
-            {
-                if (_list.ContainerFromIndex(i) is ListViewItem { ContentTemplateRoot: Grid { Children.Count: > 0 } root } && root.Children[0] is RowView row) row.Bind(current[i]);
-            }
+            _list.ItemsSource = new System.Collections.ObjectModel.ObservableCollection<FileNode>(rows);
+            if (selected is not null && rows.Contains(selected)) _list.SelectedItem = selected;
             return;
         }
-        _list.ItemsSource = rows;
-        if (selected is not null && rows.Contains(selected)) _list.SelectedItem = selected;
+        var prefix = 0;
+        while (prefix < current.Count && prefix < rows.Count && ReferenceEquals(current[prefix], rows[prefix])) prefix++;
+        var suffix = 0;
+        while (suffix < current.Count - prefix && suffix < rows.Count - prefix
+               && ReferenceEquals(current[current.Count - 1 - suffix], rows[rows.Count - 1 - suffix]))
+        {
+            suffix++;
+        }
+        for (var i = current.Count - suffix - 1; i >= prefix; i--) current.RemoveAt(i);
+        for (var i = prefix; i < rows.Count - suffix; i++) current.Insert(i, rows[i]);
+        for (var i = 0; i < current.Count; i++)
+        {
+            if (_list.ContainerFromIndex(i) is ListViewItem { ContentTemplateRoot: Grid { Children.Count: > 0 } root } && root.Children[0] is RowView row) row.Bind(current[i]);
+        }
+        if (selected is not null && current.Contains(selected) && _list.SelectedItem != selected) _list.SelectedItem = selected;
     }
 
     private void Toggle(FileNode node)
