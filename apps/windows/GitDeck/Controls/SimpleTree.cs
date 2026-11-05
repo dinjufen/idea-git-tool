@@ -10,6 +10,8 @@ namespace GitDeck.Controls;
 /// 两级的简单树列表（储藏、搁置等条目 → 文件）：条目可展开，文件缩进显示。
 /// 与 ProjectTree / BranchesPane 一样用扁平 ListView + ObservableCollection 增量更新：
 /// 展开时只插入子行、收起时只移除子行，避免 Items.Clear 整表拆掉视觉树（WinUI 重入崩溃）。
+/// 额外加固：Chevron 用 Button.Click；首次异步 Expanding 不立刻 Refresh；Refresh 重入排队；
+/// 展开后只就地更新父行箭头，不对整表 Bind。
 public sealed class SimpleTree : Grid
 {
     public sealed class Node(object tag, Icon icon, string name, string detail)
@@ -45,6 +47,9 @@ public sealed class SimpleTree : Grid
     private List<Node> _roots = [];
     private ObservableCollection<Node> _rows = [];
     private bool _rebuilding;
+    private bool _refreshing;
+    private bool _refreshQueued;
+    private bool _pendingFull;
 
     public SimpleTree(ListViewSelectionMode mode, string emptyText)
     {
@@ -62,15 +67,11 @@ public sealed class SimpleTree : Grid
         _list.SelectionChanged += (_, _) =>
         {
             if (!_rebuilding) SelectionChanged?.Invoke();
-        };
+        }; 
         _list.DoubleTapped += (_, _) =>
         {
             if (SelectedNodes.FirstOrDefault() is not { } node) return;
-            if (node.CanExpand)
-            {
-                // 推迟 Toggle，避免在输入事件栈内改 ItemsSource（WinUI 重入风险）。
-                DispatcherQueue.TryEnqueue(() => Toggle(node));
-            }
+            if (node.CanExpand) RequestToggle(node);
             else Invoked?.Invoke(node);
         };
         _list.RightTapped += (_, e) =>
@@ -126,15 +127,69 @@ public sealed class SimpleTree : Grid
         _list.ScrollIntoView(node);
     }
 
+    /// 推迟到输入事件栈外再 Toggle（Chevron Button / DoubleTapped 共用）。
+    public void RequestToggle(Node node) =>
+        DispatcherQueue.TryEnqueue(() => Toggle(node));
+
     public void Toggle(Node node)
     {
+        if (!node.CanExpand) return;
+        if (_refreshing)
+        {
+            DispatcherQueue.TryEnqueue(() => Toggle(node));
+            return;
+        }
+
         node.IsExpanded = !node.IsExpanded;
-        if (node.IsExpanded && node.Children is null) Expanding?.Invoke(node);
+        if (node.IsExpanded && node.Children is null)
+        {
+            Expanding?.Invoke(node);
+            // 异步加载尚未完成：只就地翻箭头，等 LoadFiles → SetChildren → Refresh 再插子行。
+            // 若 Expanding 同步填好了 Children，则继续走下面的 Refresh。
+            if (node.Children is null)
+            {
+                UpdateVisibleRow(node);
+                return;
+            }
+        }
         Refresh();
     }
 
     /// 按展开状态重建可见行。默认增量更新（展开 / 收起只增删子行）；`full` 时整体替换（SetRoots）。
     public void Refresh(bool full = false)
+    {
+        if (_refreshing)
+        {
+            _refreshQueued = true;
+            _pendingFull |= full;
+            return;
+        }
+
+        _refreshing = true;
+        _rebuilding = true;
+        try
+        {
+            ApplyVisibleRows(full);
+        }
+        finally
+        {
+            _rebuilding = false;
+            _refreshing = false;
+        }
+
+        _empty.Visibility = _roots.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        SelectionChanged?.Invoke();
+
+        if (_refreshQueued)
+        {
+            var againFull = _pendingFull;
+            _refreshQueued = false;
+            _pendingFull = false;
+            DispatcherQueue.TryEnqueue(() => Refresh(againFull));
+        }
+    }
+
+    private void ApplyVisibleRows(bool full)
     {
         var selected = SelectedNodes.ToHashSet();
         var visible = new List<Node>();
@@ -144,7 +199,6 @@ public sealed class SimpleTree : Grid
             if (root.IsExpanded && root.Children is { } children) visible.AddRange(children);
         }
 
-        _rebuilding = true;
         if (full || !ReferenceEquals(_list.ItemsSource, _rows))
         {
             _rows = new ObservableCollection<Node>(visible);
@@ -163,33 +217,38 @@ public sealed class SimpleTree : Grid
             }
             for (var i = _rows.Count - suffix - 1; i >= prefix; i--) _rows.RemoveAt(i);
             for (var i = prefix; i < visible.Count - suffix; i++) _rows.Insert(i, visible[i]);
-            // 展开箭头方向变了：刷新已显示的行（不重建 ItemsSource）。
-            for (var i = 0; i < _rows.Count; i++)
-            {
-                if (_list.ContainerFromIndex(i) is ListViewItem { ContentTemplateRoot: Grid { Children.Count: > 0 } root }
-                    && root.Children[0] is RowView view)
-                {
-                    view.Bind(_rows[i]);
-                }
-            }
+            // 只更新可展开根行的箭头，避免对整表 Bind / 拆图标视觉树。
+            foreach (var root in _roots) UpdateVisibleRow(root);
         }
 
+        // 选中恢复放到集合变更之后；保持 _rebuilding，避免 SelectionChanged 重入。
         if (_list.SelectionMode == ListViewSelectionMode.Single)
         {
-            _list.SelectedItem = _rows.FirstOrDefault(selected.Contains);
+            var keep = _rows.FirstOrDefault(selected.Contains);
+            if (!ReferenceEquals(_list.SelectedItem, keep)) _list.SelectedItem = keep;
         }
         else
         {
-            _list.SelectedItems.Clear();
+            var current = _list.SelectedItems.OfType<Node>().ToHashSet();
+            foreach (var node in current.Where(n => !selected.Contains(n) || !_rows.Contains(n)).ToList())
+                _list.SelectedItems.Remove(node);
             foreach (var node in _rows)
             {
-                if (selected.Contains(node)) _list.SelectedItems.Add(node);
+                if (selected.Contains(node) && !current.Contains(node)) _list.SelectedItems.Add(node);
             }
         }
-        _rebuilding = false;
+    }
 
-        _empty.Visibility = _roots.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        SelectionChanged?.Invoke();
+    /// 就地刷新某一可见行（箭头方向等），不改 Items 集合。
+    private void UpdateVisibleRow(Node node)
+    {
+        var index = _rows.IndexOf(node);
+        if (index < 0) return;
+        if (_list.ContainerFromIndex(index) is ListViewItem { ContentTemplateRoot: Grid { Children.Count: > 0 } root }
+            && root.Children[0] is RowView view)
+        {
+            view.Bind(node);
+        }
     }
 
     private void OnContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
@@ -216,8 +275,20 @@ public sealed class SimpleTree : Grid
     private sealed class RowView : Grid
     {
         private readonly SimpleTree _tree;
-        private readonly Grid _chevronArea = new() { Width = 16, Height = 16, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        private readonly Button _chevronButton = new()
+        {
+            Width = 16,
+            Height = 16,
+            Padding = new Thickness(0),
+            MinWidth = 16,
+            MinHeight = 16,
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
         private readonly FrameworkElement _chevron = Icons.Create(Icon.ChevronDown, 12);
+        private readonly RotateTransform _chevronRotate = new() { Angle = -90 };
         private readonly Grid _iconHost = new() { Width = 14, Height = 14, VerticalAlignment = VerticalAlignment.Center };
         private readonly TextBlock _name = new() { VerticalAlignment = VerticalAlignment.Center };
         private readonly TextBlock _detail = new()
@@ -227,6 +298,8 @@ public sealed class SimpleTree : Grid
             Margin = new Thickness(4, 0, 0, 0),
         };
         private Node? _node;
+        private Icon? _boundIcon;
+        private Windows.UI.Color? _boundIconColor;
 
         public RowView(SimpleTree tree)
         {
@@ -237,23 +310,27 @@ public sealed class SimpleTree : Grid
             ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             _chevron.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
-            _chevronArea.Children.Add(_chevron);
-            _chevronArea.Tapped += (_, e) =>
+            _chevron.RenderTransform = _chevronRotate;
+            _chevronButton.Content = _chevron;
+            _chevronButton.Click += (_, _) =>
             {
-                e.Handled = true;
                 if (_node is not { CanExpand: true } node) return;
-                // 推迟 Toggle，避免在 Tapped 中同步改集合（WinUI 重入风险）。
-                _tree.DispatcherQueue.TryEnqueue(() => _tree.Toggle(node));
+                // Button.Click 比 UIElement.Tapped 更晚、且不踩 ListViewItem 指针路由；仍推迟出栈。
+                _tree.RequestToggle(node);
             };
             _detail.Style = (Style)Application.Current.Resources["SecondaryTextStyle"];
             SetColumn(_iconHost, 1);
             SetColumn(_name, 2);
             SetColumn(_detail, 3);
-            Children.Add(_chevronArea);
+            Children.Add(_chevronButton);
             Children.Add(_iconHost);
             Children.Add(_name);
             Children.Add(_detail);
-            ActualThemeChanged += (_, _) => UpdateIcon();
+            ActualThemeChanged += (_, _) =>
+            {
+                _boundIcon = null;
+                UpdateIcon();
+            };
         }
 
         public Node? Node => _node;
@@ -262,8 +339,8 @@ public sealed class SimpleTree : Grid
         {
             _node = node;
             Margin = new Thickness(node.Parent is null ? 0 : 22, 0, 0, 0);
-            _chevronArea.Visibility = node.CanExpand ? Visibility.Visible : Visibility.Collapsed;
-            _chevron.RenderTransform = new RotateTransform { Angle = node.IsExpanded ? 0 : -90 };
+            _chevronButton.Visibility = node.CanExpand ? Visibility.Visible : Visibility.Collapsed;
+            _chevronRotate.Angle = node.IsExpanded ? 0 : -90;
             _name.Text = node.Name;
             _name.FontWeight = node.IsBold ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
             _name.TextDecorations = node.Strikethrough ? Windows.UI.Text.TextDecorations.Strikethrough : Windows.UI.Text.TextDecorations.None;
@@ -276,6 +353,9 @@ public sealed class SimpleTree : Grid
         {
             if (_node is not { } node) return;
             _name.Foreground = Icons.ThemeBrush(_name, node.NameBrushKey);
+            if (_boundIcon == node.Icon && _boundIconColor == node.IconColor && _iconHost.Children.Count == 1) return;
+            _boundIcon = node.Icon;
+            _boundIconColor = node.IconColor;
             _iconHost.Children.Clear();
             var brush = node.IconColor is { } color
                 ? new SolidColorBrush(color)

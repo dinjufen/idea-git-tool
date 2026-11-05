@@ -141,31 +141,42 @@ public sealed class StashesView : Grid
     private void LoadFiles(SimpleTree.Node node)
     {
         if (node.Tag is not StashEntry stash) return;
+        // 已加载过则不再请求，避免 Expanding 重入叠 Refresh。
+        if (node.Children is not null) return;
         var repository = _model.Repository;
+        var index = stash.Index;
         Task.Run(() =>
         {
             try
             {
-                return repository.StashFiles(stash.Index);
+                return repository.StashFiles(index);
             }
             catch (CoreException)
             {
-                return [];
+                return Array.Empty<ChangedFile>();
             }
-        }).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
+        }).ContinueWith(task =>
         {
-            node.SetChildren(task.Result.OrderBy(f => f.Path, StringComparer.OrdinalIgnoreCase).Select(file =>
+            if (!task.IsCompletedSuccessfully) return;
+            var files = task.Result;
+            _ = DispatcherQueue.TryEnqueue(() =>
             {
-                var directory = System.IO.Path.GetDirectoryName(file.Path)?.Replace('\\', '/') ?? "";
-                return new SimpleTree.Node(file, Icon.File, System.IO.Path.GetFileName(file.Path), directory)
+                // 期间可能已被其他路径填过 Children，或用户已收起。
+                if (node.Children is not null) return;
+                node.SetChildren(files.OrderBy(f => f.Path, StringComparer.OrdinalIgnoreCase).Select(file =>
                 {
-                    NameBrushKey = file.Kind == ChangeKind.Untracked ? "StatusUntrackedBrush" : file.Kind.BrushKey(),
-                    Strikethrough = file.Kind == ChangeKind.Deleted,
-                    Tooltip = file.Path,
-                };
-            }));
-            _tree.Refresh();
-        }), TaskScheduler.Default);
+                    var directory = System.IO.Path.GetDirectoryName(file.Path)?.Replace('\\', '/') ?? "";
+                    return new SimpleTree.Node(file, Icon.File, System.IO.Path.GetFileName(file.Path), directory)
+                    {
+                        NameBrushKey = file.Kind == ChangeKind.Untracked ? "StatusUntrackedBrush" : file.Kind.BrushKey(),
+                        Strikethrough = file.Kind == ChangeKind.Deleted,
+                        Tooltip = file.Path,
+                    };
+                }));
+                // 仍展开时才插行；Toggle 在首次 Expanding 时已跳过 Refresh。
+                if (node.IsExpanded) _tree.Refresh();
+            });
+        }, TaskScheduler.Default);
     }
 
     /// 仅调试：展开第一条储藏。
