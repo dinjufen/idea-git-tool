@@ -55,7 +55,11 @@ public sealed class SimpleTree : Grid
         _list.DoubleTapped += (_, _) =>
         {
             if (SelectedNodes.FirstOrDefault() is not { } node) return;
-            if (node.CanExpand) Toggle(node);
+            if (node.CanExpand)
+            {
+                // 推迟 Toggle，避免在输入事件栈内 Items.Clear 拆掉视觉树（WinUI 重入崩溃）。
+                DispatcherQueue.TryEnqueue(() => Toggle(node));
+            }
             else Invoked?.Invoke(node);
         };
         _list.RightTapped += (_, e) =>
@@ -162,8 +166,9 @@ public sealed class SimpleTree : Grid
             var area = new Grid { Width = 16, Height = 16, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), Children = { chevron } };
             area.Tapped += (_, e) =>
             {
-                Toggle(node);
                 e.Handled = true;
+                // 推迟 Toggle，避免在 Tapped 中同步 Refresh/Items.Clear 拆掉发送方（WinUI 重入崩溃）。
+                DispatcherQueue.TryEnqueue(() => Toggle(node));
             };
             row.Children.Add(area);
         }
