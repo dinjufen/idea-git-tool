@@ -113,3 +113,7 @@ cargo test --workspace
 - All git operations are implemented in the Rust core; the UI layers only present and interact.
 - All UI strings live in `apps/mac/Sources/GitDeck/Resources/Localizable.xcstrings` (en / zh-Hans), which the Windows app reads directly. Chinese terms follow IDEA's official Chinese language pack.
 - Only permissively licensed dependencies (MIT / Apache-2.0 / BSD). The MPL-2.0 exception for UniFFI is decision 12 in the decision log.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=dinjufen/idea-git-tool&type=Date)](https://star-history.com/#dinjufen/idea-git-tool&Date)

@@ -113,3 +113,7 @@ cargo test --workspace
 - 所有 git 操作在 Rust 核心中实现，UI 层只负责展示与交互。
 - 界面文案全部放在 `apps/mac/Sources/GitDeck/Resources/Localizable.xcstrings`（en / zh-Hans），Windows 端直接读取同一文件；中文术语对齐 IDEA 官方中文语言包。
 - 只引入 MIT / Apache-2.0 / BSD 等宽松许可的依赖（UniFFI 的 MPL-2.0 例外见决策第 12 项）。
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=dinjufen/idea-git-tool&type=Date)](https://star-history.com/#dinjufen/idea-git-tool&Date)
