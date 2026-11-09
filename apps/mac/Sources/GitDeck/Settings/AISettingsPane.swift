@@ -11,6 +11,7 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
     private let effortPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let maxTokensField = NSTextField()
     private let toolsCheckbox = NSButton(checkboxWithTitle: tr("ai.settings.tools"), target: nil, action: nil)
+    private let queryModelsButton = NSButton(title: tr("ai.settings.queryModels"), target: nil, action: nil)
     private let testButton = NSButton(title: tr("ai.settings.test"), target: nil, action: nil)
     private let testStatus = NSTextField.label("", font: Theme.smallFont, color: Theme.secondaryText)
     private let languagePopup = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -73,6 +74,10 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
         modelBox.numberOfVisibleItems = 6
         modelBox.target = self
         modelBox.action = #selector(modelChanged)
+        queryModelsButton.bezelStyle = .push
+        queryModelsButton.controlSize = .regular
+        queryModelsButton.target = self
+        queryModelsButton.action = #selector(queryModels)
         effortPopup.addItems(withTitles: AISettings.efforts)
         effortPopup.target = self
         effortPopup.action = #selector(effortChanged)
@@ -135,11 +140,13 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
             l.alignment = .right
             return l
         }
+        let modelRow = NSStackView(views: [modelBox, queryModelsButton])
+        modelRow.spacing = 8
         let rows: [[NSView]] = [
             [label("ai.settings.provider"), providerPopup],
             [label("ai.settings.key"), keyRow],
             [label("ai.settings.baseURL"), baseURLField],
-            [label("ai.settings.model"), modelBox],
+            [label("ai.settings.model"), modelRow],
             [label("ai.settings.effort"), effortPopup],
             [NSGridCell.emptyContentView, toolsCheckbox],
             [label("ai.settings.maxTokens"), maxTokensField],
@@ -163,7 +170,7 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
         for field in [keyField, baseURLField, maxTokensField] as [NSView] {
             field.widthAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
         }
-        modelBox.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        modelBox.widthAnchor.constraint(equalToConstant: 240).isActive = true
 
         grid.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(grid)
@@ -260,6 +267,60 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
     @objc private func resetPatterns() {
         patternsView.string = defaultSensitivePatterns().joined(separator: "\n")
         savePatterns()
+    }
+
+
+    @objc private func queryModels() {
+        commitFields()
+        let provider = self.provider
+        let key = AISettings.apiKey(provider) ?? ""
+        let baseURL = AISettings.baseURL(provider)
+        guard !key.isEmpty else {
+            showTestResult(tr("ai.error.auth", "API Key required"), ok: false)
+            return
+        }
+        queryModelsButton.isEnabled = false
+        testStatus.textColor = Theme.secondaryText
+        testStatus.stringValue = tr("ai.settings.queryModels.running")
+        testTask?.cancel()
+        testTask = Task {
+            let result = await Task.detached {
+                Result { try listAiModels(kind: provider.kind, baseUrl: baseURL, apiKey: key) }
+            }.value
+            self.queryModelsButton.isEnabled = true
+            switch result {
+            case .success(let models):
+                self.applyQueriedModels(models, provider: provider)
+            case let .failure(error):
+                self.showTestResult(errorMessage(error), ok: false)
+            }
+        }
+    }
+
+    private func applyQueriedModels(_ models: [AiModelInfo], provider: AISettings.Provider) {
+        guard !models.isEmpty else {
+            showTestResult(tr("ai.settings.queryModels.empty"), ok: false)
+            return
+        }
+        modelBox.removeAllItems()
+        modelBox.addItems(withObjectValues: models.map(\.id))
+        let current = AISettings.model(provider)
+        if models.contains(where: { $0.id == current }) {
+            modelBox.stringValue = current
+        } else if modelBox.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            modelBox.stringValue = models[0].id
+            AISettings.setModel(provider, models[0].id)
+        }
+        let selectedId = modelBox.stringValue
+        let info = models.first(where: { $0.id == selectedId }) ?? models[0]
+        let suggested = info.maxOutputTokens ?? defaultAiMaxTokens(kind: provider.kind)
+        let currentTokens: UInt32? = maxTokensField.integerValue > 0 ? UInt32(clamping: maxTokensField.integerValue) : nil
+        let next = shouldAutofillAiMaxTokens(kind: provider.kind, current: currentTokens, suggested: suggested)
+        if Int(next) != maxTokensField.integerValue {
+            maxTokensField.integerValue = Int(next)
+            AISettings.setMaxTokens(provider, Int(next))
+        }
+        showTestResult(tr("ai.settings.queryModels.ok", models.count), ok: true)
     }
 
     @objc private func testConnection() {
