@@ -137,3 +137,37 @@ pub(crate) fn io_error(e: std::io::Error) -> CoreError {
         detail: e.to_string(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 回归 issue #5：ureq 3.4.x 仅开 `native-tls-no-default` 时，对 https + NativeTls
+    /// 会 panic「feature is not enabled: native-tls」。3.5+ 门控修好后，不可达地址应返回
+    /// 连接类错误，而不是该 feature panic。
+    #[test]
+    fn https_native_tls_feature_is_enabled() {
+        let result = std::panic::catch_unwind(|| {
+            agent()
+                .get("https://127.0.0.1:1")
+                .call()
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        });
+        match result {
+            Ok(Ok(())) => panic!("unreachable https://127.0.0.1:1 unexpectedly succeeded"),
+            Ok(Err(msg)) => assert!(
+                !msg.contains("feature is not enabled"),
+                "NativeTls feature gate broken (issue #5): {msg}"
+            ),
+            Err(panic) => {
+                let msg = panic
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| panic.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+                    .unwrap_or_else(|| format!("{panic:?}"));
+                panic!("NativeTls feature gate broken (issue #5): {msg}");
+            }
+        }
+    }
+}
