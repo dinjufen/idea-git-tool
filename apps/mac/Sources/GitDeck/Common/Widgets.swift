@@ -61,7 +61,30 @@ final class IconButton: NSControl {
 
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
-        sendAction(action, to: target)
+        // 必须等松开且指针仍在按钮内再触发。若在 mouseDown 就打开设置窗，
+        // 松手落点还在项目窗上，AppKit 会把项目窗重新置前，设置窗闪一下就被盖住。
+        isHovered = true
+        var upInside = false
+        var tracking = true
+        while tracking {
+            guard let next = window?.nextEvent(matching: [.leftMouseUp, .leftMouseDragged]) else { break }
+            let local = convert(next.locationInWindow, from: nil)
+            switch next.type {
+            case .leftMouseDragged:
+                isHovered = bounds.contains(local)
+            case .leftMouseUp:
+                upInside = bounds.contains(local)
+                tracking = false
+            default:
+                tracking = false
+            }
+        }
+        if let window {
+            isHovered = bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
+        }
+        if upInside {
+            sendAction(action, to: target)
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {

@@ -20,6 +20,7 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
     private var effortRow: NSGridRow?
     private var toolsRow: NSGridRow?
     private var testTask: Task<Void, Never>?
+    private var presenceTask: Task<Void, Never>?
 
     private var provider: AISettings.Provider {
         AISettings.Provider.allCases[max(0, providerPopup.indexOfSelectedItem)]
@@ -194,9 +195,8 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
     private func loadProvider() {
         let provider = self.provider
         keyField.stringValue = ""
-        let hasKey = AISettings.apiKey(provider) != nil
-        keyField.placeholderString = tr(hasKey ? "ai.settings.key.saved" : "ai.settings.key.placeholder")
-        deleteKeyButton.isEnabled = hasKey
+        applyKeyPresence(AISettings.hasStoredKey(provider))
+        refreshKeyPresence(provider)
         baseURLField.stringValue = AISettings.baseURL(provider)
         baseURLField.placeholderString = defaultAiBaseUrl(kind: provider.kind)
         modelBox.removeAllItems()
@@ -211,8 +211,30 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
         testStatus.stringValue = ""
     }
 
+    private func applyKeyPresence(_ hasKey: Bool) {
+        keyField.placeholderString = tr(hasKey ? "ai.settings.key.saved" : "ai.settings.key.placeholder")
+        deleteKeyButton.isEnabled = hasKey
+    }
+
+    /// 钥匙串探测可能耗时数秒，放到后台，避免卡住 tab 切换。
+    private func refreshKeyPresence(_ provider: AISettings.Provider) {
+        presenceTask?.cancel()
+        let account = provider.rawValue
+        presenceTask = Task.detached { [weak self] in
+            let present = Keychain.probeContains(account)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self else { return }
+                AISettings.recordStoredKey(provider, present: present)
+                guard self.provider == provider else { return }
+                self.applyKeyPresence(present)
+            }
+        }
+    }
+
     /// 输入框尚未结束编辑时（例如直接点击“测试连接”）也写入设置。
     private func commitFields() {
+
         let provider = self.provider
         let key = keyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty {
