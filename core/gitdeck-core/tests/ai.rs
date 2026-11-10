@@ -13,7 +13,7 @@ use common::*;
 use gitdeck_core::{
     AiProviderConfig, AiProviderKind, AiTask, CoreError, ReviewEvent, ReviewListener,
     ReviewOptions, ReviewResult, ReviewScope, ReviewSeverity, default_sensitive_patterns,
-    test_ai_connection,
+    list_ai_models, test_ai_connection,
 };
 use serde_json::{Value, json};
 
@@ -83,6 +83,13 @@ fn http_ok(body: &str) -> String {
 fn http_error(status: u16, body: &str, extra: &str) -> String {
     format!(
         "HTTP/1.1 {status} Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+fn http_json_ok(body: &str) -> String {
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     )
 }
@@ -476,4 +483,43 @@ fn cancelled_task_stops_before_request() {
         task,
     );
     assert_eq!(result, Err(CoreError::AiCancelled));
+}
+
+#[test]
+fn lists_openai_compatible_models_and_preserves_auth_header() {
+    let body = r#"{"data":[{"id":"deepseek-chat"},{"id":"deepseek-reasoner","max_tokens":65536}]}"#;
+    let (url, requests) = mock_server(vec![http_json_ok(body)]);
+    let models = list_ai_models(AiProviderKind::OpenAiCompatible, url, "sk-test".into()).unwrap();
+    assert_eq!(models.len(), 2);
+    assert_eq!(models[0].id, "deepseek-chat");
+    assert_eq!(models[1].max_output_tokens, Some(65_536));
+    let headers = &requests.lock().unwrap()[0].headers;
+    assert!(headers.contains("authorization: bearer sk-test"));
+}
+
+#[test]
+fn lists_anthropic_models_with_api_key_header() {
+    let body = r#"{"data":[{"id":"claude-sonnet-4-5","display_name":"Claude Sonnet","max_tokens":64000}]}"#;
+    let (url, requests) = mock_server(vec![http_json_ok(body)]);
+    let models = list_ai_models(AiProviderKind::Anthropic, url, "ak-test".into()).unwrap();
+    assert_eq!(models[0].display_name, "Claude Sonnet");
+    assert_eq!(models[0].max_output_tokens, Some(64_000));
+    let headers = &requests.lock().unwrap()[0].headers;
+    assert!(headers.contains("x-api-key: ak-test"));
+    assert!(headers.contains("anthropic-version: 2023-06-01"));
+}
+
+#[test]
+fn list_models_maps_unauthorized_to_auth_error() {
+    let (url, _) = mock_server(vec![http_error(
+        401,
+        r#"{"error":{"message":"invalid api key"}}"#,
+        "",
+    )]);
+    assert_eq!(
+        list_ai_models(AiProviderKind::OpenAiCompatible, url, "bad".into()),
+        Err(CoreError::AiAuthenticationFailed {
+            message: "invalid api key".into()
+        })
+    );
 }
