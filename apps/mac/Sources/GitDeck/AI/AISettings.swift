@@ -105,11 +105,12 @@ enum AISettings {
 
     static func maxTokens(_ provider: Provider) -> Int {
         let value = defaults.integer(forKey: key(provider, "maxTokens"))
-        return value > 0 ? value : provider.defaultMaxTokens
+        guard value > 0 else { return provider.defaultMaxTokens }
+        return min(value, 128_000)
     }
 
     static func setMaxTokens(_ provider: Provider, _ value: Int) {
-        defaults.set(value, forKey: key(provider, "maxTokens"))
+        defaults.set(min(max(value, 1), 128_000), forKey: key(provider, "maxTokens"))
         post()
     }
 
@@ -141,13 +142,34 @@ enum AISettings {
         set { defaults.set(newValue, forKey: "ai.reviewBeforeCommit") }
     }
 
-    static func apiKey(_ provider: Provider) -> String? { Keychain.read(provider.rawValue) }
+    static func apiKey(_ provider: Provider, allowPrompt: Bool = true) -> String? {
+        Keychain.read(provider.rawValue, allowPrompt: allowPrompt)
+    }
+
+    /// 是否已有 Key：只读内存缓存和本地标记，不访问钥匙串，可在主线程调用。
+    static func hasStoredKey(_ provider: Provider) -> Bool {
+        if let cached = Keychain.cachedContains(provider.rawValue) { return cached }
+        return defaults.bool(forKey: storedKeyFlag(provider))
+    }
+
+    static func recordStoredKey(_ provider: Provider, present: Bool) {
+        defaults.set(present, forKey: storedKeyFlag(provider))
+    }
 
     @discardableResult
     static func setAPIKey(_ provider: Provider, _ value: String?) -> Bool {
-        let ok = Keychain.write(provider.rawValue, value?.trimmingCharacters(in: .whitespacesAndNewlines))
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ok = Keychain.write(provider.rawValue, trimmed)
+        if ok {
+            let present = !(trimmed ?? "").isEmpty
+            defaults.set(present, forKey: storedKeyFlag(provider))
+        }
         post()
         return ok
+    }
+
+    private static func storedKeyFlag(_ provider: Provider) -> String {
+        "ai.hasStoredKey.\(provider.rawValue)"
     }
 
     static func config(_ provider: Provider, effort: String? = nil) -> AiProviderConfig {

@@ -132,6 +132,39 @@ pub(crate) fn stream_error(value: &Value) -> CoreError {
     )
 }
 
+/// 发送 GET 请求并返回完整响应体（成功状态码）。
+pub(crate) fn get(url: &str, headers: &[(&str, String)], task: &AiTask) -> Result<String> {
+    let mut attempt = 0;
+    loop {
+        task.check()?;
+        let mut request = agent().get(url).header("accept", "application/json");
+        for (name, value) in headers {
+            request = request.header(*name, value.as_str());
+        }
+        let response = request.call().map_err(|e| CoreError::AiNetwork {
+            detail: e.to_string(),
+        })?;
+        let status = response.status().as_u16();
+        let text = response
+            .into_body()
+            .with_config()
+            .limit(2 * 1024 * 1024)
+            .read_to_string()
+            .unwrap_or_default();
+        if (200..300).contains(&status) {
+            return Ok(text);
+        }
+        let error = status_error(status, &text);
+        if attempt < MAX_RETRIES && is_retryable(status) {
+            attempt += 1;
+            let wait = (1 << attempt).min(30);
+            task.sleep(Duration::from_secs(wait))?;
+            continue;
+        }
+        return Err(error);
+    }
+}
+
 pub(crate) fn io_error(e: std::io::Error) -> CoreError {
     CoreError::AiNetwork {
         detail: e.to_string(),

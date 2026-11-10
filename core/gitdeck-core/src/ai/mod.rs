@@ -5,6 +5,7 @@
 
 mod filter;
 mod http;
+mod models;
 mod provider;
 mod review;
 mod sse;
@@ -15,6 +16,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 pub use filter::{default_sensitive_patterns, is_sensitive_path};
+pub use models::{AiModelInfo, default_ai_max_tokens, list_ai_models, should_autofill_ai_max_tokens};
 pub use review::{
     ReviewEvent, ReviewFinding, ReviewListener, ReviewOptions, ReviewResult, ReviewScope,
     ReviewSeverity, ReviewSuggestion, apply_review_suggestion, test_ai_connection,

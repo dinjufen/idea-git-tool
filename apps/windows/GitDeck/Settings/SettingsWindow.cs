@@ -404,7 +404,8 @@ public sealed class SettingsWindow : Window
         var key = new PasswordBox { Width = 300 };
         var deleteKey = new Button { Content = L10n.Tr("ai.settings.deleteKey") };
         var baseUrl = new TextBox { Width = 360 };
-        var model = new ComboBox { IsEditable = true, Width = 300 };
+        var model = new ComboBox { IsEditable = true, Width = 240 };
+        var queryModels = new Button { Content = L10n.Tr("ai.settings.queryModels") };
         var effort = new ComboBox { Width = 140, ItemsSource = AISettings.Efforts };
         var tools = new CheckBox { Content = L10n.Tr("ai.settings.tools") };
         var maxTokens = new NumberBox { Minimum = 1024, Maximum = 128_000, Width = 160, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Hidden };
@@ -519,6 +520,56 @@ public sealed class SettingsWindow : Window
             patterns.Text = string.Join("\r", CoreApi.DefaultSensitivePatterns());
             SavePatterns();
         };
+        queryModels.Click += (_, _) =>
+        {
+            Commit();
+            var p = Selected();
+            var apiKey = AISettings.ApiKey(p) ?? "";
+            if (apiKey.Length == 0)
+            {
+                ShowStatus(L10n.Tr("ai.error.auth", "API Key required"), ok: false);
+                return;
+            }
+            queryModels.IsEnabled = false;
+            Themed.Foreground(status, "SecondaryTextBrush");
+            status.Text = L10n.Tr("ai.settings.queryModels.running");
+            var baseUrl = AISettings.BaseUrl(p);
+            var kind = p.Kind();
+            Task.Run(() => CoreApi.ListAiModels(kind, baseUrl, apiKey)).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
+            {
+                queryModels.IsEnabled = true;
+                if (task.Exception?.InnerException is { } error)
+                {
+                    ShowStatus(L10n.Message(error), ok: false);
+                    return;
+                }
+                var models = task.Result;
+                if (models.Count == 0)
+                {
+                    ShowStatus(L10n.Tr("ai.settings.queryModels.empty"), ok: false);
+                    return;
+                }
+                model.ItemsSource = models.Select(m => m.Id).ToList();
+                var current = AISettings.Model(p);
+                if (models.Any(m => m.Id == current)) model.Text = current;
+                else if (string.IsNullOrWhiteSpace(model.Text))
+                {
+                    model.Text = models[0].Id;
+                    AISettings.SetModel(p, models[0].Id);
+                }
+                var selectedId = (model.Text ?? "").Trim();
+                var info = models.FirstOrDefault(m => m.Id == selectedId) ?? models[0];
+                var suggested = info.MaxOutputTokens ?? CoreApi.DefaultAiMaxTokens(kind);
+                uint? currentTokens = !double.IsNaN(maxTokens.Value) && maxTokens.Value > 0 ? (uint)maxTokens.Value : null;
+                var next = CoreApi.ShouldAutofillAiMaxTokens(kind, currentTokens, suggested);
+                if (maxTokens.Value != next)
+                {
+                    maxTokens.Value = next;
+                    AISettings.SetMaxTokens(p, (int)next);
+                }
+                ShowStatus(L10n.Tr("ai.settings.queryModels.ok", models.Count), ok: true);
+            }), TaskScheduler.Default);
+        };
         test.Click += (_, _) =>
         {
             Commit();
@@ -545,7 +596,7 @@ public sealed class SettingsWindow : Window
         form.Add("ai.settings.provider", provider);
         form.Add("ai.settings.key", Row(key, deleteKey));
         form.Add("ai.settings.baseURL", baseUrl);
-        form.Add("ai.settings.model", model);
+        form.Add("ai.settings.model", Row(model, queryModels));
         effortRow = form.RowDefinitions.Count;
         form.Add("ai.settings.effort", effort);
         toolsRow = form.RowDefinitions.Count;
