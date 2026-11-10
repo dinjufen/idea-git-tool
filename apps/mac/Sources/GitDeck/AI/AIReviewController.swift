@@ -15,7 +15,8 @@ final class AIReviewController {
     }
 
     enum Readiness {
-        case ready(AiProviderConfig, String)
+        case readyHttp(AiProviderConfig, String)
+        case readyCli(AiCliConfig, String)
         /// 提交前检查时用户选择跳过评审。
         case skip
         case cancelled
@@ -91,12 +92,51 @@ final class AIReviewController {
 
     // MARK: - 准备：配置与授权
 
-    /// 检查是否已配置模型服务，并在本项目首次发送代码前请用户确认。
+    /// 检查是否已配置模型服务或本机 CLI，并在本项目首次发送代码前请用户确认。
     func prepare(allowSkip: Bool = false) -> Readiness {
+        if AISettings.reviewUsesCli {
+            return prepareCli(allowSkip: allowSkip)
+        }
+        return prepareHttp(allowSkip: allowSkip)
+    }
+
+    /// 生成提交信息等仍走 HTTP 模型服务。
+    func prepareHttp(allowSkip: Bool = false) -> Readiness {
         guard let (config, apiKey) = AISettings.current() else {
+            return notConfigured(allowSkip: allowSkip)
+        }
+        let project = model.rootURL.path
+        if !AISettings.hasConsent(project: project, config: config) {
             let alert = AppAlert()
-            alert.messageText = tr("ai.notConfigured.title")
-            alert.informativeText = tr("ai.notConfigured.message")
+            alert.messageText = tr("ai.consent.title", AISettings.host(config.baseUrl))
+            alert.informativeText = tr("ai.consent.message", model.projectName, AISettings.host(config.baseUrl))
+            alert.addButton(withTitle: tr("ai.consent.allow"))
+            alert.addButton(withTitle: tr("common.cancel"))
+            guard alert.runModal() == .alertFirstButtonReturn else { return .cancelled }
+            AISettings.grantConsent(project: project, config: config)
+        }
+        return .readyHttp(config, apiKey)
+    }
+
+    private func prepareCli(allowSkip: Bool) -> Readiness {
+        do {
+            let detected = try resolveAiCli(id: AISettings.cliId, executable: AISettings.cliExecutable)
+            let project = model.rootURL.path
+            if !AISettings.hasConsent(project: project, cliId: detected.id) {
+                let name = detected.displayName
+                let alert = AppAlert()
+                alert.messageText = tr("ai.consent.cli.title", name)
+                alert.informativeText = tr("ai.consent.cli.message", model.projectName, name)
+                alert.addButton(withTitle: tr("ai.consent.allow"))
+                alert.addButton(withTitle: tr("common.cancel"))
+                guard alert.runModal() == .alertFirstButtonReturn else { return .cancelled }
+                AISettings.grantConsent(project: project, cliId: detected.id)
+            }
+            return .readyCli(AISettings.cliConfig(), detected.displayName)
+        } catch {
+            let alert = AppAlert()
+            alert.messageText = tr("ai.notConfigured.cli.title")
+            alert.informativeText = errorMessage(error)
             alert.addButton(withTitle: tr("ai.notConfigured.open"))
             if allowSkip { alert.addButton(withTitle: tr("ai.precommit.commitAnyway")) }
             alert.addButton(withTitle: tr("common.cancel"))
@@ -110,17 +150,24 @@ final class AIReviewController {
                 return .cancelled
             }
         }
-        let project = model.rootURL.path
-        if !AISettings.hasConsent(project: project, config: config) {
-            let alert = AppAlert()
-            alert.messageText = tr("ai.consent.title", AISettings.host(config.baseUrl))
-            alert.informativeText = tr("ai.consent.message", model.projectName, AISettings.host(config.baseUrl))
-            alert.addButton(withTitle: tr("ai.consent.allow"))
-            alert.addButton(withTitle: tr("common.cancel"))
-            guard alert.runModal() == .alertFirstButtonReturn else { return .cancelled }
-            AISettings.grantConsent(project: project, config: config)
+    }
+
+    private func notConfigured(allowSkip: Bool) -> Readiness {
+        let alert = AppAlert()
+        alert.messageText = tr("ai.notConfigured.title")
+        alert.informativeText = tr("ai.notConfigured.message")
+        alert.addButton(withTitle: tr("ai.notConfigured.open"))
+        if allowSkip { alert.addButton(withTitle: tr("ai.precommit.commitAnyway")) }
+        alert.addButton(withTitle: tr("common.cancel"))
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            SettingsWindowController.shared.show(.ai)
+            return .cancelled
+        case .alertSecondButtonReturn where allowSkip:
+            return .skip
+        default:
+            return .cancelled
         }
-        return .ready(config, apiKey)
     }
 
     // MARK: - 评审
@@ -162,9 +209,14 @@ final class AIReviewController {
             onReveal?()
             return
         }
-        let (config, apiKey): (AiProviderConfig, String)
+        enum Backend {
+            case http(AiProviderConfig, String)
+            case cli(AiCliConfig, String)
+        }
+        let backend: Backend
         switch prepare(allowSkip: allowSkip) {
-        case let .ready(c, k): (config, apiKey) = (c, k)
+        case let .readyHttp(c, k): backend = .http(c, k)
+        case let .readyCli(c, name): backend = .cli(c, name)
         case .skip:
             completion?(ReviewResult(summary: "", findings: [], revision: nil, turns: 0, inputTokens: 0, outputTokens: 0, incomplete: true))
             return
@@ -188,7 +240,10 @@ final class AIReviewController {
         usage = (0, 0)
         turn = 0
         applied = []
-        modelName = config.model
+        switch backend {
+        case let .http(config, _): modelName = config.model
+        case let .cli(_, name): modelName = name
+        }
         onReveal?()
         notify()
 
@@ -205,7 +260,12 @@ final class AIReviewController {
             }
         }
         reviewedModel = repository ?? model
-        task = target.repository.startAiReview(config: config, apiKey: apiKey, scope: scope, options: options, listener: listener)
+        switch backend {
+        case let .http(config, apiKey):
+            task = target.repository.startAiReview(config: config, apiKey: apiKey, scope: scope, options: options, listener: listener)
+        case let .cli(cli, _):
+            task = target.repository.startAiCliReview(cli: cli, scope: scope, options: options, listener: listener)
+        }
     }
 
     func cancel() {
@@ -303,6 +363,7 @@ final class AIReviewController {
         case "search_code": "magnifyingglass"
         case "git_log": "clock.arrow.circlepath"
         case "git_blame": "person.text.rectangle"
+        case "write_file": "square.and.pencil"
         default: "wrench"
         }
     }
@@ -314,6 +375,7 @@ final class AIReviewController {
         case "search_code": tr("ai.tool.search")
         case "git_log": tr("ai.tool.log")
         case "git_blame": tr("ai.tool.blame")
+        case "write_file": tr("ai.tool.writeFile")
         default: name
         }
     }
@@ -369,7 +431,7 @@ final class AIReviewController {
             self.messageTask = nil
             return nil
         }
-        guard case let .ready(config, apiKey) = prepare() else { return nil }
+        guard case let .readyHttp(config, apiKey) = prepareHttp() else { return nil }
         let task = AiTask()
         messageTask = task
         let repository = model.repository

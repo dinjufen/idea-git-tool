@@ -126,6 +126,36 @@ enum AISettings {
         set { defaults.set(newValue, forKey: "ai.openAICompatible.tools"); post() }
     }
 
+    /// 代码评审走 HTTP 模型服务还是本机 CLI。
+    static var reviewUsesCli: Bool {
+        get { defaults.string(forKey: "ai.reviewBackend") == "cli" }
+        set { defaults.set(newValue ? "cli" : "http", forKey: "ai.reviewBackend"); post() }
+    }
+
+    static var cliId: String {
+        get {
+            let value = defaults.string(forKey: "ai.cli.id") ?? "claude"
+            return value.isEmpty ? "claude" : value
+        }
+        set { defaults.set(newValue, forKey: "ai.cli.id"); post() }
+    }
+
+    /// 可选的可执行文件路径；为空时使用探测结果。
+    static var cliExecutable: String {
+        get { defaults.string(forKey: "ai.cli.executable") ?? "" }
+        set { defaults.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "ai.cli.executable"); post() }
+    }
+
+    /// CLI 写入类工具；默认关闭。
+    static var cliWritePermission: Bool {
+        get { defaults.object(forKey: "ai.cli.writePermission") as? Bool ?? defaultAiCliWritePermission() }
+        set { defaults.set(newValue, forKey: "ai.cli.writePermission"); post() }
+    }
+
+    static func cliConfig() -> AiCliConfig {
+        AiCliConfig(id: cliId, executable: cliExecutable, writePermission: cliWritePermission)
+    }
+
     static var language: Language {
         get { defaults.string(forKey: "ai.language").flatMap(Language.init) ?? .auto }
         set { defaults.set(newValue.rawValue, forKey: "ai.language"); post() }
@@ -218,9 +248,23 @@ enum AISettings {
     }
 
     static func grantConsent(project: String, config: AiProviderConfig) {
+        grantConsent(project: project, identity: consentIdentity(config))
+    }
+
+    static func hasConsent(project: String, cliId: String) -> Bool {
+        let map = defaults.dictionary(forKey: consentKey) as? [String: [String]] ?? [:]
+        return map[project]?.contains(consentIdentity(cliId: cliId)) == true
+    }
+
+    static func grantConsent(project: String, cliId: String) {
+        grantConsent(project: project, identity: consentIdentity(cliId: cliId))
+    }
+
+    private static func consentIdentity(cliId: String) -> String { "cli:\(cliId)" }
+
+    private static func grantConsent(project: String, identity: String) {
         var map = defaults.dictionary(forKey: consentKey) as? [String: [String]] ?? [:]
         var list = map[project] ?? []
-        let identity = consentIdentity(config)
         if !list.contains(identity) { list.append(identity) }
         map[project] = list
         defaults.set(map, forKey: consentKey)
