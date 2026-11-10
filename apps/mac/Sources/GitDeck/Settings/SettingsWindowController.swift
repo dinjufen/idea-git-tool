@@ -19,6 +19,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         )
         window.isReleasedWhenClosed = false
         window.toolbarStyle = .preference
+        // 独立标签标识 + 禁止合并：避免设置窗被并进项目窗标签组（阴影一闪后“消失”）。
+        window.tabbingIdentifier = "GitDeckSettings"
+        window.tabbingMode = .disallowed
         super.init(window: window)
         window.delegate = self
 
@@ -46,6 +49,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// 显示设置窗口；`pane` 为空时保留上次的页。
     func show(_ pane: Pane? = nil) {
         if let pane { tabs.selectedTabViewItemIndex = pane.rawValue }
+        NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
     }

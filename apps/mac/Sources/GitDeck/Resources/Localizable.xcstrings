@@ -14134,13 +14134,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Loaded %1$@ models"
+            "value": "Loaded %1$d models"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已加载 %1$@ 个模型"
+            "value": "已加载 %1$d 个模型"
           }
         }
       }

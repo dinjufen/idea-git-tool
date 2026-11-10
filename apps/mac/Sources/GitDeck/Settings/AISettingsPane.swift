@@ -313,7 +313,7 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
         }
         let selectedId = modelBox.stringValue
         let info = models.first(where: { $0.id == selectedId }) ?? models[0]
-        let suggested = info.maxOutputTokens ?? defaultAiMaxTokens(kind: provider.kind)
+        let suggested = min(info.maxOutputTokens ?? defaultAiMaxTokens(kind: provider.kind), 128_000)
         let currentTokens: UInt32? = maxTokensField.integerValue > 0 ? UInt32(clamping: maxTokensField.integerValue) : nil
         let next = shouldAutofillAiMaxTokens(kind: provider.kind, current: currentTokens, suggested: suggested)
         if Int(next) != maxTokensField.integerValue {

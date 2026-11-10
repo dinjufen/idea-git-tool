@@ -105,11 +105,12 @@ enum AISettings {
 
     static func maxTokens(_ provider: Provider) -> Int {
         let value = defaults.integer(forKey: key(provider, "maxTokens"))
-        return value > 0 ? value : provider.defaultMaxTokens
+        guard value > 0 else { return provider.defaultMaxTokens }
+        return min(value, 128_000)
     }
 
     static func setMaxTokens(_ provider: Provider, _ value: Int) {
-        defaults.set(value, forKey: key(provider, "maxTokens"))
+        defaults.set(min(max(value, 1), 128_000), forKey: key(provider, "maxTokens"))
         post()
     }
 
