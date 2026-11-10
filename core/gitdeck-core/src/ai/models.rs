@@ -70,7 +70,11 @@ fn list_anthropic(base_url: &str, api_key: &str, task: &AiTask) -> Result<Vec<Ai
     parse_list_payload(&body, /*openai_style*/ false)
 }
 
-fn list_openai_compatible(base_url: &str, api_key: &str, task: &AiTask) -> Result<Vec<AiModelInfo>> {
+fn list_openai_compatible(
+    base_url: &str,
+    api_key: &str,
+    task: &AiTask,
+) -> Result<Vec<AiModelInfo>> {
     let url = endpoint(base_url, "/models");
     let headers = [("authorization", format!("Bearer {api_key}"))];
     let body = http::get(&url, &headers, task)?;
@@ -162,7 +166,8 @@ mod tests {
 
     #[test]
     fn parse_openai_style_list() {
-        let body = r#"{"data":[{"id":"deepseek-chat","object":"model"},{"id":"deepseek-reasoner"}]}"#;
+        let body =
+            r#"{"data":[{"id":"deepseek-chat","object":"model"},{"id":"deepseek-reasoner"}]}"#;
         let models = parse_list_payload(body, true).unwrap();
         assert_eq!(models.len(), 2);
         assert_eq!(models[0].id, "deepseek-chat");

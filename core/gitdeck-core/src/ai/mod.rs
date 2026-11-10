@@ -3,6 +3,7 @@
 //! API Key 由客户端从系统钥匙串读取后逐次传入，核心不保存。
 //! 发给模型的 diff 与 Agent 工具都经过敏感文件过滤（见 [`filter`]）。
 
+mod cli;
 mod filter;
 mod http;
 mod models;
@@ -15,8 +16,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+pub use cli::{
+    AiCliConfig, DetectedAiCli, default_ai_cli_write_permission, detect_ai_clis, resolve_ai_cli,
+};
 pub use filter::{default_sensitive_patterns, is_sensitive_path};
-pub use models::{AiModelInfo, default_ai_max_tokens, list_ai_models, should_autofill_ai_max_tokens};
+pub use models::{
+    AiModelInfo, default_ai_max_tokens, list_ai_models, should_autofill_ai_max_tokens,
+};
 pub use review::{
     ReviewEvent, ReviewFinding, ReviewListener, ReviewOptions, ReviewResult, ReviewScope,
     ReviewSeverity, ReviewSuggestion, apply_review_suggestion, test_ai_connection,

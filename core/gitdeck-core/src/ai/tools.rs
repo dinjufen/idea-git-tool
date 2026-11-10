@@ -1,4 +1,5 @@
-//! 评审 Agent 的只读工具：读文件、列目录、搜索代码、查看历史与 blame。
+//! 评审 Agent 的工具：默认只读（读文件、列目录、搜索代码、查看历史与 blame）；
+//! 写入类工具（`write_file`）需单独开启，且同样经过敏感文件过滤。
 //!
 //! 所有路径都相对仓库根目录，拒绝绝对路径与 `..`，并经过敏感文件过滤；
 //! 工作区读取还会解析符号链接，确认目标仍在仓库内。
@@ -12,6 +13,7 @@ use super::provider::ToolSpec;
 use crate::repo::Repository;
 
 pub(crate) const SUBMIT_REVIEW: &str = "submit_review";
+pub(crate) const WRITE_FILE: &str = "write_file";
 
 /// 单次工具输出的上限，避免一次读取占满上下文。
 const MAX_OUTPUT_CHARS: usize = 60_000;
@@ -24,14 +26,16 @@ pub(crate) struct ToolContext<'a> {
     pub filter: &'a SensitiveFilter,
     /// 被评审的版本：`None` 为工作区，否则为某个修订。
     pub revision: Option<String>,
+    /// 是否允许写入类工具（默认关闭）。
+    pub write_permission: bool,
 }
 
-pub(crate) fn tool_specs() -> Vec<ToolSpec> {
+pub(crate) fn tool_specs(write_permission: bool) -> Vec<ToolSpec> {
     let revision = json!({
         "type": "string",
         "description": "Optional commit hash or ref to read from instead of the version under review."
     });
-    vec![
+    let mut specs = vec![
         ToolSpec {
             name: "read_file",
             description: "Read a file from the repository, with line numbers. Defaults to the version under review. Use start_line/end_line for large files.",
@@ -103,7 +107,23 @@ pub(crate) fn tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false,
             }),
         },
-        ToolSpec {
+    ];
+    if write_permission {
+        specs.push(ToolSpec {
+            name: WRITE_FILE,
+            description: "Create or overwrite a text file in the working tree, relative to the repository root. Use only for a concrete fix from this review.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path relative to the repository root." },
+                    "content": { "type": "string", "description": "The complete new file contents." },
+                },
+                "required": ["path", "content"],
+                "additionalProperties": false,
+            }),
+        });
+    }
+    specs.push(ToolSpec {
             name: SUBMIT_REVIEW,
             description: "Submit the final review. Call exactly once, when the review is complete; an empty findings list is fine when there is nothing worth reporting.",
             schema: json!({
@@ -132,8 +152,8 @@ pub(crate) fn tool_specs() -> Vec<ToolSpec> {
                 "required": ["summary", "findings"],
                 "additionalProperties": false,
             }),
-        },
-    ]
+        });
+    specs
 }
 
 /// 工具调用的简短描述，用于进度显示（例如 `read_file src/main.rs:10-40`）。
@@ -168,6 +188,7 @@ impl ToolContext<'_> {
             "search_code" => self.search_code(input),
             "git_log" => self.git_log(input),
             "git_blame" => self.git_blame(input),
+            WRITE_FILE => self.write_file(input),
             other => Err(format!("unknown tool: {other}")),
         }?;
         Ok(truncate(output, MAX_OUTPUT_CHARS))
@@ -476,6 +497,62 @@ impl ToolContext<'_> {
             .map_err(|e| e.to_string())?;
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
+
+    fn write_file(&self, input: &Value) -> std::result::Result<String, String> {
+        if !self.write_permission {
+            return Err(
+                "write permission is disabled; enable it in Settings > AI Review to allow write_file"
+                    .into(),
+            );
+        }
+        let path = self.path(input, true, false)?;
+        let Some(content) = input.get("content").and_then(Value::as_str) else {
+            return Err("`content` (string) is required".into());
+        };
+        if content.contains('\0') {
+            return Err("refusing to write binary content".into());
+        }
+        let root = std::fs::canonicalize(&self.repo.root).map_err(|e| e.to_string())?;
+        let full = root.join(&path);
+        // 拒绝写到仓库外（含尚未存在的路径：用父目录校验）。
+        let parent = full
+            .parent()
+            .ok_or_else(|| format!("{path}: invalid path"))?;
+        if !parent.exists() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let parent = std::fs::canonicalize(parent).map_err(|e| e.to_string())?;
+        if !parent.starts_with(&root) {
+            return Err(format!("{path} points outside the repository"));
+        }
+        if full.exists() {
+            let canonical = std::fs::canonicalize(&full).map_err(|e| e.to_string())?;
+            if !canonical.starts_with(&root) {
+                return Err(format!("{path} points outside the repository"));
+            }
+            let relative = canonical
+                .strip_prefix(&root)
+                .map_err(|_| format!("{path} points outside the repository"))?
+                .to_string_lossy()
+                .replace('\\', "/");
+            if self.filter.matches(&relative, canonical.is_dir()) {
+                return Err(format!(
+                    "{path} is excluded from AI review by the sensitive-file rules"
+                ));
+            }
+            if canonical.is_dir() {
+                return Err(format!("{path} is a directory"));
+            }
+        }
+        let tmp = full.with_extension("gitdeck-write-tmp");
+        std::fs::write(&tmp, content).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, &full).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            e.to_string()
+        })?;
+        let bytes = content.len();
+        Ok(format!("Wrote {path} ({bytes} bytes)"))
+    }
 }
 
 /// 规范化相对路径：统一分隔符，去掉 `.`，拒绝绝对路径与 `..`。
@@ -538,5 +615,17 @@ mod tests {
         assert!(normalize_path("src/../../x").is_err());
         assert!(normalize_path("/etc/passwd").is_err());
         assert!(normalize_path("C:/Windows").is_err());
+    }
+
+    #[test]
+    fn write_file_is_omitted_from_specs_by_default() {
+        let names: Vec<_> = tool_specs(false).iter().map(|t| t.name).collect();
+        assert!(names.contains(&"read_file"));
+        assert!(names.contains(&"search_code"));
+        assert!(names.contains(&SUBMIT_REVIEW));
+        assert!(!names.contains(&WRITE_FILE));
+        let with_write: Vec<_> = tool_specs(true).iter().map(|t| t.name).collect();
+        assert!(with_write.contains(&WRITE_FILE));
+        assert_eq!(*with_write.last().unwrap(), SUBMIT_REVIEW);
     }
 }

@@ -43,7 +43,7 @@ pub(crate) enum StopReason {
     Other(String),
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct Usage {
     /// 含缓存读写的全部输入 token。
     pub input_tokens: u64,
@@ -110,7 +110,7 @@ fn parse_data(data: &str) -> Result<Value> {
     })
 }
 
-fn parse_tool_input(raw: &str) -> std::result::Result<Value, String> {
+pub(super) fn parse_tool_input(raw: &str) -> std::result::Result<Value, String> {
     let text = if raw.trim().is_empty() { "{}" } else { raw };
     match serde_json::from_str::<Value>(text) {
         Ok(v @ Value::Object(_)) => Ok(v),

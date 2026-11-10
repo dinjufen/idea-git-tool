@@ -484,14 +484,24 @@ Reply with only a JSON object, no other text:
 \"original\": \"optional exact current text of lines line..end_line\", \"replacement\": \"optional corrected text\"}]}
 Use an empty findings array when there is nothing worth reporting.";
 
-fn system_prompt(options: &ReviewOptions, with_tools: bool, rules: Option<&str>) -> String {
+const WRITE_GUIDELINES: &str = "\
+You may also use write_file to apply a concrete, local fix in the working tree. Only change files that need a fix from this review, and do not rewrite unrelated files. Sensitive files cannot be written.";
+
+pub(super) fn system_prompt(
+    options: &ReviewOptions,
+    with_tools: bool,
+    with_write: bool,
+    rules: Option<&str>,
+) -> String {
+    let tools = if with_tools && with_write {
+        format!("{TOOLS_GUIDELINES}\n\n{WRITE_GUIDELINES}")
+    } else if with_tools {
+        TOOLS_GUIDELINES.to_owned()
+    } else {
+        JSON_GUIDELINES.to_owned()
+    };
     let mut system = format!(
-        "{REVIEW_GUIDELINES}\n\n{}\n\nWrite the summary, titles and explanations in {}. Keep code identifiers unchanged.",
-        if with_tools {
-            TOOLS_GUIDELINES
-        } else {
-            JSON_GUIDELINES
-        },
+        "{REVIEW_GUIDELINES}\n\n{tools}\n\nWrite the summary, titles and explanations in {}. Keep code identifiers unchanged.",
         if options.language.trim().is_empty() {
             "English"
         } else {
@@ -538,6 +548,7 @@ fn run_review(
         repo,
         filter: &filter,
         revision: revision.clone(),
+        write_permission: false,
     };
     let rules = read_rules(repo);
 
@@ -570,43 +581,25 @@ fn run_review(
     }
 
     let tool_specs = if config.supports_tools {
-        tools::tool_specs()
+        tools::tool_specs(false)
     } else {
         Vec::new()
     };
-    let system = system_prompt(options, config.supports_tools, rules.as_deref());
+    let system = system_prompt(options, config.supports_tools, false, rules.as_deref());
     let mut conversation = provider::conversation(config, api_key, system, tool_specs);
     conversation.push_user_text(&prompt);
 
-    let max_turns = if options.max_turns == 0 {
-        24
-    } else {
-        options.max_turns
-    };
-    let budget = if options.token_budget == 0 {
-        1_500_000
-    } else {
-        options.token_budget
-    };
-    let mut agent = Agent {
+    let (max_turns, budget) = review_limits(options);
+    run_tool_agent(
         conversation,
         context,
         task,
         listener,
-        with_tools: config.supports_tools,
-        usage: Usage::default(),
-        turns: 0,
-    };
-    let (summary, findings, incomplete) = agent.run(max_turns, budget)?;
-    Ok(ReviewResult {
-        summary,
-        findings,
+        config.supports_tools,
+        max_turns,
+        budget,
         revision,
-        turns: agent.turns,
-        input_tokens: agent.usage.input_tokens,
-        output_tokens: agent.usage.output_tokens,
-        incomplete,
-    })
+    )
 }
 
 struct Agent<'a> {
@@ -745,78 +738,174 @@ impl Agent<'_> {
         &self,
         input: &Value,
     ) -> std::result::Result<(String, Vec<ReviewFinding>), String> {
-        let summary = input["summary"]
-            .as_str()
-            .unwrap_or_default()
-            .trim()
-            .to_owned();
-        let list = input["findings"]
-            .as_array()
-            .ok_or("`findings` must be an array")?;
-        let mut findings = Vec::with_capacity(list.len());
-        for (i, item) in list.iter().enumerate() {
-            let field = |key: &str| {
-                item[key]
-                    .as_str()
-                    .map(str::trim)
-                    .unwrap_or_default()
-                    .to_owned()
-            };
-            let file =
-                normalize_path(&field("file")).map_err(|e| format!("findings[{i}].file: {e}"))?;
-            if file.is_empty() {
-                return Err(format!("findings[{i}].file is required"));
-            }
-            if self.context.filter.matches(&file, false) {
-                continue;
-            }
-            let line = item["line"]
-                .as_u64()
-                .ok_or(format!("findings[{i}].line must be a positive integer"))?;
-            let line = u32::try_from(line.max(1)).unwrap_or(u32::MAX);
-            let end_line = item["end_line"]
-                .as_u64()
-                .and_then(|e| u32::try_from(e).ok())
-                .filter(|&e| e >= line)
-                .unwrap_or(line);
-            let severity = match field("severity").to_ascii_lowercase().as_str() {
-                "error" | "critical" | "high" => ReviewSeverity::Error,
-                "warning" | "medium" => ReviewSeverity::Warning,
-                "suggestion" | "info" | "low" | "nit" => ReviewSeverity::Suggestion,
-                other => {
-                    return Err(format!(
-                        "findings[{i}].severity must be error, warning or suggestion, not {other:?}"
-                    ));
-                }
-            };
-            let title = field("title");
-            if title.is_empty() {
-                return Err(format!("findings[{i}].title is required"));
-            }
-            let suggestion = match (item["original"].as_str(), item["replacement"].as_str()) {
-                (Some(original), Some(replacement))
-                    if !original.is_empty() && original != replacement =>
-                {
-                    Some(ReviewSuggestion {
-                        original: original.to_owned(),
-                        replacement: replacement.to_owned(),
-                    })
-                }
-                _ => None,
-            };
-            findings.push(ReviewFinding {
-                file,
-                line,
-                end_line,
-                severity,
-                title,
-                explanation: field("explanation"),
-                suggestion,
-            });
-        }
-        findings.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
-        Ok((summary, findings))
+        parse_submission_input(self.context.filter, input)
     }
+}
+
+pub(super) fn parse_submission_input(
+    filter: &SensitiveFilter,
+    input: &Value,
+) -> std::result::Result<(String, Vec<ReviewFinding>), String> {
+    let summary = input["summary"]
+        .as_str()
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
+    let list = input["findings"]
+        .as_array()
+        .ok_or("`findings` must be an array")?;
+    let mut findings = Vec::with_capacity(list.len());
+    for (i, item) in list.iter().enumerate() {
+        let field = |key: &str| {
+            item[key]
+                .as_str()
+                .map(str::trim)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let file =
+            normalize_path(&field("file")).map_err(|e| format!("findings[{i}].file: {e}"))?;
+        if file.is_empty() {
+            return Err(format!("findings[{i}].file is required"));
+        }
+        if filter.matches(&file, false) {
+            continue;
+        }
+        let line = item["line"]
+            .as_u64()
+            .ok_or(format!("findings[{i}].line must be a positive integer"))?;
+        let line = u32::try_from(line.max(1)).unwrap_or(u32::MAX);
+        let end_line = item["end_line"]
+            .as_u64()
+            .and_then(|e| u32::try_from(e).ok())
+            .filter(|&e| e >= line)
+            .unwrap_or(line);
+        let severity = match field("severity").to_ascii_lowercase().as_str() {
+            "error" | "critical" | "high" => ReviewSeverity::Error,
+            "warning" | "medium" => ReviewSeverity::Warning,
+            "suggestion" | "info" | "low" | "nit" => ReviewSeverity::Suggestion,
+            other => {
+                return Err(format!(
+                    "findings[{i}].severity must be error, warning or suggestion, not {other:?}"
+                ));
+            }
+        };
+        let title = field("title");
+        if title.is_empty() {
+            return Err(format!("findings[{i}].title is required"));
+        }
+        let suggestion = match (item["original"].as_str(), item["replacement"].as_str()) {
+            (Some(original), Some(replacement))
+                if !original.is_empty() && original != replacement =>
+            {
+                Some(ReviewSuggestion {
+                    original: original.to_owned(),
+                    replacement: replacement.to_owned(),
+                })
+            }
+            _ => None,
+        };
+        findings.push(ReviewFinding {
+            file,
+            line,
+            end_line,
+            severity,
+            title,
+            explanation: field("explanation"),
+            suggestion,
+        });
+    }
+    findings.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
+    Ok((summary, findings))
+}
+
+/// CLI 与 HTTP 共用的工具调用循环：由 GitDeck 执行工具并推送 ReviewEvent。
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_tool_agent(
+    conversation: Box<dyn Conversation>,
+    context: ToolContext<'_>,
+    task: &AiTask,
+    listener: &dyn ReviewListener,
+    with_tools: bool,
+    max_turns: u32,
+    budget: u64,
+    revision: Option<String>,
+) -> Result<ReviewResult> {
+    let mut agent = Agent {
+        conversation,
+        context,
+        task,
+        listener,
+        with_tools,
+        usage: Usage::default(),
+        turns: 0,
+    };
+    let (summary, findings, incomplete) = agent.run(max_turns, budget)?;
+    Ok(ReviewResult {
+        summary,
+        findings,
+        revision,
+        turns: agent.turns,
+        input_tokens: agent.usage.input_tokens,
+        output_tokens: agent.usage.output_tokens,
+        incomplete,
+    })
+}
+
+pub(super) fn review_limits(options: &ReviewOptions) -> (u32, u64) {
+    let max_turns = if options.max_turns == 0 {
+        24
+    } else {
+        options.max_turns
+    };
+    let budget = if options.token_budget == 0 {
+        1_500_000
+    } else {
+        options.token_budget
+    };
+    (max_turns, budget)
+}
+
+pub(super) struct ReviewPrep {
+    pub filter: SensitiveFilter,
+    pub revision: Option<String>,
+    pub files: Vec<String>,
+    pub excluded: Vec<String>,
+    pub truncated: bool,
+    pub prompt: String,
+    pub rules: Option<String>,
+}
+
+/// 准备评审材料与提示词（CLI / HTTP 共用）。CLI 路径始终启用工具，不附带文件全文。
+pub(super) fn prepare_review_session(
+    repo: &Repository,
+    scope: &ReviewScope,
+    options: &ReviewOptions,
+) -> Result<ReviewPrep> {
+    let filter = SensitiveFilter::new(&options.sensitive_patterns);
+    let (material, revision, description) = material_for(repo, scope, &filter)?;
+    let mut prompt = format!("Review the following change.\n\n{description}\n");
+    if !material.excluded.is_empty() {
+        prompt.push_str(&format!(
+            "\nThese changed files are excluded for privacy and not shown: {}\n",
+            material.excluded.join(", ")
+        ));
+    }
+    if material.truncated {
+        prompt.push_str("\nThe diff is large; some files show only their header.\n");
+    }
+    prompt.push_str("\n<diff>\n");
+    prompt.push_str(&material.diff);
+    prompt.push_str("</diff>\n");
+    Ok(ReviewPrep {
+        revision,
+        files: material.files,
+        excluded: material.excluded,
+        truncated: material.truncated,
+        prompt,
+        rules: read_rules(repo),
+        filter,
+    })
 }
 
 fn error_output(id: &str, message: &str) -> ToolOutput {
@@ -828,7 +917,7 @@ fn error_output(id: &str, message: &str) -> ToolOutput {
 }
 
 /// 从文本回复中取出 JSON 对象（允许包在代码块或前后有说明文字）。
-fn extract_json(text: &str) -> Option<Value> {
+pub(super) fn extract_json(text: &str) -> Option<Value> {
     let start = text.find('{')?;
     let end = text.rfind('}')?;
     (end > start)
