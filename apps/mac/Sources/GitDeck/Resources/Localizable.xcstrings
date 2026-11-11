@@ -273,6 +273,40 @@
         }
       }
     },
+    "ai.consent.cli.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The first time you review “%1$@” with %2$@, GitDeck sends the change under review to that local CLI. Approve only if you trust it. Files matching the sensitive-file rules are never sent."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "首次用 %2$@ 评审“%1$@”时，GitDeck 会把待评审的改动交给该本机 CLI。请确认你信任该工具后再继续。匹配敏感文件规则的文件不会发送。"
+          }
+        }
+      }
+    },
+    "ai.consent.cli.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send code to %1$@?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将代码发送给 %1$@？"
+          }
+        }
+      }
+    },
     "ai.consent.message": {
       "extractionState": "manual",
       "localizations": {
@@ -388,6 +422,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "已取消"
+          }
+        }
+      }
+    },
+    "ai.error.cliFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The local CLI failed: %1$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本机 CLI 失败：%1$@"
+          }
+        }
+      }
+    },
+    "ai.error.cliNotFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The %1$@ CLI was not found. Install it and make sure it is on your PATH, or set the path in Settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未找到 %1$@ 命令行工具。请先安装，并确保它在 PATH 中，或在设置里指定路径。"
           }
         }
       }
@@ -677,6 +745,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "使用 AI 生成提交信息"
+          }
+        }
+      }
+    },
+    "ai.notConfigured.cli.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local CLI not found"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未找到本机 CLI"
           }
         }
       }
@@ -987,6 +1072,108 @@
         }
       }
     },
+    "ai.settings.cli": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CLI"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CLI"
+          }
+        }
+      }
+    },
+    "ai.settings.cli.found": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Found %1$@ at %2$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已找到 %1$@（%2$@）"
+          }
+        }
+      }
+    },
+    "ai.settings.cli.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No supported CLI found"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未找到可用的本机 CLI"
+          }
+        }
+      }
+    },
+    "ai.settings.cli.path": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CLI path"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CLI 路径"
+          }
+        }
+      }
+    },
+    "ai.settings.cli.path.placeholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Optional: override the detected executable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可选：手动指定可执行文件"
+          }
+        }
+      }
+    },
+    "ai.settings.cli.refresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新探测"
+          }
+        }
+      }
+    },
     "ai.settings.deleteKey": {
       "extractionState": "manual",
       "localizations": {
@@ -1242,6 +1429,125 @@
         }
       }
     },
+    "ai.settings.queryModels": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fetch models"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查询"
+          }
+        }
+      }
+    },
+    "ai.settings.queryModels.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No models returned"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未返回模型"
+          }
+        }
+      }
+    },
+    "ai.settings.queryModels.ok": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loaded %1$d models"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已加载 %1$d 个模型"
+          }
+        }
+      }
+    },
+    "ai.settings.queryModels.running": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fetching models…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在查询模型…"
+          }
+        }
+      }
+    },
+    "ai.settings.reviewBackend": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review backend"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "评审后端"
+          }
+        }
+      }
+    },
+    "ai.settings.reviewBackend.cli": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local CLI"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本机 CLI"
+          }
+        }
+      }
+    },
+    "ai.settings.reviewBackend.http": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HTTP API"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HTTP 接口"
+          }
+        }
+      }
+    },
     "ai.settings.rules.hint": {
       "extractionState": "manual",
       "localizations": {
@@ -1340,6 +1646,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "模型支持工具调用（评审时可读取其他文件）"
+          }
+        }
+      }
+    },
+    "ai.settings.writePermission": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow the CLI to write files in the repository"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允许 CLI 写入仓库文件"
+          }
+        }
+      }
+    },
+    "ai.settings.writePermission.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off by default. When enabled, the reviewer may create or overwrite files through GitDeck’s write tool. Sensitive files stay blocked, and the CLI’s own write or shell tools remain disabled."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认关闭。开启后，评审可通过 GitDeck 的写入工具创建或覆盖文件；敏感文件仍然不可写入，CLI 自带的写入或命令行工具也不会开放。"
           }
         }
       }
@@ -1544,6 +1884,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "搜索"
+          }
+        }
+      }
+    },
+    "ai.tool.writeFile": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Write file"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "写入文件"
           }
         }
       }
@@ -14090,74 +14447,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "移除工作树？"
-          }
-        }
-      }
-    },
-    "ai.settings.queryModels": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Fetch models"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "查询"
-          }
-        }
-      }
-    },
-    "ai.settings.queryModels.running": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Fetching models…"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "正在查询模型…"
-          }
-        }
-      }
-    },
-    "ai.settings.queryModels.ok": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Loaded %1$d models"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已加载 %1$d 个模型"
-          }
-        }
-      }
-    },
-    "ai.settings.queryModels.empty": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No models returned"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "未返回模型"
           }
         }
       }

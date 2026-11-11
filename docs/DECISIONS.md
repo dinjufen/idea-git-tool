@@ -34,6 +34,7 @@
 | 15 | Windows 打包与 askpass（2026-10-19） | **先做非打包、自包含发布 + 普通安装程序（Inno Setup），有代码签名证书后再加 MSIX** | 安装到 `%LOCALAPPDATA%\Programs\GitDeck`，无需管理员权限；无证书时只有 SmartScreen 提示。askpass 用独立控制台程序 `GitDeck.AskPass.exe`：git 按路径调用，它经命名管道请主程序弹框并把结果写回标准输出；HTTPS 认证优先交给 Git Credential Manager。修改“技术默认”中的 MSIX 打包。**实现（2026-10-20）**：askpass 实际为 GUI 子系统的 WinForms 小程序，由它自己弹框（不经命名管道，主程序未运行时也可用）；安装包由 `scripts/package-win.ps1` 生成（`apps/windows/Installer/GitDeck.iss`），卸载不删除设置与凭据；安装界面暂时只有英文（Inno Setup 未自带简体中文语言文件） |
 | 16 | Windows 上的 git（2026-10-20，修改第 4 项） | **不内置 MinGit，只使用用户安装的 Git for Windows** | 找不到 git 时欢迎页提示并给出下载链接，设置中可手动指定 git 路径；避免随包分发 GPL-2.0 程序及其合规材料。以后需要时再考虑内置 |
 | 17 | Windows 运行环境（2026-10-20） | **.NET 10 LTS + Windows App SDK 2.5.x，最低 Windows 10 1809（build 17763）** | 与 Windows App SDK、WinUIEdit 的最低版本一致；Windows 11 上使用 Mica 背景，Windows 10 自动退回普通背景 |
+| 18 | CLI 评审（2026-11-10，Phase B / issue #8） | **本机 CLI 可作为评审后端**，由 GitDeck 执行工具并推送现有 ReviewEvent；写权限默认关闭 | 设置中可选 HTTP 或本机 CLI。探测至少支持 `claude`（Claude Code）。调用 `claude` 时禁用其内置 Read/Write/Bash 等工具，只允许 GitDeck 经本机 MCP 暴露的工具，从而不绕过敏感文件过滤。写入类工具仅在用户开启后加入工具面。生成提交信息仍走 HTTP 模型服务。缺失 CLI 返回明确错误，不崩溃 |
 
 ### 由以上决策推导出的技术默认
 
@@ -70,11 +71,11 @@
 |---|------|------|
 | 1 | 模型厂商 | **Anthropic Messages API + OpenAI 兼容协议**。Claude 默认 `claude-opus-5-5`，可选 `claude-sonnet-5-5`；OpenAI 兼容协议覆盖 OpenAI、DeepSeek、通义千问、Kimi、智谱及本地 Ollama / LM Studio（自定义 Base URL 与模型名）。Gemini 原生 / Azure 以后按需添加 |
 | 2 | 评审场景 | **提交前评审本地变更**（提交窗口按钮，可作为提交前检查）、**评审已有提交**（Log 右键）、**分支对比评审**（当前分支相对目标分支）；另加 **AI 生成提交信息**（提交窗口一键生成） |
-| 3 | Agent 能力 | **只读 Agent**：读文件、搜索代码、查看历史版本 / log / blame、列目录、读取评审规则；有轮数与 token 上限；不支持工具调用的模型自动降级为单次调用（diff + 改动文件全文） |
+| 3 | Agent 能力 | **只读 Agent（HTTP）**：读文件、搜索代码、查看历史版本 / log / blame、列目录、读取评审规则；有轮数与 token 上限；不支持工具调用的模型自动降级为单次调用（diff + 改动文件全文）。**CLI 评审（Phase B，2026-11-10）**：走本机已探测的 CLI（目前为 `claude`）时，仍由 GitDeck 执行与 HTTP Agent 相同的只读工具面（敏感文件规则同样生效），不是无工具的单次调用；写入类工具（`write_file`）单独门控，默认关闭 |
 | 4 | 结果展示 | 右侧 **AI 评审工具窗口**（按文件分组、严重程度、文件:行号、点击跳转）+ **编辑器内标记** + **实时进度、可取消** + **一键应用修改建议**（先 Diff 预览，用户确认后写入；写入由用户触发，不是 Agent 自行修改） |
 | 5 | 隐私与密钥 | API Key 存**系统钥匙串**（macOS 钥匙串 / Windows 凭据管理器）；**每个项目首次使用时确认**发送对象与内容（本地模型免确认）；**默认排除敏感文件**（`.env`、`*.pem`、`*.key`、`id_rsa*`、`secrets/` 等，可自定义），Agent 工具同样不可读取；支持项目级评审规则文件 `.gitdeck/ai-review.md` |
 
-技术默认（实现时细化）：模型调用、Agent 循环、工具执行、敏感文件过滤都放在 Rust 核心，经流式（SSE）接口把进度与结果推给 UI；Claude 请求使用自适应思考与流式输出，评审默认 effort 设为 `high`（Opus 5.5 的默认值是 `medium`，需显式设置）。
+技术默认（实现时细化）：模型调用、Agent 循环、工具执行、敏感文件过滤都放在 Rust 核心，经流式（SSE）接口把进度与结果推给 UI；Claude 请求使用自适应思考与流式输出，评审默认 effort 设为 `high`（Opus 5.5 的默认值是 `medium`，需显式设置）。CLI 评审复用同一套材料准备、工具执行与结果解析：通用适配使用行分隔 JSON 协议并由 GitDeck 驱动 Agent 循环；`claude` 使用其 print/stream-json 接口，经本进程 MCP 调用 GitDeck 工具。
 
 ### 四期：Windows 端
 - 复用 Rust 核心，实现 WinUI 3 UI 层

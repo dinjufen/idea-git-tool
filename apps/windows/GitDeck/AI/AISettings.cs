@@ -119,6 +119,55 @@ public static class AISettings
         }
     }
 
+    /// 代码评审走 HTTP 模型服务还是本机 CLI。
+    public static bool ReviewUsesCli
+    {
+        get => Settings.GetString("ai.reviewBackend") == "cli";
+        set
+        {
+            Settings.Set("ai.reviewBackend", value ? "cli" : "http");
+            Changed?.Invoke();
+        }
+    }
+
+    public static string CliId
+    {
+        get
+        {
+            var value = Settings.GetString("ai.cli.id");
+            return string.IsNullOrEmpty(value) ? "claude" : value;
+        }
+        set
+        {
+            Settings.Set("ai.cli.id", value);
+            Changed?.Invoke();
+        }
+    }
+
+    /// 可选的可执行文件路径；为空时使用探测结果。
+    public static string CliExecutable
+    {
+        get => Settings.GetString("ai.cli.executable") ?? "";
+        set
+        {
+            Settings.Set("ai.cli.executable", value.Trim());
+            Changed?.Invoke();
+        }
+    }
+
+    /// CLI 写入类工具；默认关闭。
+    public static bool CliWritePermission
+    {
+        get => Settings.GetBool("ai.cli.writePermission", CoreApi.DefaultAiCliWritePermission());
+        set
+        {
+            Settings.Set("ai.cli.writePermission", value);
+            Changed?.Invoke();
+        }
+    }
+
+    public static AiCliConfig CliConfig() => new(CliId, CliExecutable, CliWritePermission);
+
     public static Language ReviewLanguage
     {
         get => Settings.GetString("ai.language") switch
@@ -207,12 +256,25 @@ public static class AISettings
     public static bool HasConsent(string project, AiProviderConfig config) =>
         IsLocal(config.BaseUrl) || (ConsentMap().TryGetValue(project.ToLowerInvariant(), out var list) && list.Contains(ConsentIdentity(config)));
 
-    public static void GrantConsent(string project, AiProviderConfig config)
+    public static void GrantConsent(string project, AiProviderConfig config) =>
+        GrantConsent(project, ConsentIdentity(config));
+
+    public static bool HasConsent(string project, string cliId)
+    {
+        var map = ConsentMap();
+        return map.TryGetValue(project.ToLowerInvariant(), out var list) && list.Contains(ConsentIdentity(cliId));
+    }
+
+    public static void GrantConsent(string project, string cliId) =>
+        GrantConsent(project, ConsentIdentity(cliId));
+
+    private static string ConsentIdentity(string cliId) => $"cli:{cliId}";
+
+    private static void GrantConsent(string project, string identity)
     {
         var map = ConsentMap();
         var key = project.ToLowerInvariant();
         if (!map.TryGetValue(key, out var list)) map[key] = list = [];
-        var identity = ConsentIdentity(config);
         if (!list.Contains(identity)) list.Add(identity);
         Settings.Set(ConsentKey, JsonSerializer.Serialize(map));
     }

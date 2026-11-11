@@ -125,6 +125,8 @@ public static partial class L10n
         CoreException.AiRequestFailed e => Tr("ai.error.request", e.status.ToString(CultureInfo.InvariantCulture), e.message),
         CoreException.AiRefused e => Tr("ai.error.refused", e.category ?? "-"),
         CoreException.AiInvalidResponse e => Tr("ai.error.invalidResponse", e.detail),
+        CoreException.AiCliNotFound e => Tr("ai.error.cliNotFound", e.name),
+        CoreException.AiCliFailed e => Tr("ai.error.cliFailed", e.message),
         CoreException.AiCancelled => Tr("ai.error.cancelled"),
         _ => error.Message,
     };

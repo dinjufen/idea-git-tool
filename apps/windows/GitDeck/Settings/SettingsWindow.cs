@@ -423,8 +423,17 @@ public sealed class SettingsWindow : Window
             Text = string.Join("\r", AISettings.SensitivePatterns),
         };
         var resetPatterns = new Button { Content = L10n.Tr("ai.settings.patterns.reset") };
+        var backend = new ComboBox { Width = 300, ItemsSource = new[] { L10n.Tr("ai.settings.reviewBackend.http"), L10n.Tr("ai.settings.reviewBackend.cli") }, SelectedIndex = AISettings.ReviewUsesCli ? 1 : 0 };
+        var cliBox = new ComboBox { Width = 300 };
+        var cliRefresh = new Button { Content = L10n.Tr("ai.settings.cli.refresh") };
+        var cliPath = new TextBox { Width = 360, PlaceholderText = L10n.Tr("ai.settings.cli.path.placeholder"), Text = AISettings.CliExecutable };
+        var cliStatus = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 420 };
+        var writePermission = new CheckBox { Content = L10n.Tr("ai.settings.writePermission"), IsChecked = AISettings.CliWritePermission };
+        List<DetectedAiCli> detectedClis = [];
         AISettings.Provider Selected() => providers[Math.Max(0, provider.SelectedIndex)];
         var loading = false;
+        var httpRows = new List<int>();
+        var cliRows = new List<int>();
 
         var effortRow = 0;
         var toolsRow = 0;
@@ -444,10 +453,62 @@ public sealed class SettingsWindow : Window
             effort.SelectedItem = AISettings.Effort;
             maxTokens.Value = AISettings.MaxTokens(p);
             tools.IsChecked = AISettings.SupportsTools;
-            SetRowVisible(form, effortRow, p == AISettings.Provider.Anthropic);
-            SetRowVisible(form, toolsRow, p == AISettings.Provider.OpenAICompatible);
+            if (!AISettings.ReviewUsesCli)
+            {
+                SetRowVisible(form, effortRow, p == AISettings.Provider.Anthropic);
+                SetRowVisible(form, toolsRow, p == AISettings.Provider.OpenAICompatible);
+            }
             status.Text = "";
             loading = false;
+        }
+
+        void ApplyBackendVisibility()
+        {
+            var cli = AISettings.ReviewUsesCli;
+            foreach (var row in httpRows) SetRowVisible(form, row, !cli);
+            foreach (var row in cliRows) SetRowVisible(form, row, cli);
+            if (!cli) LoadProvider();
+        }
+
+        void RefreshClis()
+        {
+            detectedClis = [.. CoreApi.DetectAiClis()];
+            if (detectedClis.Count == 0)
+            {
+                cliBox.ItemsSource = new[] { L10n.Tr("ai.settings.cli.none") };
+                cliBox.SelectedIndex = 0;
+                cliBox.IsEnabled = false;
+            }
+            else
+            {
+                cliBox.IsEnabled = true;
+                cliBox.ItemsSource = detectedClis.Select(c => string.IsNullOrEmpty(c.Version) ? c.DisplayName : $"{c.DisplayName}  ({c.Version})").ToList();
+                var index = detectedClis.FindIndex(c => c.Id == AISettings.CliId);
+                if (index < 0)
+                {
+                    index = 0;
+                    AISettings.CliId = detectedClis[0].Id;
+                }
+                cliBox.SelectedIndex = index;
+            }
+            UpdateCliStatus();
+        }
+
+        void UpdateCliStatus()
+        {
+            try
+            {
+                var cli = CoreApi.ResolveAiCli(AISettings.CliId, cliPath.Text ?? "");
+                cliStatus.Text = L10n.Tr("ai.settings.cli.found", cli.DisplayName, cli.Path);
+                ToolTipService.SetToolTip(cliStatus, cli.Path);
+                Themed.Foreground(cliStatus, "StatusAddedBrush");
+            }
+            catch (Exception error)
+            {
+                cliStatus.Text = L10n.Message(error);
+                ToolTipService.SetToolTip(cliStatus, cliStatus.Text);
+                Themed.Foreground(cliStatus, "StatusConflictBrush");
+            }
         }
 
         // 输入框尚未结束编辑时（例如直接点击 “测试连接”）也写入设置。
@@ -471,6 +532,7 @@ public sealed class SettingsWindow : Window
             if (baseUrl.Text.Trim() != AISettings.BaseUrl(p)) AISettings.SetBaseUrl(p, baseUrl.Text);
             if ((model.Text ?? "").Trim() != AISettings.Model(p)) AISettings.SetModel(p, model.Text ?? "");
             if (!double.IsNaN(maxTokens.Value) && (int)maxTokens.Value != AISettings.MaxTokens(p)) AISettings.SetMaxTokens(p, (int)maxTokens.Value);
+            if ((cliPath.Text ?? "").Trim() != AISettings.CliExecutable) AISettings.CliExecutable = cliPath.Text ?? "";
             SavePatterns();
         }
 
@@ -513,6 +575,30 @@ public sealed class SettingsWindow : Window
             if (!loading && effort.SelectedItem is string value) AISettings.Effort = value;
         };
         tools.Click += (_, _) => AISettings.SupportsTools = tools.IsChecked == true;
+        backend.SelectionChanged += (_, _) =>
+        {
+            if (loading) return;
+            AISettings.ReviewUsesCli = backend.SelectedIndex == 1;
+            ApplyBackendVisibility();
+            if (AISettings.ReviewUsesCli) RefreshClis();
+        };
+        cliBox.SelectionChanged += (_, _) =>
+        {
+            if (loading || !cliBox.IsEnabled) return;
+            var index = cliBox.SelectedIndex;
+            if (index >= 0 && index < detectedClis.Count)
+            {
+                AISettings.CliId = detectedClis[index].Id;
+                UpdateCliStatus();
+            }
+        };
+        cliRefresh.Click += (_, _) => RefreshClis();
+        cliPath.LostFocus += (_, _) =>
+        {
+            AISettings.CliExecutable = cliPath.Text ?? "";
+            UpdateCliStatus();
+        };
+        writePermission.Click += (_, _) => AISettings.CliWritePermission = writePermission.IsChecked == true;
         language.SelectionChanged += (_, _) => AISettings.ReviewLanguage = languages[Math.Max(0, language.SelectedIndex)];
         patterns.LostFocus += (_, _) => SavePatterns();
         resetPatterns.Click += (_, _) =>
@@ -593,17 +679,37 @@ public sealed class SettingsWindow : Window
         };
         _commit = Commit;
 
+        form.Add("ai.settings.reviewBackend", backend);
+        httpRows.Add(form.RowDefinitions.Count);
         form.Add("ai.settings.provider", provider);
+        httpRows.Add(form.RowDefinitions.Count);
         form.Add("ai.settings.key", Row(key, deleteKey));
+        httpRows.Add(form.RowDefinitions.Count);
         form.Add("ai.settings.baseURL", baseUrl);
+        httpRows.Add(form.RowDefinitions.Count);
         form.Add("ai.settings.model", Row(model, queryModels));
         effortRow = form.RowDefinitions.Count;
+        httpRows.Add(effortRow);
         form.Add("ai.settings.effort", effort);
         toolsRow = form.RowDefinitions.Count;
+        httpRows.Add(toolsRow);
         form.Add(null, tools);
+        httpRows.Add(form.RowDefinitions.Count);
         form.Add("ai.settings.maxTokens", maxTokens);
+        httpRows.Add(form.RowDefinitions.Count);
         form.Add(null, Row(test, status));
+        httpRows.Add(form.RowDefinitions.Count);
         form.Hint(L10n.Tr("ai.settings.privacy.hint"));
+        cliRows.Add(form.RowDefinitions.Count);
+        form.Add("ai.settings.cli", Row(cliBox, cliRefresh));
+        cliRows.Add(form.RowDefinitions.Count);
+        form.Add("ai.settings.cli.path", cliPath);
+        cliRows.Add(form.RowDefinitions.Count);
+        form.Add(null, cliStatus);
+        cliRows.Add(form.RowDefinitions.Count);
+        form.Add(null, writePermission);
+        cliRows.Add(form.RowDefinitions.Count);
+        form.Hint(L10n.Tr("ai.settings.writePermission.hint"));
         form.Add("ai.settings.language", language);
         var patternsColumn = new StackPanel
         {
@@ -618,6 +724,8 @@ public sealed class SettingsWindow : Window
         form.Add("ai.settings.patterns", patternsColumn);
         form.Hint(L10n.Tr("ai.settings.rules.hint"));
         LoadProvider();
+        RefreshClis();
+        ApplyBackendVisibility();
         return form;
     }
 

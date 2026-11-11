@@ -104,27 +104,22 @@ public sealed class AIReviewController
 
     // MARK: - 准备：配置与授权
 
-    /// 检查是否已配置模型服务，并在本项目首次发送代码前请用户确认。
-    private async Task<(Readiness, AiProviderConfig?, string)> Prepare(bool allowSkip = false)
+    private sealed record Prepared(Readiness Readiness, AiProviderConfig? Config = null, string ApiKey = "", AiCliConfig? Cli = null, string ModelName = "");
+
+    /// 检查是否已配置模型服务或本机 CLI，并在本项目首次发送代码前请用户确认。
+    /// `httpOnly` 用于生成提交信息（始终走 HTTP）。
+    private async Task<Prepared> Prepare(bool allowSkip = false, bool httpOnly = false)
     {
-        if (_root() is not { } root) return (Readiness.Cancelled, null, "");
+        if (_root() is not { } root) return new(Readiness.Cancelled);
+        if (!httpOnly && AISettings.ReviewUsesCli) return await PrepareCli(root, allowSkip);
+        return await PrepareHttp(root, allowSkip);
+    }
+
+    private async Task<Prepared> PrepareHttp(XamlRoot root, bool allowSkip)
+    {
         if (AISettings.Current() is not { } current)
         {
-            var dialog = Dialogs.Create(root, L10n.Tr("ai.notConfigured.title"));
-            dialog.Content = new TextBlock { Text = L10n.Tr("ai.notConfigured.message"), TextWrapping = TextWrapping.Wrap, MaxWidth = 420 };
-            dialog.PrimaryButtonText = L10n.Tr("ai.notConfigured.open");
-            if (allowSkip) dialog.SecondaryButtonText = L10n.Tr("ai.precommit.commitAnyway");
-            dialog.CloseButtonText = L10n.Tr("common.cancel");
-            switch (await dialog.ShowAsync())
-            {
-                case ContentDialogResult.Primary:
-                    SettingsWindow.Show(SettingsWindow.Page.AI);
-                    return (Readiness.Cancelled, null, "");
-                case ContentDialogResult.Secondary:
-                    return (Readiness.Skip, null, "");
-                default:
-                    return (Readiness.Cancelled, null, "");
-            }
+            return await NotConfigured(root, allowSkip, L10n.Tr("ai.notConfigured.title"), L10n.Tr("ai.notConfigured.message"));
         }
         var (config, apiKey) = current;
         var project = _model.RootPath;
@@ -133,11 +128,54 @@ public sealed class AIReviewController
             var host = AISettings.Host(config.BaseUrl);
             if (!await ConfirmDialog.Show(root, L10n.Tr("ai.consent.title", host), L10n.Tr("ai.consent.message", _model.ProjectName, host), L10n.Tr("ai.consent.allow")))
             {
-                return (Readiness.Cancelled, null, "");
+                return new(Readiness.Cancelled);
             }
             AISettings.GrantConsent(project, config);
         }
-        return (Readiness.Ready, config, apiKey);
+        return new(Readiness.Ready, Config: config, ApiKey: apiKey, ModelName: config.Model);
+    }
+
+    private async Task<Prepared> PrepareCli(XamlRoot root, bool allowSkip)
+    {
+        DetectedAiCli detected;
+        try
+        {
+            detected = CoreApi.ResolveAiCli(AISettings.CliId, AISettings.CliExecutable);
+        }
+        catch (Exception error)
+        {
+            return await NotConfigured(root, allowSkip, L10n.Tr("ai.notConfigured.cli.title"), L10n.Message(error));
+        }
+        var project = _model.RootPath;
+        if (!AISettings.HasConsent(project, detected.Id))
+        {
+            var name = detected.DisplayName;
+            if (!await ConfirmDialog.Show(root, L10n.Tr("ai.consent.cli.title", name), L10n.Tr("ai.consent.cli.message", _model.ProjectName, name), L10n.Tr("ai.consent.allow")))
+            {
+                return new(Readiness.Cancelled);
+            }
+            AISettings.GrantConsent(project, detected.Id);
+        }
+        return new(Readiness.Ready, Cli: AISettings.CliConfig(), ModelName: detected.DisplayName);
+    }
+
+    private async Task<Prepared> NotConfigured(XamlRoot root, bool allowSkip, string title, string message)
+    {
+        var dialog = Dialogs.Create(root, title);
+        dialog.Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, MaxWidth = 420 };
+        dialog.PrimaryButtonText = L10n.Tr("ai.notConfigured.open");
+        if (allowSkip) dialog.SecondaryButtonText = L10n.Tr("ai.precommit.commitAnyway");
+        dialog.CloseButtonText = L10n.Tr("common.cancel");
+        switch (await dialog.ShowAsync())
+        {
+            case ContentDialogResult.Primary:
+                SettingsWindow.Show(SettingsWindow.Page.AI);
+                return new(Readiness.Cancelled);
+            case ContentDialogResult.Secondary:
+                return new(Readiness.Skip);
+            default:
+                return new(Readiness.Cancelled);
+        }
     }
 
     // MARK: - 评审
@@ -175,13 +213,13 @@ public sealed class AIReviewController
             Reveal?.Invoke();
             return;
         }
-        var (readiness, config, apiKey) = await Prepare(allowSkip);
-        if (readiness == Readiness.Skip)
+        var prepared = await Prepare(allowSkip);
+        if (prepared.Readiness == Readiness.Skip)
         {
             completion?.Invoke(new ReviewResult("", [], null, 0, 0, 0, true));
             return;
         }
-        if (readiness == Readiness.Cancelled || config is null)
+        if (prepared.Readiness == Readiness.Cancelled || (prepared.Config is null && prepared.Cli is null))
         {
             completion?.Invoke(null);
             return;
@@ -200,7 +238,7 @@ public sealed class AIReviewController
         Usage = (0, 0);
         Turn = 0;
         Applied.Clear();
-        ModelName = config.Model;
+        ModelName = prepared.ModelName;
         Reveal?.Invoke();
         Notify();
 
@@ -208,7 +246,14 @@ public sealed class AIReviewController
         // 回调来自核心的后台线程：按顺序转到界面线程处理，丢弃旧评审的事件。
         var listener = new ListenerBridge(e => _dispatcher.TryEnqueue(() => Handle(e, current)));
         var target = Target.Repository;
-        _task = await Task.Run(() => target.StartAiReview(config, apiKey, scope, options, listener));
+        if (prepared.Cli is { } cli)
+        {
+            _task = await Task.Run(() => target.StartAiCliReview(cli, scope, options, listener));
+        }
+        else
+        {
+            _task = await Task.Run(() => target.StartAiReview(prepared.Config!, prepared.ApiKey, scope, options, listener));
+        }
     }
 
     public void Cancel()
@@ -320,6 +365,7 @@ public sealed class AIReviewController
         "search_code" => L10n.Tr("ai.tool.search"),
         "git_log" => L10n.Tr("ai.tool.log"),
         "git_blame" => L10n.Tr("ai.tool.blame"),
+        "write_file" => L10n.Tr("ai.tool.writeFile"),
         _ => name,
     };
 
@@ -369,8 +415,10 @@ public sealed class AIReviewController
             Notify();
             return null;
         }
-        var (readiness, config, apiKey) = await Prepare();
-        if (readiness != Readiness.Ready || config is null) return null;
+        var prepared = await Prepare(httpOnly: true);
+        if (prepared.Readiness != Readiness.Ready || prepared.Config is null) return null;
+        var config = prepared.Config;
+        var apiKey = prepared.ApiKey;
         var task = new AiTask();
         _messageTask = task;
         Notify();

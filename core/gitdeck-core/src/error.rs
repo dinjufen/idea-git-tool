@@ -85,6 +85,14 @@ pub enum CoreError {
     #[error("unexpected AI response: {detail}")]
     AiInvalidResponse { detail: String },
 
+    /// 本机未找到所选的 AI CLI，或指定的可执行文件不可用。
+    #[error("AI CLI not found: {name}")]
+    AiCliNotFound { name: String },
+
+    /// 本机 AI CLI 启动失败、异常退出或输出无法解析。
+    #[error("AI CLI failed: {message}")]
+    AiCliFailed { message: String },
+
     #[error("AI task cancelled")]
     AiCancelled,
 }

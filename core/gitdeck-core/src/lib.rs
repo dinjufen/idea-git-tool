@@ -29,10 +29,12 @@ mod tags;
 mod workspace;
 
 pub use ai::{
-    AiModelInfo, AiProviderConfig, AiProviderKind, AiTask, ReviewEvent, ReviewFinding,
-    ReviewListener, ReviewOptions, ReviewResult, ReviewScope, ReviewSeverity, ReviewSuggestion,
-    apply_review_suggestion, default_ai_base_url, default_ai_max_tokens, default_sensitive_patterns,
-    is_sensitive_path, list_ai_models, should_autofill_ai_max_tokens, test_ai_connection,
+    AiCliConfig, AiModelInfo, AiProviderConfig, AiProviderKind, AiTask, DetectedAiCli, ReviewEvent,
+    ReviewFinding, ReviewListener, ReviewOptions, ReviewResult, ReviewScope, ReviewSeverity,
+    ReviewSuggestion, apply_review_suggestion, default_ai_base_url,
+    default_ai_cli_write_permission, default_ai_max_tokens, default_sensitive_patterns,
+    detect_ai_clis, is_sensitive_path, list_ai_models, resolve_ai_cli,
+    should_autofill_ai_max_tokens, test_ai_connection,
 };
 pub use blame::{BlameCommit, BlameResult, FileRevision};
 pub use branch_ops::{CheckoutMode, CheckoutOutcome, MergeOutcome};

@@ -22,6 +22,16 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
     private var testTask: Task<Void, Never>?
     private var presenceTask: Task<Void, Never>?
 
+    private let backendPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let cliPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let cliRefreshButton = NSButton(title: tr("ai.settings.cli.refresh"), target: nil, action: nil)
+    private let cliPathField = NSTextField()
+    private let cliStatus = NSTextField.label("", font: Theme.smallFont, color: Theme.secondaryText)
+    private let writeCheckbox = NSButton(checkboxWithTitle: tr("ai.settings.writePermission"), target: nil, action: nil)
+    private var httpRows: [NSGridRow] = []
+    private var cliRows: [NSGridRow] = []
+    private var detectedClis: [DetectedAiCli] = []
+
     private var provider: AISettings.Provider {
         AISettings.Provider.allCases[max(0, providerPopup.indexOfSelectedItem)]
     }
@@ -56,9 +66,25 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
     private func buildLayout() {
         let content = view
 
+        backendPopup.addItems(withTitles: [tr("ai.settings.reviewBackend.http"), tr("ai.settings.reviewBackend.cli")])
+        backendPopup.target = self
+        backendPopup.action = #selector(backendChanged)
+
         providerPopup.addItems(withTitles: AISettings.Provider.allCases.map(\.title))
         providerPopup.target = self
         providerPopup.action = #selector(providerChanged)
+
+        cliRefreshButton.bezelStyle = .push
+        cliRefreshButton.controlSize = .small
+        cliRefreshButton.target = self
+        cliRefreshButton.action = #selector(refreshClis)
+        cliPopup.target = self
+        cliPopup.action = #selector(cliChanged)
+        cliPathField.placeholderString = tr("ai.settings.cli.path.placeholder")
+        cliPathField.delegate = self
+        writeCheckbox.target = self
+        writeCheckbox.action = #selector(writePermissionChanged)
+        cliStatus.lineBreakMode = .byTruncatingTail
 
         keyField.placeholderString = tr("ai.settings.key.placeholder")
         keyField.delegate = self
@@ -143,7 +169,13 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
         }
         let modelRow = NSStackView(views: [modelBox, queryModelsButton])
         modelRow.spacing = 8
+        let cliRow = NSStackView(views: [cliPopup, cliRefreshButton])
+        cliRow.spacing = 8
+        let writeHint = NSTextField.label(tr("ai.settings.writePermission.hint"), font: Theme.smallFont, color: Theme.secondaryText)
+        writeHint.lineBreakMode = .byWordWrapping
+        writeHint.preferredMaxLayoutWidth = 440
         let rows: [[NSView]] = [
+            [label("ai.settings.reviewBackend"), backendPopup],
             [label("ai.settings.provider"), providerPopup],
             [label("ai.settings.key"), keyRow],
             [label("ai.settings.baseURL"), baseURLField],
@@ -153,6 +185,11 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
             [label("ai.settings.maxTokens"), maxTokensField],
             [NSGridCell.emptyContentView, testRow],
             [NSGridCell.emptyContentView, privacyHint],
+            [label("ai.settings.cli"), cliRow],
+            [label("ai.settings.cli.path"), cliPathField],
+            [NSGridCell.emptyContentView, cliStatus],
+            [NSGridCell.emptyContentView, writeCheckbox],
+            [NSGridCell.emptyContentView, writeHint],
             [label("ai.settings.language"), languagePopup],
             [label("ai.settings.patterns"), patternsColumn],
             [NSGridCell.emptyContentView, rulesHint],
@@ -163,12 +200,15 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
         grid.column(at: 0).xPlacement = .trailing
         grid.column(at: 1).width = 450
         grid.rowAlignment = .firstBaseline
-        effortRow = grid.row(at: 4)
-        toolsRow = grid.row(at: 5)
-        grid.row(at: 8).bottomPadding = 8
-        grid.row(at: 10).rowAlignment = .none
-        grid.cell(atColumnIndex: 0, rowIndex: 10).yPlacement = .top
-        for field in [keyField, baseURLField, maxTokensField] as [NSView] {
+        // 0 backend; 1-9 HTTP; 10-14 CLI; 15 language; 16 patterns; 17 rules
+        effortRow = grid.row(at: 5)
+        toolsRow = grid.row(at: 6)
+        httpRows = (1...9).map { grid.row(at: $0) }
+        cliRows = (10...14).map { grid.row(at: $0) }
+        grid.row(at: 9).bottomPadding = 8
+        grid.row(at: 16).rowAlignment = .none
+        grid.cell(atColumnIndex: 0, rowIndex: 16).yPlacement = .top
+        for field in [keyField, baseURLField, maxTokensField, cliPathField] as [NSView] {
             field.widthAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
         }
         modelBox.widthAnchor.constraint(equalToConstant: 240).isActive = true
@@ -186,8 +226,11 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
     // MARK: - 数据
 
     private func load() {
+        backendPopup.selectItem(at: AISettings.reviewUsesCli ? 1 : 0)
         providerPopup.selectItem(at: AISettings.Provider.allCases.firstIndex(of: AISettings.provider) ?? 0)
         loadProvider()
+        loadCliSettings()
+        applyBackendVisibility()
         languagePopup.selectItem(at: AISettings.Language.allCases.firstIndex(of: AISettings.language) ?? 0)
         patternsView.string = AISettings.sensitivePatterns.joined(separator: "\n")
     }
@@ -256,6 +299,9 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
         if maxTokensField.integerValue > 0, maxTokensField.integerValue != AISettings.maxTokens(provider) {
             AISettings.setMaxTokens(provider, maxTokensField.integerValue)
         }
+        if cliPathField.stringValue != AISettings.cliExecutable {
+            AISettings.cliExecutable = cliPathField.stringValue
+        }
     }
 
     private func savePatterns() {
@@ -281,6 +327,79 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
     @objc private func modelChanged() { commitFields() }
     @objc private func effortChanged() { AISettings.effort = effortPopup.titleOfSelectedItem ?? "high" }
     @objc private func toolsChanged() { AISettings.supportsTools = toolsCheckbox.state == .on }
+
+    @objc private func backendChanged() {
+        commitFields()
+        AISettings.reviewUsesCli = backendPopup.indexOfSelectedItem == 1
+        applyBackendVisibility()
+        if AISettings.reviewUsesCli { refreshClis() }
+    }
+
+    @objc private func cliChanged() {
+        let index = cliPopup.indexOfSelectedItem
+        if index >= 0, index < detectedClis.count {
+            AISettings.cliId = detectedClis[index].id
+            updateCliStatus()
+        }
+    }
+
+    @objc private func refreshClis() {
+        detectedClis = detectAiClis()
+        cliPopup.removeAllItems()
+        if detectedClis.isEmpty {
+            cliPopup.addItem(withTitle: tr("ai.settings.cli.none"))
+            cliPopup.isEnabled = false
+        } else {
+            cliPopup.isEnabled = true
+            cliPopup.addItems(withTitles: detectedClis.map { cli in
+                if let version = cli.version, !version.isEmpty {
+                    return "\(cli.displayName)  (\(version))"
+                }
+                return cli.displayName
+            })
+            if let index = detectedClis.firstIndex(where: { $0.id == AISettings.cliId }) {
+                cliPopup.selectItem(at: index)
+            } else {
+                cliPopup.selectItem(at: 0)
+                AISettings.cliId = detectedClis[0].id
+            }
+        }
+        updateCliStatus()
+    }
+
+    @objc private func writePermissionChanged() {
+        AISettings.cliWritePermission = writeCheckbox.state == .on
+    }
+
+    private func loadCliSettings() {
+        cliPathField.stringValue = AISettings.cliExecutable
+        writeCheckbox.state = AISettings.cliWritePermission ? .on : .off
+        refreshClis()
+    }
+
+    private func applyBackendVisibility() {
+        let cli = AISettings.reviewUsesCli
+        httpRows.forEach { $0.isHidden = cli }
+        cliRows.forEach { $0.isHidden = !cli }
+        if !cli {
+            effortRow?.isHidden = provider != .anthropic
+            toolsRow?.isHidden = provider != .openAICompatible
+        }
+    }
+
+    private func updateCliStatus() {
+        let executable = cliPathField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            let cli = try resolveAiCli(id: AISettings.cliId, executable: executable)
+            cliStatus.stringValue = tr("ai.settings.cli.found", cli.displayName, cli.path)
+            cliStatus.textColor = LineStatusColors.added
+            cliStatus.toolTip = cli.path
+        } catch {
+            cliStatus.stringValue = errorMessage(error)
+            cliStatus.textColor = Theme.FileStatus.conflict
+            cliStatus.toolTip = cliStatus.stringValue
+        }
+    }
 
     @objc private func languageChanged() {
         AISettings.language = AISettings.Language.allCases[max(0, languagePopup.indexOfSelectedItem)]

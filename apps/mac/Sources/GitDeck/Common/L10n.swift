@@ -77,6 +77,10 @@ extension CoreError {
             tr("ai.error.refused", category ?? "-")
         case let .AiInvalidResponse(detail):
             tr("ai.error.invalidResponse", detail)
+        case let .AiCliNotFound(name):
+            tr("ai.error.cliNotFound", name)
+        case let .AiCliFailed(message):
+            tr("ai.error.cliFailed", message)
         case .AiCancelled:
             tr("ai.error.cancelled")
         }
