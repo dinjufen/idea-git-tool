@@ -260,12 +260,111 @@ fn well_known_paths(id: &str) -> Vec<PathBuf> {
                 .join(format!("{id}.exe")),
         );
     }
+    // 访达 / 程序坞启动时 PATH 往往没有 nvm。NVM_BIN 是当前选中的 Node bin。
+    if let Some(bin) = std::env::var_os("NVM_BIN") {
+        let bin = PathBuf::from(bin);
+        paths.push(bin.join(id));
+        paths.push(bin.join(format!("{id}.exe")));
+        paths.push(bin.join(format!("{id}.cmd")));
+    }
+    let mut nvm_roots = Vec::new();
+    if let Some(dir) = std::env::var_os("NVM_DIR") {
+        nvm_roots.push(PathBuf::from(dir));
+    }
+    if let Some(dir) = std::env::var_os("NVM_HOME") {
+        nvm_roots.push(PathBuf::from(dir));
+    }
+    if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+        let home = PathBuf::from(home);
+        nvm_roots.push(home.join(".nvm"));
+        nvm_roots.push(home.join("AppData/Roaming/nvm"));
+    }
+    paths.extend(nvm_install_paths(&nvm_roots, id));
     if id == CLI_CLAUDE {
         paths.push(PathBuf::from("/opt/homebrew/bin/claude"));
         paths.push(PathBuf::from("/usr/local/bin/claude"));
         paths.push(PathBuf::from("/usr/bin/claude"));
     }
     paths
+}
+
+/// nvm（含 nvm-windows）安装根下的 CLI 路径：默认 alias 优先，其余按 Node 版本从新到旧。
+fn nvm_install_paths(roots: &[PathBuf], id: &str) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for root in roots {
+        let key = std::fs::canonicalize(root).unwrap_or_else(|_| root.clone());
+        if !seen.insert(key) || !root.is_dir() {
+            continue;
+        }
+
+        let mut versions = read_dir_dirs(&root.join("versions/node"));
+        versions.sort_by(|a, b| cmp_node_version_desc(a, b));
+        if let Some(default) = nvm_default_version_dir(root) {
+            versions.retain(|path| path != &default);
+            versions.insert(0, default);
+        }
+        for version in &versions {
+            paths.push(version.join("bin").join(id));
+            paths.push(version.join("bin").join(format!("{id}.exe")));
+        }
+
+        // nvm-windows：`%NVM_HOME%\v24.14.0\claude.cmd`
+        let mut win_versions = read_dir_dirs(root);
+        win_versions.retain(|path| parse_node_version(path).is_some());
+        win_versions.sort_by(|a, b| cmp_node_version_desc(a, b));
+        for version in win_versions {
+            paths.push(version.join(id));
+            paths.push(version.join(format!("{id}.cmd")));
+            paths.push(version.join(format!("{id}.exe")));
+        }
+    }
+    paths
+}
+
+fn read_dir_dirs(dir: &Path) -> Vec<PathBuf> {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect()
+}
+
+fn nvm_default_version_dir(root: &Path) -> Option<PathBuf> {
+    let raw = std::fs::read_to_string(root.join("alias/default")).ok()?;
+    let name = raw.trim();
+    if name.is_empty() {
+        return None;
+    }
+    [
+        root.join("versions/node").join(name),
+        root.join("versions/node").join(format!("v{name}")),
+        root.join(name),
+        root.join(format!("v{name}")),
+    ]
+    .into_iter()
+    .find(|path| path.is_dir())
+}
+
+fn parse_node_version(path: &Path) -> Option<(u64, u64, u64)> {
+    let name = path.file_name()?.to_str()?;
+    let name = name.strip_prefix('v').unwrap_or(name);
+    let mut parts = name.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next().unwrap_or("0").parse().ok()?;
+    let patch = parts.next().unwrap_or("0").parse().ok()?;
+    Some((major, minor, patch))
+}
+
+fn cmp_node_version_desc(a: &Path, b: &Path) -> std::cmp::Ordering {
+    match (parse_node_version(a), parse_node_version(b)) {
+        (Some(left), Some(right)) => right.cmp(&left),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => b.file_name().cmp(&a.file_name()),
+    }
 }
 
 fn is_runnable(path: &Path) -> bool {
@@ -373,5 +472,69 @@ mod tests {
         );
         let err = resolve_ai_cli_inner(CLI_CLAUDE, "/no/such/claude-binary").unwrap_err();
         assert!(matches!(err, CoreError::AiCliNotFound { .. }));
+    }
+
+    #[test]
+    fn nvm_install_paths_prefers_default_alias_then_newer_node() {
+        let root = std::env::temp_dir().join(format!(
+            "gitdeck-nvm-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let cleanup = |root: &Path| {
+            let _ = std::fs::remove_dir_all(root);
+        };
+        cleanup(&root);
+        let v22_bin = root.join("versions/node/v22.0.0/bin");
+        let v24_bin = root.join("versions/node/v24.14.0/bin");
+        std::fs::create_dir_all(&v22_bin).unwrap();
+        std::fs::create_dir_all(&v24_bin).unwrap();
+        std::fs::write(v22_bin.join("claude"), b"").unwrap();
+        std::fs::write(v24_bin.join("claude"), b"").unwrap();
+        std::fs::create_dir_all(root.join("alias")).unwrap();
+        std::fs::write(root.join("alias/default"), "v22.0.0\n").unwrap();
+
+        let claude_bins = |root: &Path| -> Vec<PathBuf> {
+            nvm_install_paths(&[root.to_path_buf()], "claude")
+                .into_iter()
+                .filter(|path| path.file_name().and_then(|name| name.to_str()) == Some("claude"))
+                .collect()
+        };
+
+        assert_eq!(
+            claude_bins(&root),
+            vec![v22_bin.join("claude"), v24_bin.join("claude")]
+        );
+
+        std::fs::remove_file(root.join("alias/default")).unwrap();
+        assert_eq!(
+            claude_bins(&root),
+            vec![v24_bin.join("claude"), v22_bin.join("claude")]
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn nvm_install_paths_finds_nvm_windows_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "gitdeck-nvm-win-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let v24 = root.join("v24.14.0");
+        std::fs::create_dir_all(&v24).unwrap();
+        std::fs::write(v24.join("claude.cmd"), b"").unwrap();
+
+        let paths = nvm_install_paths(&[root.clone()], "claude");
+        assert!(paths.contains(&v24.join("claude.cmd")));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
