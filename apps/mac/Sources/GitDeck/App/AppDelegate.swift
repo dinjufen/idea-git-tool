@@ -18,12 +18,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         checkGitAvailable()
 
         // 与 IDEA 一致：启动时重新打开上次的项目，否则显示欢迎页。
-        if let last = RecentProjects.shared.paths.first,
-           FileManager.default.fileExists(atPath: last) {
-            openProject(at: URL(fileURLWithPath: last))
+        #if DEBUG
+        // `-debug.open <路径>`：只打开指定项目，避免复用最近项目干扰调试。
+        if let path = UserDefaults.standard.string(forKey: "debug.open"),
+           FileManager.default.fileExists(atPath: path) {
+            openProject(at: URL(fileURLWithPath: path))
         } else {
-            showWelcome()
+            openLastProjectOrWelcome()
         }
+        #else
+        openLastProjectOrWelcome()
+        #endif
         NSApp.activate()
         #if DEBUG
         // 仅 Debug：`-debug.openAlso <路径>` 启动后再打开一个项目（验证多项目标签页）。
@@ -43,6 +48,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - 项目窗口
+
+    private func openLastProjectOrWelcome() {
+        if let last = RecentProjects.shared.paths.first,
+           FileManager.default.fileExists(atPath: last) {
+            openProject(at: URL(fileURLWithPath: last))
+        } else {
+            showWelcome()
+        }
+    }
 
     func showWelcome() {
         if welcome == nil {

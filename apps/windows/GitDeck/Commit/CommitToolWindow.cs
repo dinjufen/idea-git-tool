@@ -63,6 +63,8 @@ public sealed class CommitToolWindow : Grid
     private readonly HashSet<string> _included = [];
     /// 已见过的路径；新出现的已跟踪变更默认勾选，未跟踪文件默认不勾选（与 IDEA 一致）。
     private HashSet<string> _known = [];
+    /// 下一次状态刷新时不自动勾选新出现的已跟踪文件（Git Reset / Undo Commit 回退产生的变更）。
+    private bool _skipAutoIncludeOnNextRefresh;
     private readonly HashSet<string> _collapsed = [];
     /// 各仓库的 Changelist（从核心加载并与工作区同步）；多仓库时以主仓库的列表为准统一显示。
     private Dictionary<ProjectModel, Changelists> _changelistsByRepo = [];
@@ -134,6 +136,9 @@ public sealed class CommitToolWindow : Grid
 
     /// 主仓库中勾选的文件（AI 评审与生成提交信息使用）。
     public List<string> IncludedPaths => [.. IncludedEntries.Where(e => e.Model == _model).Select(e => e.Change.Path)];
+
+    /// Git Reset / Undo Commit 执行前调用：随后一次状态刷新不再自动勾选新文件。
+    public void SuppressAutoIncludeOnNextRefresh() => _skipAutoIncludeOnNextRefresh = true;
 
     /// 勾选的条目，按仓库顺序与路径排列。
     private List<Entry> IncludedEntries => [.. _entries.Values.Where(e => _included.Contains(e.Key))
@@ -403,12 +408,25 @@ public sealed class CommitToolWindow : Grid
             }
         }
         // 与 IDEA 一致：新出现的已跟踪改动只在活动 Changelist 中默认勾选。
+        // Git Reset / Undo Commit 回退产生的文件除外，避免被误认为已暂存。
         var current = _entries.Keys.ToHashSet();
         var active = ActiveChangelist;
-        foreach (var entry in _entries.Values)
+        // 标记必须等到这次刷新里真正出现新文件再消费，避免 reset 完成前的空刷新把标记清掉。
+        if (_skipAutoIncludeOnNextRefresh)
         {
-            if (_known.Contains(entry.Key) || entry.Change.IsUntracked() || entry.Change.Conflict is not null) continue;
-            if (ChangelistName(entry) == active) _included.Add(entry.Key);
+            if (_entries.Values.Any(entry =>
+                !_known.Contains(entry.Key) && !entry.Change.IsUntracked() && entry.Change.Conflict is null))
+            {
+                _skipAutoIncludeOnNextRefresh = false;
+            }
+        }
+        else
+        {
+            foreach (var entry in _entries.Values)
+            {
+                if (_known.Contains(entry.Key) || entry.Change.IsUntracked() || entry.Change.Conflict is not null) continue;
+                if (ChangelistName(entry) == active) _included.Add(entry.Key);
+            }
         }
         _included.IntersectWith(current);
         _known = current;

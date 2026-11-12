@@ -27,6 +27,8 @@ final class GitOperations {
     var onRevealCommit: ((String) -> Void)?
     /// 打开某个修订中的文件与工作区文件的 Diff。
     var onShowRevisionFileDiff: ((String, ChangedFile) -> Void)?
+    /// 即将因 Reset / Undo Commit 产生新的工作区变更时调用，提交面板不要自动勾选这些文件。
+    var onSuppressCommitAutoInclude: (() -> Void)?
 
     private(set) var runningTitle: String?
 

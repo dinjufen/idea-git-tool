@@ -31,6 +31,9 @@ public sealed partial class GitOperations
     /// 打开某个修订中的文件与工作区文件的 Diff。
     public event Action<string, ChangedFile>? ShowRevisionFileDiff;
 
+    /// 即将因 Reset / Undo Commit 产生新的工作区变更时调用，提交面板不要自动勾选这些文件。
+    public event Action? SuppressCommitAutoInclude;
+
     public ProjectModel Model => _model;
 
     public string? RunningTitle { get; private set; }

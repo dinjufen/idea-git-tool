@@ -123,6 +123,8 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     private var entries: [String: Entry] = [:]
     /// 勾选要提交的文件的键。
     private var included: Set<String> = []
+    /// 下一次状态刷新时不自动勾选新出现的已跟踪文件（Git Reset / Undo Commit 回退产生的变更）。
+    private var skipAutoIncludeOnNextRefresh = false
     /// 已见过的路径；新出现的已跟踪变更默认勾选，未跟踪文件默认不勾选（与 IDEA 一致）。
     private var known: Set<String> = []
     private var observer: UUID?
@@ -384,10 +386,16 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         }
         entries = Dictionary(all.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
         // 与 IDEA 一致：新出现的已跟踪改动只在活动 Changelist 中默认勾选。
+        // Git Reset / Undo Commit 回退产生的文件除外，避免被误认为已暂存。
         let current = Set(entries.keys)
         let newKeys = Set(all.filter { !$0.change.isUntracked && $0.change.conflict == nil }.map(\.key)).subtracting(known)
         let inactive = Set(all.filter { changelistName(of: $0) != activeChangelist }.map(\.key))
-        included.formUnion(newKeys.subtracting(inactive))
+        // 标记必须等到这次刷新里真正出现新文件再消费，避免 reset 完成前的空刷新把标记清掉。
+        if skipAutoIncludeOnNextRefresh {
+            if !newKeys.isEmpty { skipAutoIncludeOnNextRefresh = false }
+        } else {
+            included.formUnion(newKeys.subtracting(inactive))
+        }
         included.formIntersection(current)
         known = current
         // 复用未变化的节点，使 NSOutlineView 保持选中状态。
@@ -576,6 +584,15 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     var includedPaths: [String] {
         includedEntries.filter { $0.model === model }.map(\.change.path)
     }
+
+    /// Git Reset / Undo Commit 执行前调用：随后一次状态刷新不再自动勾选新文件。
+    func suppressAutoIncludeOnNextRefresh() {
+        skipAutoIncludeOnNextRefresh = true
+    }
+
+    #if DEBUG
+    var debugIncludedKeys: [String] { included.sorted() }
+    #endif
 
     /// 按仓库分组。
     private func grouped(_ list: [Entry]) -> RepositoryPaths {

@@ -231,6 +231,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             self?.gitToolWindow.reveal(commit: hash)
         }
         operations.onShowRevisionFileDiff = { [weak self] revision, file in self?.diffOpener.showRevisionAgainstWorkingTree(revision: revision, file: file) }
+        operations.onSuppressCommitAutoInclude = { [weak self] in self?.commitToolWindow.suppressAutoIncludeOnNextRefresh() }
         conflictResolver.window = window
         operations.onConflicts = { [weak self] in self?.conflictResolver.requestConflicts() }
         commitToolWindow.onResolveConflict = { [weak self] repository, change in self?.conflictResolver(for: repository).openMerge(change) }
@@ -371,7 +372,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
     #if DEBUG
     /// 仅 Debug 构建：启动参数 `-debug.openLocalDiff <相对路径>` 在状态加载后自动打开该文件的本地 Diff，便于界面验证。
     private var debugDiffPath = UserDefaults.standard.string(forKey: "debug.openLocalDiff")
-    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge|annotate|history|stashes|rebase|console|worktrees|aiReview|aiMessage|settings|commit|shelf|rollback|clone|compare|branchDiff|replace>（compare / branchDiff 配合 `-debug.branch`，replace 配合 `-debug.historyPath`）（history 需配合 `-debug.historyPath <路径>`）` 在状态加载后自动执行对应操作。
+    /// 仅 Debug 构建：启动参数 `-debug.action <branches|push|update|newBranch|conflicts|merge|annotate|history|stashes|rebase|console|worktrees|aiReview|aiMessage|settings|commit|shelf|rollback|clone|compare|branchDiff|replace|reset>（compare / branchDiff 配合 `-debug.branch`，replace 配合 `-debug.historyPath`，reset 配合 `-debug.hash` 与可选 `-debug.resetMode`）（history 需配合 `-debug.historyPath <路径>`）` 在状态加载后自动执行对应操作。
     private var debugAction = UserDefaults.standard.string(forKey: "debug.action")
     private weak var debugStashes: StashesView?
     private weak var debugShelf: ShelfView?
@@ -449,6 +450,35 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
                 let pane = SettingsWindowController.Pane(rawValue: UserDefaults.standard.integer(forKey: "debug.settingsPane")) ?? .general
                 SettingsWindowController.shared.show(pane)
             case "commit": show(.commit)
+            case "reset":
+                // `-debug.hash <修订>` 与可选 `-debug.resetMode soft|mixed|hard|keep`（默认 mixed）。
+                show(.commit)
+                let hash = UserDefaults.standard.string(forKey: "debug.hash") ?? ""
+                let mode: ResetMode = {
+                    switch UserDefaults.standard.string(forKey: "debug.resetMode") {
+                    case "soft": return .soft
+                    case "hard": return .hard
+                    case "keep": return .keep
+                    default: return .mixed
+                    }
+                }()
+                operations.reset(to: hash, mode: mode)
+                if let out = UserDefaults.standard.string(forKey: "debug.includedOut") {
+                    var started = false
+                    var attempts = 0
+                    func writeIncluded() {
+                        attempts += 1
+                        if self.operations.isRunning { started = true }
+                        let busy = self.workspace.isRefreshing || self.operations.isRunning
+                        if (!started || busy) && attempts < 80 {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: writeIncluded)
+                            return
+                        }
+                        let text = self.commitToolWindow.debugIncludedKeys.joined(separator: "\n")
+                        try? (text + (text.isEmpty ? "" : "\n")).write(toFile: out, atomically: true, encoding: .utf8)
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: writeIncluded)
+                }
             case "checkoutBranch":
                 // 等加入的仓库加载后在主仓库签出 `-debug.branch`（验证同步分支控制）。
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
@@ -698,6 +728,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
         ops.aiReview = aiReview
         ops.onProgress = operations.onProgress
         ops.onRevealCommit = operations.onRevealCommit
+        ops.onShowRevisionFileDiff = operations.onShowRevisionFileDiff
+        ops.onSuppressCommitAutoInclude = operations.onSuppressCommitAutoInclude
         ops.peers = { [weak self] in self?.allOperations ?? [] }
         ops.onConflicts = { [weak self, weak repositoryModel] in
             guard let self, let repositoryModel else { return }

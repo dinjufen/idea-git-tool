@@ -44,8 +44,14 @@ public sealed partial class GitOperations
         dialog.PrimaryButtonText = L10n.Tr("reset.confirm");
         dialog.CloseButtonText = L10n.Tr("common.cancel");
         if (await dialog.ShowAsync() != ContentDialogResult.Primary || options.SelectedIndex < 0) return;
-        var mode = modes[options.SelectedIndex].Mode;
-        await Run(L10n.Tr("ops.progress.reset"), repo => repo.ResetTo(hash, mode),
+        await ResetTo(hash, modes[options.SelectedIndex].Mode);
+    }
+
+    /// 将当前分支重置到指定修订；回退产生的文件不会在提交面板中被自动勾选。
+    public Task ResetTo(string hash, ResetMode mode)
+    {
+        SuppressCommitAutoInclude?.Invoke();
+        return Run(L10n.Tr("ops.progress.reset"), repo => repo.ResetTo(hash, mode),
             () => Done(L10n.Tr("reset.done", Short(hash))), error => ShowError(L10n.Tr("reset.failed"), error));
     }
 
@@ -53,6 +59,7 @@ public sealed partial class GitOperations
     public async Task UndoCommit(string hash)
     {
         if (!await ConfirmIfPushed([hash])) return;
+        SuppressCommitAutoInclude?.Invoke();
         await Run(L10n.Tr("ops.progress.undo"), repo => repo.UndoLastCommit(),
             () => Done(L10n.Tr("undo.done")), error => ShowError(L10n.Tr("undo.failed"), error));
     }
