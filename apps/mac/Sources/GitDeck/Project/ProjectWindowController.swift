@@ -231,7 +231,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
             self?.gitToolWindow.reveal(commit: hash)
         }
         operations.onShowRevisionFileDiff = { [weak self] revision, file in self?.diffOpener.showRevisionAgainstWorkingTree(revision: revision, file: file) }
-        operations.onSuppressCommitAutoInclude = { [weak self] in self?.commitToolWindow.suppressAutoIncludeOnNextRefresh() }
+        operations.onSuppressCommitAutoInclude = { [weak self] repository in
+            self?.commitToolWindow.suppressAutoInclude(for: repository)
+        }
         conflictResolver.window = window
         operations.onConflicts = { [weak self] in self?.conflictResolver.requestConflicts() }
         commitToolWindow.onResolveConflict = { [weak self] repository, change in self?.conflictResolver(for: repository).openMerge(change) }
@@ -466,6 +468,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
                 if let out = UserDefaults.standard.string(forKey: "debug.includedOut") {
                     var started = false
                     var attempts = 0
+                    var settled = false
                     func writeIncluded() {
                         attempts += 1
                         if self.operations.isRunning { started = true }
@@ -474,8 +477,30 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSSpl
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: writeIncluded)
                             return
                         }
-                        let text = self.commitToolWindow.debugIncludedKeys.joined(separator: "\n")
+                        // 再等一拍，避免在 refresh 刚结束、提交面板尚未收到通知时写出空结果。
+                        if !settled && attempts < 80 {
+                            settled = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: writeIncluded)
+                            return
+                        }
+                        let keys = self.commitToolWindow.debugIncludedKeys
+                        let text = keys.joined(separator: "\n")
                         try? (text + (text.isEmpty ? "" : "\n")).write(toFile: out, atomically: true, encoding: .utf8)
+                        if let out2 = UserDefaults.standard.string(forKey: "debug.includedOut2") {
+                            var later = 0
+                            func writeSecond() {
+                                later += 1
+                                let busy = self.workspace.isRefreshing || self.operations.isRunning
+                                let changed = self.commitToolWindow.debugIncludedKeys != keys
+                                if (busy || !changed) && later < 80 {
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: writeSecond)
+                                    return
+                                }
+                                let next = self.commitToolWindow.debugIncludedKeys.joined(separator: "\n")
+                                try? (next + (next.isEmpty ? "" : "\n")).write(toFile: out2, atomically: true, encoding: .utf8)
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: writeSecond)
+                        }
                     }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: writeIncluded)
                 }

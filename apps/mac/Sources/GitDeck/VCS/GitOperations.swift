@@ -27,8 +27,8 @@ final class GitOperations {
     var onRevealCommit: ((String) -> Void)?
     /// 打开某个修订中的文件与工作区文件的 Diff。
     var onShowRevisionFileDiff: ((String, ChangedFile) -> Void)?
-    /// 即将因 Reset / Undo Commit 产生新的工作区变更时调用，提交面板不要自动勾选这些文件。
-    var onSuppressCommitAutoInclude: (() -> Void)?
+    /// Reset / Undo Commit 成功后、状态刷新开始前调用；提交面板不要自动勾选该仓库此次刷新中新出现的文件。
+    var onSuppressCommitAutoInclude: ((ProjectModel) -> Void)?
 
     private(set) var runningTitle: String?
 
@@ -44,6 +44,7 @@ final class GitOperations {
     func run<T: Sendable>(
         _ title: String,
         _ work: @escaping @Sendable (Repository) throws -> T,
+        skipCommitAutoInclude: Bool = false,
         completion: @escaping (Result<T, any Error>) -> Void
     ) {
         guard runningTitle == nil else {
@@ -59,6 +60,9 @@ final class GitOperations {
             }.value
             self.runningTitle = nil
             self.onProgress?(nil)
+            if skipCommitAutoInclude, case .success = result {
+                onSuppressCommitAutoInclude?(model)
+            }
             completion(result)
             self.model.refresh()
         }

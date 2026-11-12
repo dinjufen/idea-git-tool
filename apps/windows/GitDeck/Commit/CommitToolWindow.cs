@@ -63,8 +63,8 @@ public sealed class CommitToolWindow : Grid
     private readonly HashSet<string> _included = [];
     /// 已见过的路径；新出现的已跟踪变更默认勾选，未跟踪文件默认不勾选（与 IDEA 一致）。
     private HashSet<string> _known = [];
-    /// 下一次状态刷新时不自动勾选新出现的已跟踪文件（Git Reset / Undo Commit 回退产生的变更）。
-    private bool _skipAutoIncludeOnNextRefresh;
+    /// 指定仓库在对应代数的状态刷新完成前，不自动勾选该仓库新出现的已跟踪文件（Git Reset / Undo Commit）。
+    private readonly Dictionary<ProjectModel, ulong> _skipAutoIncludeUntil = [];
     private readonly HashSet<string> _collapsed = [];
     /// 各仓库的 Changelist（从核心加载并与工作区同步）；多仓库时以主仓库的列表为准统一显示。
     private Dictionary<ProjectModel, Changelists> _changelistsByRepo = [];
@@ -137,8 +137,9 @@ public sealed class CommitToolWindow : Grid
     /// 主仓库中勾选的文件（AI 评审与生成提交信息使用）。
     public List<string> IncludedPaths => [.. IncludedEntries.Where(e => e.Model == _model).Select(e => e.Change.Path)];
 
-    /// Git Reset / Undo Commit 执行前调用：随后一次状态刷新不再自动勾选新文件。
-    public void SuppressAutoIncludeOnNextRefresh() => _skipAutoIncludeOnNextRefresh = true;
+    /// Git Reset / Undo Commit 成功后、对应状态刷新开始前调用：该仓库此次刷新中新出现的文件不自动勾选。
+    public void SuppressAutoInclude(ProjectModel repository) =>
+        _skipAutoIncludeUntil[repository] = repository.NextRefreshGeneration();
 
     /// 勾选的条目，按仓库顺序与路径排列。
     private List<Entry> IncludedEntries => [.. _entries.Values.Where(e => _included.Contains(e.Key))
@@ -411,22 +412,26 @@ public sealed class CommitToolWindow : Grid
         // Git Reset / Undo Commit 回退产生的文件除外，避免被误认为已暂存。
         var current = _entries.Keys.ToHashSet();
         var active = ActiveChangelist;
-        // 标记必须等到这次刷新里真正出现新文件再消费，避免 reset 完成前的空刷新把标记清掉。
-        if (_skipAutoIncludeOnNextRefresh)
+        var skip = new HashSet<string>();
+        foreach (var repository in _workspace.Models)
         {
-            if (_entries.Values.Any(entry =>
-                !_known.Contains(entry.Key) && !entry.Change.IsUntracked() && entry.Change.Conflict is null))
-            {
-                _skipAutoIncludeOnNextRefresh = false;
-            }
-        }
-        else
-        {
+            if (!_skipAutoIncludeUntil.TryGetValue(repository, out var target)) continue;
             foreach (var entry in _entries.Values)
             {
-                if (_known.Contains(entry.Key) || entry.Change.IsUntracked() || entry.Change.Conflict is not null) continue;
-                if (ChangelistName(entry) == active) _included.Add(entry.Key);
+                if (entry.Model == repository && !_known.Contains(entry.Key)
+                    && !entry.Change.IsUntracked() && entry.Change.Conflict is null)
+                {
+                    skip.Add(entry.Key);
+                }
             }
+            if (repository.RefreshGeneration >= target)
+                _skipAutoIncludeUntil.Remove(repository);
+        }
+        foreach (var entry in _entries.Values)
+        {
+            if (_known.Contains(entry.Key) || entry.Change.IsUntracked() || entry.Change.Conflict is not null) continue;
+            if (skip.Contains(entry.Key)) continue;
+            if (ChangelistName(entry) == active) _included.Add(entry.Key);
         }
         _included.IntersectWith(current);
         _known = current;

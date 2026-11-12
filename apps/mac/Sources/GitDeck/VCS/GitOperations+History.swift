@@ -68,8 +68,7 @@ extension GitOperations {
 
     /// 将当前分支重置到指定修订；回退产生的文件不会在提交面板中被自动勾选。
     func reset(to hash: String, mode: ResetMode) {
-        onSuppressCommitAutoInclude?()
-        run(tr("ops.progress.reset"), { repo in try repo.resetTo(revision: hash, mode: mode) }) { [self] result in
+        run(tr("ops.progress.reset"), { repo in try repo.resetTo(revision: hash, mode: mode) }, skipCommitAutoInclude: true) { [self] result in
             switch result {
             case .success: model.post(tr("reset.done", String(hash.prefix(8))))
             case let .failure(error): showError(tr("reset.failed"), error)
@@ -80,8 +79,7 @@ extension GitOperations {
     /// 撤销最近一次提交（改动回到暂存区）；已推送时先确认。
     func undoCommit(_ hash: String) {
         warnIfPushed([hash]) { [self] in
-            onSuppressCommitAutoInclude?()
-            run(tr("ops.progress.undo"), { repo in try repo.undoLastCommit() }) { [self] result in
+            run(tr("ops.progress.undo"), { repo in try repo.undoLastCommit() }, skipCommitAutoInclude: true) { [self] result in
                 switch result {
                 case .success: model.post(tr("undo.done"))
                 case let .failure(error): showError(tr("undo.failed"), error)

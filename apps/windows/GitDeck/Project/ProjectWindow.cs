@@ -318,7 +318,7 @@ public sealed class ProjectWindow : Window
             _gitWindow.Reveal(hash);
         };
         _operations.ShowRevisionFileDiff += ShowRevisionAgainstWorkingTree;
-        _operations.SuppressCommitAutoInclude += _commitWindow.SuppressAutoIncludeOnNextRefresh;
+        _operations.SuppressCommitAutoInclude += _commitWindow.SuppressAutoInclude;
         _gitWindow.Log.OpenFile += path => _editor.Open(path);
         _gitWindow.Log.ShowCommitDiff += (hash, parent, file, model) => ShowCommitFile(hash, parent, file, model);
         _editor.CaretInfoChanged += _statusBar.SetEditorInfo;
@@ -544,7 +544,7 @@ public sealed class ProjectWindow : Window
             _gitWindow.Reveal(hash, model);
         };
         operations.ShowRevisionFileDiff += ShowRevisionAgainstWorkingTree;
-        operations.SuppressCommitAutoInclude += _commitWindow.SuppressAutoIncludeOnNextRefresh;
+        operations.SuppressCommitAutoInclude += _commitWindow.SuppressAutoInclude;
         operations.Conflicts += ConflictsFor(model).RequestConflicts;
         _extraOperations[model] = operations;
         return operations;

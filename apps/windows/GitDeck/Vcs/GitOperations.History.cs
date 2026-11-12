@@ -48,20 +48,18 @@ public sealed partial class GitOperations
     }
 
     /// 将当前分支重置到指定修订；回退产生的文件不会在提交面板中被自动勾选。
-    public Task ResetTo(string hash, ResetMode mode)
-    {
-        SuppressCommitAutoInclude?.Invoke();
-        return Run(L10n.Tr("ops.progress.reset"), repo => repo.ResetTo(hash, mode),
-            () => Done(L10n.Tr("reset.done", Short(hash))), error => ShowError(L10n.Tr("reset.failed"), error));
-    }
+    public Task ResetTo(string hash, ResetMode mode) =>
+        Run(L10n.Tr("ops.progress.reset"), repo => repo.ResetTo(hash, mode),
+            () => Done(L10n.Tr("reset.done", Short(hash))), error => ShowError(L10n.Tr("reset.failed"), error),
+            skipCommitAutoInclude: true);
 
     /// 撤销最近一次提交（改动回到暂存区）；已推送时先确认。
     public async Task UndoCommit(string hash)
     {
         if (!await ConfirmIfPushed([hash])) return;
-        SuppressCommitAutoInclude?.Invoke();
         await Run(L10n.Tr("ops.progress.undo"), repo => repo.UndoLastCommit(),
-            () => Done(L10n.Tr("undo.done")), error => ShowError(L10n.Tr("undo.failed"), error));
+            () => Done(L10n.Tr("undo.done")), error => ShowError(L10n.Tr("undo.failed"), error),
+            skipCommitAutoInclude: true);
     }
 
     /// IDEA 的 “Edit Commit Message”：多行编辑框，已推送时先确认。
