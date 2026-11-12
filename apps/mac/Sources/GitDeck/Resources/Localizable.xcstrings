@@ -5186,6 +5186,23 @@
         }
       }
     },
+    "error.commandFailedGeneric": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Git command could not be completed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Git 命令未能完成。"
+          }
+        }
+      }
+    },
     "error.emptyCommitMessage": {
       "extractionState": "manual",
       "localizations": {
@@ -5318,6 +5335,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "错误"
+          }
+        }
+      }
+    },
+    "error.unknownRevision": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not recognize revision “%1$@”."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法识别修订“%1$@”。"
+          }
+        }
+      }
+    },
+    "error.unknownRevisionGeneric": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The specified revision could not be recognized."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法识别指定的修订。"
           }
         }
       }

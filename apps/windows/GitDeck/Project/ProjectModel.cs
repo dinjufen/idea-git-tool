@@ -45,6 +45,13 @@ public sealed class ProjectModel
 
     public bool IsRefreshing { get; private set; }
 
+    /// 已完成的状态刷新次数，用来把一次操作和它结束之后的那次刷新对应起来。
+    public ulong RefreshGeneration { get; private set; }
+
+    /// 下一次调用 <see cref="Refresh"/> 完成时的代数。若当前正在刷新，则会在结束后再补刷一次，返回的是那次补刷的代数。
+    public ulong NextRefreshGeneration() =>
+        RefreshGeneration + (IsRefreshing || _pendingRefresh ? 2UL : 1UL);
+
     public string? LastError { get; private set; }
 
     /// 最近一条通知（例如操作结果），显示在状态栏，对应 IDEA 的事件通知。
@@ -103,6 +110,7 @@ public sealed class ProjectModel
                     LastError = null;
                 }
                 IsRefreshing = false;
+                RefreshGeneration++;
                 Changed?.Invoke();
                 if (_pendingRefresh)
                 {

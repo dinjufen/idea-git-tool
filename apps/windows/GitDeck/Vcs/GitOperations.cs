@@ -31,6 +31,9 @@ public sealed partial class GitOperations
     /// 打开某个修订中的文件与工作区文件的 Diff。
     public event Action<string, ChangedFile>? ShowRevisionFileDiff;
 
+    /// Reset / Undo Commit 成功后、状态刷新开始前调用；提交面板不要自动勾选该仓库此次刷新中新出现的文件。
+    public event Action<ProjectModel>? SuppressCommitAutoInclude;
+
     public ProjectModel Model => _model;
 
     public string? RunningTitle { get; private set; }
@@ -42,7 +45,7 @@ public sealed partial class GitOperations
     // MARK: - 执行框架
 
     /// 在后台执行 `work`，完成后刷新状态并回调。
-    public async Task Run<T>(string title, Func<Repository, T> work, Func<T, Task> success, Func<Exception, Task> failure)
+    public async Task Run<T>(string title, Func<Repository, T> work, Func<T, Task> success, Func<Exception, Task> failure, bool skipCommitAutoInclude = false)
     {
         if (IsRunning) return;
         RunningTitle = title;
@@ -63,16 +66,18 @@ public sealed partial class GitOperations
         }
         RunningTitle = null;
         Progress?.Invoke(null);
+        if (skipCommitAutoInclude)
+            SuppressCommitAutoInclude?.Invoke(_model);
         _model.Refresh();
         await success(result);
     }
 
-    public Task Run(string title, Action<Repository> work, Func<Task> success, Func<Exception, Task> failure) =>
+    public Task Run(string title, Action<Repository> work, Func<Task> success, Func<Exception, Task> failure, bool skipCommitAutoInclude = false) =>
         Run(title, repo =>
         {
             work(repo);
             return true;
-        }, _ => success(), failure);
+        }, _ => success(), failure, skipCommitAutoInclude);
 
     public async Task ShowError(string title, Exception error)
     {
