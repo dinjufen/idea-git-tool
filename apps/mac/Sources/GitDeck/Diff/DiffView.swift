@@ -86,6 +86,8 @@ final class DiffView: NSView {
         language = languageForPath(path: path)
         leftEditor = CodeEditorView(text: left.text ?? "", language: language, isEditable: false)
         rightEditor = CodeEditorView(text: right.text ?? "", language: language, isEditable: false)
+        leftEditor.minimapStyle = .overview
+        rightEditor.minimapStyle = .overview
         leftBackground = DiffBackgroundView(textView: leftEditor.textView, side: .base)
         rightBackground = DiffBackgroundView(textView: rightEditor.textView, side: .new)
         super.init(frame: .zero)
@@ -274,6 +276,8 @@ final class DiffView: NSView {
             self.leftBackground.blocks = blocks
             self.rightBackground.blocks = blocks
             self.connector.blocks = blocks
+            self.leftEditor.minimapDiffHighlights = Self.minimapHighlights(blocks, side: .base)
+            self.rightEditor.minimapDiffHighlights = Self.minimapHighlights(blocks, side: .new)
             self.rebuildUnified()
             self.selectionChanged()
             #if DEBUG
@@ -305,6 +309,7 @@ final class DiffView: NSView {
         unified = UnifiedModel(base: left.text ?? "", text: right.text ?? "", blocks: blocks)
         unifiedEditor?.removeFromSuperview()
         let editor = CodeEditorView(text: unified.text, language: language, isEditable: false)
+        editor.minimapStyle = .overview
         editor.translatesAutoresizingMaskIntoConstraints = false
         unifiedContainer.addSubview(editor)
         editor.pinEdges(to: unifiedContainer)
@@ -329,6 +334,13 @@ final class DiffView: NSView {
             }
         }
         unifiedBackground = UnifiedBackgroundView(textView: editor.textView, model: model)
+        editor.minimapDiffHighlights = model.rows.enumerated().compactMap { index, row in
+            switch row.kind {
+            case .added: MinimapDiffHighlight(start: index, count: 1, kind: .added)
+            case .deleted: MinimapDiffHighlight(start: index, count: 1, kind: .deleted)
+            case .context: nil
+            }
+        }
         unifiedEditor = editor
         updateExcludedDisplay()
     }
@@ -442,6 +454,15 @@ final class DiffView: NSView {
             return Int(first.change.start)
         }
         return rightEditor.caretLine
+    }
+
+    /// 把差异块转成一侧编辑器缩略图的行装饰。
+    static func minimapHighlights(_ blocks: [DiffBlock], side: DiffBackgroundView.Side) -> [MinimapDiffHighlight] {
+        blocks.map { block in
+            let c = block.change
+            let (start, count) = side == .base ? (Int(c.baseStart), Int(c.baseCount)) : (Int(c.start), Int(c.count))
+            return MinimapDiffHighlight(start: start, count: count, kind: c.kind)
+        }
     }
 
     /// 按行变更把一侧的行换算到另一侧：变更段之前按偏移平移，落在变更段内时取对应段的起始行（与 IDEA 一致）。

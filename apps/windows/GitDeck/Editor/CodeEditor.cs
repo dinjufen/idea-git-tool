@@ -50,6 +50,7 @@ public sealed partial class CodeEditor : Grid
 
     private readonly EditorBaseControl _control = new();
     private readonly FindBar _findBar = new();
+    private readonly MinimapView _minimap = new();
     private string _text;
     private string? _language;
     private IReadOnlyList<HighlightSpan> _spans = [];
@@ -68,10 +69,18 @@ public sealed partial class CodeEditor : Grid
         IsEditable = isEditable;
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(MinimapView.WidthPx) });
         _findBar.Visibility = Visibility.Collapsed;
         SetRow(_control, 1);
+        SetColumn(_control, 0);
+        SetRow(_minimap, 1);
+        SetColumn(_minimap, 1);
+        SetColumnSpan(_findBar, 2);
         Children.Add(_findBar);
         Children.Add(_control);
+        Children.Add(_minimap);
+        _minimap.Attach(this);
 
         _findBar.QueryChanged += () => Find(keepIndex: false);
         _findBar.Next += () => MoveFind(1);
@@ -125,6 +134,7 @@ public sealed partial class CodeEditor : Grid
         {
             _lineChanges = value;
             ApplyLineChanges();
+            _minimap.InvalidateContent();
         }
     }
 
@@ -227,6 +237,46 @@ public sealed partial class CodeEditor : Grid
     /// 编辑器文本区域在本控件中的上边距（查找栏显示时向下偏移）。
     public double TextAreaTop => _findBar.Visibility == Visibility.Visible ? _findBar.ActualHeight : 0;
 
+    /// 缩略图使用的语法高亮区间。
+    internal IReadOnlyList<HighlightSpan> MinimapSpans => _spans;
+
+    /// 缩略图使用的 Diff / 合并行装饰；为空时退回 `LineChanges`。
+    internal IReadOnlyList<DiffLine> MinimapDiffLines => _diffLines;
+
+    /// 视口顶部所在的行（可带小数；与 mac 端 `topVisibleLine` 对齐）。
+    internal double MinimapTopVisibleLine => FirstVisibleLine;
+
+    /// 视口中可见的行数。
+    internal double MinimapVisibleLineCount
+    {
+        get
+        {
+            if (!_ready) return 1;
+            var editor = _control.Editor;
+            var scale = XamlRoot?.RasterizationScale ?? 1;
+            var lineHeight = editor.TextHeight(0) / scale;
+            if (lineHeight <= 0) return Math.Max(editor.LinesOnScreen, 1);
+            return Math.Max(_control.ActualHeight / lineHeight, 1);
+        }
+    }
+
+    /// 把指定行滚到视口顶部（缩略图点击 / 拖动）。
+    internal void MinimapScrollToLine(double line)
+    {
+        if (_ready) _control.Editor.FirstVisibleLine = (int)Math.Max(Math.Round(line), 0);
+    }
+
+    /// 普通文件为完整文本缩略图；Diff / 合并为窄的差异概览条。
+    public MinimapStyle MinimapStyle
+    {
+        get => _minimap.Style;
+        set
+        {
+            _minimap.Style = value;
+            if (ColumnDefinitions.Count > 1) ColumnDefinitions[1].Width = new GridLength(_minimap.LaneWidth);
+        }
+    }
+
     /// 显示垂直滚动条（Diff 左侧隐藏，只保留右侧的滚动条）。
     public bool ShowVerticalScrollBar
     {
@@ -256,6 +306,7 @@ public sealed partial class CodeEditor : Grid
         _diffLines = lines;
         _diffInline = inline;
         ApplyDiffDecorations();
+        _minimap.InvalidateContent();
     }
 
     /// 自定义行号（统一 Diff 视图显示新旧两列行号）；`width` 为预留的字符数。
@@ -577,7 +628,11 @@ public sealed partial class CodeEditor : Grid
             ReportCaret();
             UpdateInlineBlame(force: false);
             if ((args.Updated & (int)(Update.VScroll | Update.HScroll)) != 0) HideInlineBlamePopup();
-            if ((args.Updated & (int)Update.VScroll) != 0) Scrolled?.Invoke();
+            if ((args.Updated & (int)Update.VScroll) != 0)
+            {
+                Scrolled?.Invoke();
+                _minimap.InvalidateViewport();
+            }
         };
         editor.SetMarginSensitiveN(NumberMargin, true);
         editor.MarginClick += (_, args) =>
@@ -614,8 +669,13 @@ public sealed partial class CodeEditor : Grid
         ApplyReviewMarkers();
         InitializeInlineBlame();
         ScheduleHighlight(TimeSpan.Zero);
+        _minimap.InvalidateContent();
         // 等首次排版完成后再通知，行位置才是准确的。
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => Initialized?.Invoke());
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            Initialized?.Invoke();
+            _minimap.InvalidateViewport();
+        });
     }
 
     private bool IsDark => ActualTheme == ElementTheme.Dark;
@@ -693,6 +753,7 @@ public sealed partial class CodeEditor : Grid
         ApplyInlineBlameStyle();
         ApplyStyles(_spans);
         ApplyDiffDecorations();
+        _minimap.InvalidateContent();
     }
 
     private void SettingsChanged()
@@ -725,6 +786,7 @@ public sealed partial class CodeEditor : Grid
         _text = editor.GetText(editor.Length);
         _revision++;
         UpdateNumberMarginWidth();
+        _minimap.InvalidateContent();
         // 输入时稍作停顿再重新高亮，避免每个按键都触发完整解析。
         ScheduleHighlight(TimeSpan.FromMilliseconds(120));
         if (_findBar.Visibility == Visibility.Visible) Find(keepIndex: true);
@@ -751,6 +813,7 @@ public sealed partial class CodeEditor : Grid
         {
             _spans = [];
             ApplyStyles(_spans);
+            _minimap.InvalidateContent();
             return;
         }
         var cancel = _highlightCancel = new CancellationTokenSource();
@@ -765,6 +828,7 @@ public sealed partial class CodeEditor : Grid
                 if (cancel.IsCancellationRequested || _revision != expected) return;
                 _spans = spans;
                 ApplyStyles(spans);
+                _minimap.InvalidateContent();
             });
         }, cancel.Token);
     }
