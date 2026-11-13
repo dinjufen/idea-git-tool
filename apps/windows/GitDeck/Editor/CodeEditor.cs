@@ -4,6 +4,8 @@ using GitDeck.Core;
 using GitDeck.Diff;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Media;
 using Windows.UI;
 using WinUIEditor;
 
@@ -266,13 +268,89 @@ public sealed partial class CodeEditor : Grid
         if (_ready) _control.Editor.FirstVisibleLine = (int)Math.Max(Math.Round(line), 0);
     }
 
+    /// 概览条与原生垂直滚动条共用的坐标系：轨道位置、滚动空间（行）与视口行数。
+    internal readonly record struct OverviewScrollMetrics(
+        double TrackTop,
+        double TrackHeight,
+        double ScrollHeightLines,
+        double ViewportLines,
+        double LineHeight);
+
+    /// 与 Scintilla / WinUI 原生滚动条相同的滚动空间，供差异概览条对齐色块。
+    internal OverviewScrollMetrics MinimapOverviewMetrics
+    {
+        get
+        {
+            var trackTop = 0.0;
+            var trackHeight = Math.Max(_minimap.ActualHeight > 0 ? _minimap.ActualHeight : _control.ActualHeight, 1);
+            var lineHeight = 1.0;
+            var lineCount = Math.Max(LineCount, 1);
+            var linesOnScreen = 1.0;
+
+            if (_ready)
+            {
+                var editor = _control.Editor;
+                var scale = XamlRoot?.RasterizationScale ?? 1;
+                var textHeight = editor.TextHeight(0) / scale;
+                if (textHeight > 0) lineHeight = textHeight;
+                lineCount = Math.Max((int)editor.LineCount, 1);
+                var onScreen = (int)editor.LinesOnScreen;
+                if (onScreen > 0) linesOnScreen = onScreen;
+
+                if (FindVerticalScrollBar(_control) is { ActualHeight: > 0 } bar)
+                {
+                    try
+                    {
+                        var origin = bar.TransformToVisual(_minimap).TransformPoint(new Windows.Foundation.Point(0, 0));
+                        trackTop = origin.Y;
+                        trackHeight = Math.Max(bar.ActualHeight, 1);
+                        if (bar.ViewportSize > 0)
+                        {
+                            linesOnScreen = bar.ViewportSize;
+                            var scrollLines = bar.Maximum - bar.Minimum + bar.ViewportSize;
+                            if (scrollLines > 0)
+                                return new OverviewScrollMetrics(trackTop, trackHeight, scrollLines, linesOnScreen, lineHeight);
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // 模板尚未展开或可视化树不可用时退回 Scintilla 公式。
+                    }
+                }
+            }
+
+            // 与 Editor::ChangeScrollBars / MaxScrollPos 一致：
+            // EndAtLastLine 时 MaxScrollPos = LineCount - LinesOnScreen；
+            // 否则（本编辑器默认）MaxScrollPos = LineCount - 1，可把末行滚到视口顶部。
+            // 原生 WinUI 滚动条：Maximum = MaxScrollPos，ViewportSize = LinesOnScreen，
+            // 滚动空间 = Maximum + ViewportSize。
+            var endAtLast = _ready && _control.Editor.EndAtLastLine;
+            var maxScrollPos = endAtLast
+                ? Math.Max(lineCount - linesOnScreen, 0)
+                : Math.Max(lineCount - 1, 0);
+            return new OverviewScrollMetrics(trackTop, trackHeight, maxScrollPos + linesOnScreen, linesOnScreen, lineHeight);
+        }
+    }
+
+    private static ScrollBar? FindVerticalScrollBar(DependencyObject root)
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is ScrollBar { Orientation: Orientation.Vertical } bar) return bar;
+            if (FindVerticalScrollBar(child) is { } found) return found;
+        }
+        return null;
+    }
+
     /// 普通文件为完整文本缩略图；Diff / 合并为窄的差异概览条。
     public MinimapStyle MinimapStyle
     {
-        get => _minimap.Style;
+        get => _minimap.LaneStyle;
         set
         {
-            _minimap.Style = value;
+            _minimap.LaneStyle = value;
             if (ColumnDefinitions.Count > 1) ColumnDefinitions[1].Width = new GridLength(_minimap.LaneWidth);
         }
     }
@@ -631,7 +709,7 @@ public sealed partial class CodeEditor : Grid
             if ((args.Updated & (int)Update.VScroll) != 0)
             {
                 Scrolled?.Invoke();
-                _minimap.InvalidateViewport();
+                _minimap.RefreshViewport();
             }
         };
         editor.SetMarginSensitiveN(NumberMargin, true);
@@ -674,7 +752,7 @@ public sealed partial class CodeEditor : Grid
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             Initialized?.Invoke();
-            _minimap.InvalidateViewport();
+            _minimap.RefreshViewport();
         });
     }
 

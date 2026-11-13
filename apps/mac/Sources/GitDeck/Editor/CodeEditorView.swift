@@ -490,5 +490,32 @@ extension CodeEditorView: MinimapDataSource {
         return Double(height / line.height)
     }
     var minimapLineCount: Int { max(textView.layoutManager.lineCount, 1) }
+    var minimapScrollHeight: CGFloat {
+        max(scrollView.documentView?.frame.height ?? 0, 1)
+    }
+    func minimapVerticalOffset(forLine line: Int) -> CGFloat {
+        let storage = textView.layoutManager.lineStorage
+        if let position = storage.getLine(atIndex: max(line, 0)) {
+            return position.yPos
+        }
+        if let last = storage.last {
+            return last.yPos + last.height
+        }
+        return 0
+    }
+    func minimapLine(atVerticalOffset offset: CGFloat) -> Double {
+        let y = max(0, offset)
+        guard let line = textView.layoutManager.lineStorage.getLine(atPosition: y) else {
+            return Double(max(textView.layoutManager.lineCount, 0))
+        }
+        let fraction = line.height > 0 ? Double((y - line.yPos) / line.height) : 0
+        return Double(line.index) + min(max(fraction, 0), 1)
+    }
+    var minimapOverviewTrack: (y: CGFloat, height: CGFloat)? {
+        guard let scroller = scrollView.verticalScroller, scroller.frame.height > 0 else { return nil }
+        let frame = scroller.convert(scroller.bounds, to: minimap)
+        guard frame.height > 0 else { return nil }
+        return (frame.minY, frame.height)
+    }
     func minimapScroll(toLine line: Double) { scroll(toLine: line) }
 }

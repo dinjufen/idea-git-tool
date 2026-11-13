@@ -18,7 +18,7 @@ public enum MinimapStyle
 {
     /// VS Code 的 minimap：按字符绘制全文，带视口滑块。
     Document,
-    /// VS Code 的 overview ruler：只在变更处着色，铺满编辑器高度。
+    /// VS Code 的 overview ruler：只在变更处着色，色块按滚动空间映射到滚动条轨道。
     Overview,
 }
 
@@ -33,10 +33,10 @@ public sealed class MinimapView : Grid
     private const double MinLineHeight = 2;
     private const double MaxLineHeight = 4;
     private const double CharWidth = 1;
-    private const double Padding = 2;
+    private const double PadPx = 2;
 
     public static double WidthFor(MinimapStyle style) => style == MinimapStyle.Overview ? OverviewWidth : DocumentWidth;
-    public double LaneWidth => WidthFor(Style);
+    public double LaneWidth => WidthFor(LaneStyle);
 
     private readonly Image _image = new() { Stretch = Stretch.Fill, IsHitTestVisible = false };
     private readonly Rectangle _slider = new() { IsHitTestVisible = false, StrokeThickness = 1 };
@@ -46,6 +46,10 @@ public sealed class MinimapView : Grid
     private Content? _content;
     private double _lineHeight = 2;
     private double _contentOffset;
+    private double _trackTop;
+    private double _trackHeight = 1;
+    private double _scrollHeightLines = 1;
+    private double _viewportLines = 1;
     private int _generation;
     private CancellationTokenSource? _rebuild;
     private bool _dragging;
@@ -53,7 +57,7 @@ public sealed class MinimapView : Grid
     private bool _pointerHooked;
     private MinimapStyle _style = MinimapStyle.Document;
 
-    public MinimapStyle Style
+    public MinimapStyle LaneStyle
     {
         get => _style;
         set
@@ -75,7 +79,7 @@ public sealed class MinimapView : Grid
         Children.Add(_border);
         Themed.Background(this, "EditorBackgroundBrush");
         Themed.Brush(_border, "SeparatorBrush", (e, b) => e.Fill = b);
-        SizeChanged += (_, _) => InvalidateViewport();
+        SizeChanged += (_, _) => RefreshViewport();
         ActualThemeChanged += (_, _) => InvalidateContent();
         Loaded += (_, _) =>
         {
@@ -100,7 +104,7 @@ public sealed class MinimapView : Grid
 
     private void ApplyAccessibility()
     {
-        if (Style == MinimapStyle.Overview)
+        if (LaneStyle == MinimapStyle.Overview)
         {
             AutomationProperties.SetName(this, L10n.Tr("editor.minimap.overview"));
             ToolTipService.SetToolTip(this, L10n.Tr("editor.minimap.overview.tooltip"));
@@ -126,7 +130,7 @@ public sealed class MinimapView : Grid
     }
 
     /// 编辑器滚动或尺寸变化后更新视口矩形。
-    public void InvalidateViewport()
+    public void RefreshViewport()
     {
         UpdateMetrics();
         RelayoutOffset();
@@ -153,10 +157,10 @@ public sealed class MinimapView : Grid
         var changes = editor.LineChanges;
         var diffLines = editor.MinimapDiffLines;
         var dark = ActualTheme == ElementTheme.Dark;
-        var colors = ColorTable.Resolve(dark, Style == MinimapStyle.Overview);
+        var colors = ColorTable.Resolve(dark, LaneStyle == MinimapStyle.Overview);
         _ = Task.Run(() =>
         {
-            var built = Content.Build(text, spans, changes, diffLines, colors, includeText: Style == MinimapStyle.Document);
+            var built = Content.Build(text, spans, changes, diffLines, colors, includeText: LaneStyle == MinimapStyle.Document);
             if (cancel.IsCancellationRequested) return;
             DispatcherQueue.TryEnqueue(() =>
             {
@@ -173,11 +177,16 @@ public sealed class MinimapView : Grid
     private double _renderedOffset = double.NaN;
     private double _renderedWidth;
     private double _renderedHeight;
+    private double _renderedTrackTop = double.NaN;
+    private double _renderedTrackHeight = double.NaN;
+    private double _renderedScrollHeight = double.NaN;
 
     private void ScheduleSlice()
     {
         if (_content is null) return;
-        if (_contentOffset != _renderedOffset || ActualWidth != _renderedWidth || ActualHeight != _renderedHeight)
+        var metricsChanged = LaneStyle == MinimapStyle.Overview
+            && (_trackTop != _renderedTrackTop || _trackHeight != _renderedTrackHeight || _scrollHeightLines != _renderedScrollHeight);
+        if (_contentOffset != _renderedOffset || ActualWidth != _renderedWidth || ActualHeight != _renderedHeight || metricsChanged)
             RenderSlice();
         LayoutSlider();
     }
@@ -186,13 +195,28 @@ public sealed class MinimapView : Grid
     {
         var lines = Math.Max(_content?.LineCount ?? _editor?.LineCount ?? 1, 1);
         var fitted = ActualHeight > 0 ? ActualHeight / lines : MinLineHeight;
-        // 概览条铺满编辑器高度，整份文件的变更一次可见。
-        _lineHeight = Style == MinimapStyle.Overview ? fitted : Math.Min(Math.Max(fitted, MinLineHeight), MaxLineHeight);
+        if (LaneStyle == MinimapStyle.Overview)
+        {
+            // 与原生滚动条同一坐标系：y = line / scrollHeight * trackHeight。
+            var metrics = _editor?.MinimapOverviewMetrics
+                ?? new CodeEditor.OverviewScrollMetrics(0, Math.Max(ActualHeight, 1), lines, 1, fitted);
+            _trackTop = metrics.TrackTop;
+            _trackHeight = Math.Max(metrics.TrackHeight, 1);
+            _scrollHeightLines = Math.Max(metrics.ScrollHeightLines, 1);
+            _viewportLines = Math.Max(metrics.ViewportLines, 1);
+            _lineHeight = _trackHeight / _scrollHeightLines;
+            return;
+        }
+        _lineHeight = Math.Min(Math.Max(fitted, MinLineHeight), MaxLineHeight);
+        _trackTop = 0;
+        _trackHeight = Math.Max(ActualHeight, 1);
+        _scrollHeightLines = lines;
+        _viewportLines = 1;
     }
 
     private void RelayoutOffset()
     {
-        if (Style == MinimapStyle.Overview)
+        if (LaneStyle == MinimapStyle.Overview)
         {
             _contentOffset = 0;
             return;
@@ -213,7 +237,7 @@ public sealed class MinimapView : Grid
     private void LayoutSlider()
     {
         // 概览条只显示变更色块，视口由编辑器自身的滚动条表示。
-        if (Style == MinimapStyle.Overview || _editor is null || _content is null || _lineHeight <= 0 || ActualHeight <= 0)
+        if (LaneStyle == MinimapStyle.Overview || _editor is null || _content is null || _lineHeight <= 0 || ActualHeight <= 0)
         {
             _slider.Visibility = Visibility.Collapsed;
             return;
@@ -240,6 +264,25 @@ public sealed class MinimapView : Grid
         var background = _content.Colors.Background;
         Fill(pixels, width, height, 0, 0, width, height, background);
 
+        if (LaneStyle == MinimapStyle.Overview)
+        {
+            PaintOverviewDecorations(pixels, width, height, scale);
+            var overviewBitmap = new WriteableBitmap(width, height);
+            using (var stream = overviewBitmap.PixelBuffer.AsStream())
+            {
+                stream.Write(pixels, 0, pixels.Length);
+            }
+            overviewBitmap.Invalidate();
+            _image.Source = overviewBitmap;
+            _renderedOffset = _contentOffset;
+            _renderedWidth = ActualWidth;
+            _renderedHeight = ActualHeight;
+            _renderedTrackTop = _trackTop;
+            _renderedTrackHeight = _trackHeight;
+            _renderedScrollHeight = _scrollHeightLines;
+            return;
+        }
+
         var linePx = Math.Max(_lineHeight * scale, 1);
         var offsetPx = _contentOffset * scale;
         var first = Math.Max((int)Math.Floor(_contentOffset / _lineHeight), 0);
@@ -259,22 +302,7 @@ public sealed class MinimapView : Grid
             Fill(pixels, width, height, 0, top, width, h, decoration.Color);
         }
 
-        if (Style == MinimapStyle.Overview)
-        {
-            var overviewBitmap = new WriteableBitmap(width, height);
-            using (var stream = overviewBitmap.PixelBuffer.AsStream())
-            {
-                stream.Write(pixels, 0, pixels.Length);
-            }
-            overviewBitmap.Invalidate();
-            _image.Source = overviewBitmap;
-            _renderedOffset = _contentOffset;
-            _renderedWidth = ActualWidth;
-            _renderedHeight = ActualHeight;
-            return;
-        }
-
-        var pad = (int)Math.Round(Padding * scale);
+        var pad = (int)Math.Round(PadPx * scale);
         var charW = Math.Max((int)Math.Round(CharWidth * scale), 1);
         var gap = Math.Max((int)Math.Round(linePx * 0.25), 1);
         var charH = Math.Max((int)Math.Round(linePx) - gap, 1);
@@ -303,6 +331,44 @@ public sealed class MinimapView : Grid
         }
         bitmap.Invalidate();
         _image.Source = bitmap;
+    }
+
+    /// 按 VS Code overview ruler 公式绘制：y = verticalOffset / scrollHeight * trackHeight。
+    /// 最短色块为 6 设备像素，过小时居中并夹紧到轨道内。
+    private void PaintOverviewDecorations(byte[] pixels, int width, int height, double scale)
+    {
+        if (_content is null || _scrollHeightLines <= 0 || _trackHeight <= 0) return;
+        var trackTopPx = _trackTop * scale;
+        var trackHeightPx = Math.Max(_trackHeight * scale, 1);
+        var heightRatio = trackHeightPx / _scrollHeightLines;
+        const int minDecorationHeight = 6;
+        var canvasBottom = height;
+        foreach (var decoration in _content.Decorations)
+        {
+            var start = decoration.Start;
+            var end = decoration.Count <= 0 ? start : start + decoration.Count;
+            var y1 = trackTopPx + start * heightRatio;
+            var y2 = trackTopPx + end * heightRatio;
+            if (decoration.Count <= 0 || y2 - y1 < minDecorationHeight)
+            {
+                var mid = decoration.Count <= 0 ? y1 : (y1 + y2) / 2;
+                y1 = mid - minDecorationHeight / 2.0;
+                y2 = y1 + minDecorationHeight;
+            }
+            var top = (int)Math.Round(y1);
+            var bottom = (int)Math.Round(y2);
+            if (bottom <= top) bottom = top + minDecorationHeight;
+            var trackStart = (int)Math.Round(trackTopPx);
+            var trackEnd = (int)Math.Round(trackTopPx + trackHeightPx);
+            if (trackEnd <= trackStart) trackEnd = trackStart + 1;
+            top = Math.Clamp(top, trackStart, trackEnd);
+            bottom = Math.Clamp(bottom, trackStart, trackEnd);
+            if (bottom <= top) continue;
+            top = Math.Clamp(top, 0, canvasBottom);
+            bottom = Math.Clamp(bottom, 0, canvasBottom);
+            if (bottom <= top) continue;
+            Fill(pixels, width, height, 0, top, width, bottom - top, decoration.Color);
+        }
     }
 
     private static void Fill(byte[] pixels, int width, int height, int x, int y, int w, int h, uint color)
@@ -350,12 +416,17 @@ public sealed class MinimapView : Grid
 
     private void OnPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (_editor is null || _lineHeight <= 0) return;
+        if (_editor is null) return;
+        if (LaneStyle == MinimapStyle.Overview)
+        {
+            if (_scrollHeightLines <= 0 || _trackHeight <= 0) return;
+        }
+        else if (_lineHeight <= 0) return;
         var point = e.GetCurrentPoint(this).Position;
         var line = DocumentLine(point.Y);
-        if (Style == MinimapStyle.Overview)
+        if (LaneStyle == MinimapStyle.Overview)
         {
-            _dragLineOffset = Math.Max(_editor.MinimapVisibleLineCount, 1) / 2;
+            _dragLineOffset = Math.Max(_viewportLines, 1) / 2;
             _editor.MinimapScrollToLine(Math.Max(0, line - _dragLineOffset));
             _dragging = true;
             CapturePointer(e.Pointer);
@@ -392,7 +463,12 @@ public sealed class MinimapView : Grid
         e.Handled = true;
     }
 
-    private double DocumentLine(double y) => _lineHeight <= 0 ? 0 : (_contentOffset + y) / _lineHeight;
+    private double DocumentLine(double y)
+    {
+        if (LaneStyle == MinimapStyle.Overview)
+            return _scrollHeightLines <= 0 || _trackHeight <= 0 ? 0 : (y - _trackTop) / _trackHeight * _scrollHeightLines;
+        return _lineHeight <= 0 ? 0 : (_contentOffset + y) / _lineHeight;
+    }
 
     private bool InSlider(double y)
     {

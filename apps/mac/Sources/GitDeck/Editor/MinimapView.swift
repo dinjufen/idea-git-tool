@@ -20,14 +20,32 @@ protocol MinimapDataSource: AnyObject {
     var minimapTopVisibleLine: Double { get }
     var minimapVisibleLineCount: Double { get }
     var minimapLineCount: Int { get }
+    /// 与原生滚动条同一坐标系的文档滚动空间高度（点）。
+    var minimapScrollHeight: CGFloat { get }
+    /// 第 `line` 行顶部在滚动空间中的垂直偏移（点）。
+    func minimapVerticalOffset(forLine line: Int) -> CGFloat
+    /// 滚动空间中的垂直偏移对应的文档行（可带小数）。
+    func minimapLine(atVerticalOffset offset: CGFloat) -> Double
+    /// 概览条应对齐的滚动条轨道（相对缩略图视图）；`nil` 表示铺满自身高度。
+    var minimapOverviewTrack: (y: CGFloat, height: CGFloat)? { get }
     func minimapScroll(toLine line: Double)
+}
+
+extension MinimapDataSource {
+    var minimapScrollHeight: CGFloat { CGFloat(max(minimapLineCount, 1)) }
+    func minimapVerticalOffset(forLine line: Int) -> CGFloat { CGFloat(max(line, 0)) }
+    func minimapLine(atVerticalOffset offset: CGFloat) -> Double {
+        let height = max(minimapScrollHeight, 1)
+        return Double(offset / height * CGFloat(max(minimapLineCount, 1)))
+    }
+    var minimapOverviewTrack: (y: CGFloat, height: CGFloat)? { nil }
 }
 
 /// 右侧概览样式：普通编辑器为完整文本缩略图，Diff / 合并为窄的变更着色条（VS Code 的 overview ruler）。
 enum MinimapStyle {
     /// VS Code 的 minimap：按字符绘制全文，带视口滑块。
     case document
-    /// VS Code 的 overview ruler：只在变更处着色，铺满编辑器高度。
+    /// VS Code 的 overview ruler：只在变更处着色，色块按滚动空间映射到滚动条轨道。
     case overview
 
     var width: CGFloat {
@@ -70,6 +88,9 @@ final class MinimapView: NSView {
     private var cacheSize: CGSize = .zero
     private var lineHeight: CGFloat = 2
     private var contentOffset: CGFloat = 0
+    private var trackTop: CGFloat = 0
+    private var trackHeight: CGFloat = 1
+    private var scrollHeight: CGFloat = 1
     private var generation = 0
     private var rebuildTask: Task<Void, Never>?
     private var isDragging = false
@@ -145,7 +166,8 @@ final class MinimapView: NSView {
         bg.setFill()
         bounds.fill()
 
-        if cache == nil || cacheSize != bounds.size || cacheOffset != contentOffset || cacheScale != backingScale {
+        if cache == nil || cacheSize != bounds.size || cacheOffset != contentOffset || cacheScale != backingScale
+            || cachedTrackTop != trackTop || cachedTrackHeight != trackHeight || cachedScrollHeight != scrollHeight {
             rebuildCache()
         }
         if let cache {
@@ -181,7 +203,12 @@ final class MinimapView: NSView {
     // MARK: - 交互
 
     override func mouseDown(with event: NSEvent) {
-        guard dataSource != nil, lineHeight > 0 else { return }
+        guard dataSource != nil else { return }
+        if style == .overview {
+            guard scrollHeight > 0, trackHeight > 0 else { return }
+        } else {
+            guard lineHeight > 0 else { return }
+        }
         let point = convert(event.locationInWindow, from: nil)
         let line = documentLine(atY: point.y)
         if style == .overview {
@@ -245,11 +272,18 @@ final class MinimapView: NSView {
     private func updateMetrics() {
         let lines = max(content?.lineCount ?? dataSource?.minimapLineCount ?? 1, 1)
         let fitted = bounds.height > 0 ? bounds.height / CGFloat(lines) : Self.minLineHeight
-        if style == .overview {
-            // 概览条铺满编辑器高度，整份文件的变更一次可见。
-            lineHeight = fitted
+        if style == .overview, let source = dataSource {
+            // 与原生滚动条同一坐标系：y = verticalOffset / scrollHeight * trackHeight。
+            let track = source.minimapOverviewTrack
+            trackTop = track?.y ?? 0
+            trackHeight = max(track?.height ?? bounds.height, 1)
+            scrollHeight = max(source.minimapScrollHeight, 1)
+            lineHeight = trackHeight / scrollHeight
         } else {
             lineHeight = min(max(fitted, Self.minLineHeight), Self.maxLineHeight)
+            trackTop = 0
+            trackHeight = max(bounds.height, 1)
+            scrollHeight = CGFloat(lines) * lineHeight
         }
     }
 
@@ -276,6 +310,11 @@ final class MinimapView: NSView {
     }
 
     private func documentLine(atY y: CGFloat) -> Double {
+        if style == .overview, let source = dataSource {
+            guard trackHeight > 0, scrollHeight > 0 else { return 0 }
+            let offset = (y - trackTop) / trackHeight * scrollHeight
+            return source.minimapLine(atVerticalOffset: offset)
+        }
         guard lineHeight > 0 else { return 0 }
         return Double((contentOffset + y) / lineHeight)
     }
@@ -288,11 +327,17 @@ final class MinimapView: NSView {
     }
 
     private var backingScale: CGFloat { window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2 }
+    private var cachedTrackTop: CGFloat = 0
+    private var cachedTrackHeight: CGFloat = 0
+    private var cachedScrollHeight: CGFloat = 0
 
     private func rebuildCache() {
         cacheSize = bounds.size
         cacheOffset = contentOffset
         cacheScale = backingScale
+        cachedTrackTop = trackTop
+        cachedTrackHeight = trackHeight
+        cachedScrollHeight = scrollHeight
         cache = nil
         guard bounds.width > 0, bounds.height > 0, let content else { return }
 
@@ -308,6 +353,12 @@ final class MinimapView: NSView {
         let first = max(Int((contentOffset / lineHeight).rounded(.down)), 0)
         let last = min(content.lineCount, Int(ceil((contentOffset + bounds.height) / lineHeight)) + 1)
         guard first < last else {
+            cache = image(from: pixels, width: width, height: height)
+            return
+        }
+
+        if style == .overview, let source = dataSource {
+            paintOverviewDecorations(pixels: &pixels, width: width, height: height, scale: scale, source: source, content: content)
             cache = image(from: pixels, width: width, height: height)
             return
         }
@@ -351,6 +402,46 @@ final class MinimapView: NSView {
 
         cache = image(from: pixels, width: width, height: height)
     }
+
+    /// 按 VS Code overview ruler 公式绘制：y = verticalOffset / scrollHeight * trackHeight。
+    /// 最短色块为 6 设备像素，过小时居中并夹紧到轨道内。
+    private func paintOverviewDecorations(pixels: inout [UInt8], width: Int, height: Int, scale: CGFloat, source: MinimapDataSource, content: Content) {
+        guard scrollHeight > 0, trackHeight > 0 else { return }
+        let trackTopPx = trackTop * scale
+        let trackHeightPx = max(trackHeight * scale, 1)
+        let heightRatio = trackHeightPx / scrollHeight
+        let minDecorationHeight = 6
+        for decoration in content.decorations {
+            let startOffset = source.minimapVerticalOffset(forLine: decoration.start)
+            let endOffset: CGFloat
+            if decoration.count <= 0 {
+                endOffset = startOffset
+            } else {
+                endOffset = source.minimapVerticalOffset(forLine: decoration.start + decoration.count)
+            }
+            var y1 = trackTopPx + startOffset * heightRatio
+            var y2 = trackTopPx + endOffset * heightRatio
+            if decoration.count <= 0 || y2 - y1 < CGFloat(minDecorationHeight) {
+                let mid = decoration.count <= 0 ? y1 : (y1 + y2) / 2
+                y1 = mid - CGFloat(minDecorationHeight) / 2
+                y2 = y1 + CGFloat(minDecorationHeight)
+            }
+            var top = Int(y1.rounded())
+            var bottom = Int(y2.rounded())
+            if bottom <= top { bottom = top + minDecorationHeight }
+            let trackStart = Int(trackTopPx.rounded())
+            var trackEnd = Int((trackTopPx + trackHeightPx).rounded())
+            if trackEnd <= trackStart { trackEnd = trackStart + 1 }
+            top = min(max(top, trackStart), trackEnd)
+            bottom = min(max(bottom, trackStart), trackEnd)
+            if bottom <= top { continue }
+            top = min(max(top, 0), height)
+            bottom = min(max(bottom, 0), height)
+            if bottom <= top { continue }
+            fill(pixels: &pixels, width: width, height: height, x: 0, y: top, w: width, h: bottom - top, color: decoration.color)
+        }
+    }
+
 
     private func fill(pixels: inout [UInt8], width: Int, height: Int, x: Int, y: Int, w: Int, h: Int, color: UInt32) {
         let x0 = max(x, 0)
