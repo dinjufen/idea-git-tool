@@ -257,7 +257,7 @@ public static class AISettings
         IsLocal(config.BaseUrl) || (ConsentMap().TryGetValue(project.ToLowerInvariant(), out var list) && list.Contains(ConsentIdentity(config)));
 
     public static void GrantConsent(string project, AiProviderConfig config) =>
-        GrantConsent(project, ConsentIdentity(config));
+        PersistConsent(project, ConsentIdentity(config));
 
     public static bool HasConsent(string project, string cliId)
     {
@@ -266,11 +266,11 @@ public static class AISettings
     }
 
     public static void GrantConsent(string project, string cliId) =>
-        GrantConsent(project, ConsentIdentity(cliId));
+        PersistConsent(project, ConsentIdentity(cliId));
 
     private static string ConsentIdentity(string cliId) => $"cli:{cliId}";
 
-    private static void GrantConsent(string project, string identity)
+    private static void PersistConsent(string project, string identity)
     {
         var map = ConsentMap();
         var key = project.ToLowerInvariant();

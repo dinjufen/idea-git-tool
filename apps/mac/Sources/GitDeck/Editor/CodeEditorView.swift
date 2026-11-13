@@ -20,6 +20,7 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
     private var annotationWidth: NSLayoutConstraint!
     private let findBar = FindBar()
     private var findBarHeight: NSLayoutConstraint!
+    private let minimap = MinimapView()
 
     /// 语言标识（见核心 `language_for_path`）；`nil` 表示纯文本。
     var language: String? {
@@ -28,7 +29,21 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
 
     var lineChanges: [LineChange] {
         get { gutter.changes }
-        set { gutter.changes = newValue }
+        set {
+            gutter.changes = newValue
+            minimap.invalidateContent()
+        }
+    }
+
+    /// Diff / 合并界面按行着色的缩略图装饰（新增绿色、删除品红；冲突为红色）。
+    var minimapDiffHighlights: [MinimapDiffHighlight] = [] {
+        didSet { minimap.invalidateContent() }
+    }
+
+    /// 普通文件为完整文本缩略图；Diff / 合并为窄的差异概览条。
+    var minimapStyle: MinimapStyle {
+        get { minimap.style }
+        set { minimap.style = newValue }
     }
 
     var text: String { textView.string }
@@ -193,7 +208,8 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
         findBar.onReplaceAll = { [weak self] text in self?.replaceAll(with: text) }
 
         annotationView.isHidden = true
-        for view in [findBar, annotationView, gutter, scrollView] as [NSView] { addSubview(view) }
+        minimap.dataSource = self
+        for view in [findBar, annotationView, gutter, scrollView, minimap] as [NSView] { addSubview(view) }
         annotationWidth = annotationView.widthAnchor.constraint(equalToConstant: 0)
         // 查找栏隐藏时高度为 0；显示时由查找栏自身的高度约束（优先级略低）决定。
         findBarHeight = findBar.heightAnchor.constraint(equalToConstant: 0)
@@ -211,8 +227,11 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
             gutter.bottomAnchor.constraint(equalTo: bottomAnchor),
             scrollView.topAnchor.constraint(equalTo: findBar.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: gutter.trailingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: minimap.leadingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            minimap.topAnchor.constraint(equalTo: findBar.bottomAnchor),
+            minimap.trailingAnchor.constraint(equalTo: trailingAnchor),
+            minimap.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         findBar.setContentHuggingPriority(.required, for: .vertical)
     }
@@ -227,6 +246,9 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
         }
         observers = [
             center.addObserver(forName: NSView.boundsDidChangeNotification, object: scrollView.contentView, queue: .main, using: redrawGutter),
+            center.addObserver(forName: NSView.boundsDidChangeNotification, object: scrollView.contentView, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.minimap.invalidateViewport() }
+            },
             // 编辑区宽度变化（窗口缩放、打开注释列）时重新计算行内提交信息的截断宽度。
             center.addObserver(forName: NSView.frameDidChangeNotification, object: scrollView, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.inlineBlame.relayout() }
@@ -249,6 +271,7 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
         super.layout()
         _ = textView.updateFrameIfNeeded()
         gutter.needsDisplay = true
+        minimap.invalidateViewport()
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -256,6 +279,7 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
         // 文本颜色在排版时固化，外观切换后需要重新设置。
         applyColors()
         apply(lastSpans)
+        minimap.invalidateContent()
     }
 
     // MARK: - 外观
@@ -335,6 +359,7 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
             storage.addAttribute(.foregroundColor, value: color, range: range)
         }
         storage.endEditing()
+        minimap.invalidateContent()
     }
 
     // MARK: - TextViewDelegate
@@ -350,6 +375,7 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
         // 输入时稍作停顿再重新高亮，避免每个按键都触发完整解析。
         scheduleHighlight(delay: .milliseconds(120))
         gutter.lineCountChanged()
+        minimap.invalidateContent()
         if findBar.isHidden == false { find(findBar.query, caseSensitive: findBar.isCaseSensitive, keepIndex: true) }
         onTextChange?()
     }
@@ -450,4 +476,46 @@ final class CodeEditorView: NSView, @preconcurrency TextViewDelegate {
         }
         findBar.setResult(current: findIndex, total: findMatches.count)
     }
+}
+
+extension CodeEditorView: MinimapDataSource {
+    var minimapText: String { text }
+    var minimapSpans: [HighlightSpan] { lastSpans }
+    var minimapLineChanges: [LineChange] { lineChanges }
+    var minimapTopVisibleLine: Double { topVisibleLine }
+    var minimapVisibleLineCount: Double {
+        let height = scrollView.contentView.bounds.height
+        let y = max(0, scrollView.contentView.bounds.minY)
+        guard let line = textView.layoutManager.lineStorage.getLine(atPosition: y), line.height > 0 else { return 1 }
+        return Double(height / line.height)
+    }
+    var minimapLineCount: Int { max(textView.layoutManager.lineCount, 1) }
+    var minimapScrollHeight: CGFloat {
+        max(scrollView.documentView?.frame.height ?? 0, 1)
+    }
+    func minimapVerticalOffset(forLine line: Int) -> CGFloat {
+        let storage = textView.layoutManager.lineStorage
+        if let position = storage.getLine(atIndex: max(line, 0)) {
+            return position.yPos
+        }
+        if let last = storage.last {
+            return last.yPos + last.height
+        }
+        return 0
+    }
+    func minimapLine(atVerticalOffset offset: CGFloat) -> Double {
+        let y = max(0, offset)
+        guard let line = textView.layoutManager.lineStorage.getLine(atPosition: y) else {
+            return Double(max(textView.layoutManager.lineCount, 0))
+        }
+        let fraction = line.height > 0 ? Double((y - line.yPos) / line.height) : 0
+        return Double(line.index) + min(max(fraction, 0), 1)
+    }
+    var minimapOverviewTrack: (y: CGFloat, height: CGFloat)? {
+        guard let scroller = scrollView.verticalScroller, scroller.frame.height > 0 else { return nil }
+        let frame = scroller.convert(scroller.bounds, to: minimap)
+        guard frame.height > 0 else { return nil }
+        return (frame.minY, frame.height)
+    }
+    func minimapScroll(toLine line: Double) { scroll(toLine: line) }
 }

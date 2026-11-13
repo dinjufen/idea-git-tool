@@ -93,9 +93,9 @@ public sealed class MergeWindow : Window
         _chunks = [.. chunks.Select(c => new ChunkState(c))];
 
         var language = CoreApi.LanguageForPath(System.IO.Path.GetFileName(path));
-        _leftEditor = new CodeEditor(ours, language, isEditable: false) { ShowVerticalScrollBar = false };
-        _centerEditor = new CodeEditor(baseText, language, isEditable: true) { ShowVerticalScrollBar = false };
-        _rightEditor = new CodeEditor(theirs, language, isEditable: false);
+        _leftEditor = new CodeEditor(ours, language, isEditable: false) { ShowVerticalScrollBar = false, MinimapStyle = MinimapStyle.Overview };
+        _centerEditor = new CodeEditor(baseText, language, isEditable: true) { ShowVerticalScrollBar = false, MinimapStyle = MinimapStyle.Overview };
+        _rightEditor = new CodeEditor(theirs, language, isEditable: false) { MinimapStyle = MinimapStyle.Overview };
 
         Title = L10n.Tr("merge.window.title", path);
         ExtendsContentIntoTitleBar = true;
