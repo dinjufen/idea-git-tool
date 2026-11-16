@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -103,7 +105,7 @@ public static partial class L10n
         CoreException.GitNotFound => Tr("error.gitNotFound"),
         CoreException.GitTooOld e => Tr("error.gitTooOld", e.found, e.required),
         CoreException.NotARepository e => Tr("error.notARepository", e.path),
-        CoreException.CommandFailed e => Tr("error.commandFailed", e.command, e.stderr),
+        CoreException.CommandFailed e => CommandFailedMessage(e.stderr),
         CoreException.Parse e => Tr("error.parse", e.detail),
         CoreException.Io e => Tr("error.io", e.detail),
         CoreException.EmptyCommitMessage => Tr("error.emptyCommitMessage"),
@@ -130,4 +132,85 @@ public static partial class L10n
         CoreException.AiCancelled => Tr("ai.error.cancelled"),
         _ => error.Message,
     };
+
+    /// 把 Git 命令失败转成面向用户的说明，与 mac 端 `commandFailedMessage` 保持一致。
+    internal static string CommandFailedMessage(string stderr)
+    {
+        var detail = GitErrorDetail(stderr);
+        if (UnknownRevision(detail) is { Length: > 0 } revision)
+            return Tr("error.unknownRevision", revision);
+        if (LooksLikeUnknownRevision(detail))
+            return Tr("error.unknownRevisionGeneric");
+        return string.IsNullOrEmpty(detail) ? Tr("error.commandFailedGeneric") : detail;
+    }
+
+    /// 去掉 Git 日志里的 fatal/error 等严重级别前缀，避免弹窗看起来像程序崩溃。
+    internal static string GitErrorDetail(string stderr)
+    {
+        var lines = new List<string>();
+        foreach (var raw in stderr.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+        {
+            var line = StripGitSeverityPrefix(raw);
+            if (line.Length > 0) lines.Add(line);
+        }
+        return string.Join("\n", lines);
+    }
+
+    private static readonly string[] GitSeverityPrefixes =
+    [
+        "fatal:", "error:", "warning:", "hint:",
+        "致命错误：", "错误：", "警告：", "提示：",
+    ];
+
+    private static string StripGitSeverityPrefix(string line)
+    {
+        line = line.Trim();
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var prefix in GitSeverityPrefixes)
+            {
+                var matches = prefix.All(c => c <= 127)
+                    ? line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    : line.StartsWith(prefix, StringComparison.Ordinal);
+                if (!matches) continue;
+                line = line[prefix.Length..].Trim();
+                changed = true;
+                break;
+            }
+        }
+        return line;
+    }
+
+    private static readonly Regex[] UnknownRevisionRegexes =
+    [
+        new(@"could not parse object '([^']+)'", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        new(@"invalid object name '([^']+)'", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        new(@"invalid object name ([0-9a-fA-F]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        new(@"bad revision '([^']+)'", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        new(@"bad object '([^']+)'", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        new(@"ambiguous argument '([^']+)'", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        new(@"无法解析对象\s*['「『“]([^'」』”]+)['」』”]", RegexOptions.Compiled),
+    ];
+
+    private static string? UnknownRevision(string detail)
+    {
+        foreach (var regex in UnknownRevisionRegexes)
+        {
+            var match = regex.Match(detail);
+            if (match.Success && match.Groups.Count > 1)
+            {
+                var revision = match.Groups[1].Value.Trim();
+                if (revision.Length > 0) return revision;
+            }
+        }
+        return null;
+    }
+
+    private static readonly Regex UnknownRevisionGenericRegex =
+        new(@"needed a single revision|unknown revision", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static bool LooksLikeUnknownRevision(string detail) =>
+        UnknownRevisionGenericRegex.IsMatch(detail);
 }

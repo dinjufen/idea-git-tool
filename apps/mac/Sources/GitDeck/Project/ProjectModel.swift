@@ -25,6 +25,8 @@ final class ProjectModel {
 
     private var observers: [UUID: @MainActor () -> Void] = [:]
     private var pendingRefresh = false
+    /// 已完成的状态刷新次数，用来把一次操作和它结束之后的那次刷新对应起来。
+    private(set) var refreshGeneration: UInt64 = 0
 
     init(repository: Repository) {
         self.repository = repository
@@ -64,6 +66,11 @@ final class ProjectModel {
         notify()
     }
 
+    /// 下一次调用 `refresh()` 完成时的代数。若当前正在刷新，则会在结束后再补刷一次，返回的是那次补刷的代数。
+    func nextRefreshGeneration() -> UInt64 {
+        refreshGeneration + (isRefreshing || pendingRefresh ? 2 : 1)
+    }
+
     @discardableResult
     func observe(_ handler: @escaping @MainActor () -> Void) -> UUID {
         let id = UUID()
@@ -100,6 +107,7 @@ final class ProjectModel {
                 self.lastError = errorMessage(error)
             }
             self.isRefreshing = false
+            self.refreshGeneration += 1
             self.notify()
             if self.pendingRefresh {
                 self.pendingRefresh = false

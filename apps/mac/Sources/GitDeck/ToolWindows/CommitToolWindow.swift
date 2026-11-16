@@ -123,6 +123,8 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     private var entries: [String: Entry] = [:]
     /// 勾选要提交的文件的键。
     private var included: Set<String> = []
+    /// 指定仓库在对应代数的状态刷新完成前，不自动勾选该仓库新出现的已跟踪文件（Git Reset / Undo Commit）。
+    private var skipAutoIncludeUntil: [ObjectIdentifier: UInt64] = [:]
     /// 已见过的路径；新出现的已跟踪变更默认勾选，未跟踪文件默认不勾选（与 IDEA 一致）。
     private var known: Set<String> = []
     private var observer: UUID?
@@ -384,10 +386,20 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
         }
         entries = Dictionary(all.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
         // 与 IDEA 一致：新出现的已跟踪改动只在活动 Changelist 中默认勾选。
+        // Git Reset / Undo Commit 回退产生的文件除外，避免被误认为已暂存。
         let current = Set(entries.keys)
         let newKeys = Set(all.filter { !$0.change.isUntracked && $0.change.conflict == nil }.map(\.key)).subtracting(known)
         let inactive = Set(all.filter { changelistName(of: $0) != activeChangelist }.map(\.key))
-        included.formUnion(newKeys.subtracting(inactive))
+        var skip: Set<String> = []
+        for repository in workspace.models {
+            let id = ObjectIdentifier(repository)
+            guard let target = skipAutoIncludeUntil[id] else { continue }
+            skip.formUnion(newKeys.filter { entries[$0]?.model === repository })
+            if repository.refreshGeneration >= target {
+                skipAutoIncludeUntil.removeValue(forKey: id)
+            }
+        }
+        included.formUnion(newKeys.subtracting(inactive).subtracting(skip))
         included.formIntersection(current)
         known = current
         // 复用未变化的节点，使 NSOutlineView 保持选中状态。
@@ -576,6 +588,15 @@ final class CommitToolWindow: NSView, NSOutlineViewDataSource, NSOutlineViewDele
     var includedPaths: [String] {
         includedEntries.filter { $0.model === model }.map(\.change.path)
     }
+
+    /// Git Reset / Undo Commit 成功后、对应状态刷新开始前调用：该仓库此次刷新中新出现的文件不自动勾选。
+    func suppressAutoInclude(for repository: ProjectModel) {
+        skipAutoIncludeUntil[ObjectIdentifier(repository)] = repository.nextRefreshGeneration()
+    }
+
+    #if DEBUG
+    var debugIncludedKeys: [String] { included.sorted() }
+    #endif
 
     /// 按仓库分组。
     private func grouped(_ list: [Entry]) -> RepositoryPaths {
