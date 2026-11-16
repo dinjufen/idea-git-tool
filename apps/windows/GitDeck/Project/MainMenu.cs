@@ -31,7 +31,7 @@ public static class MainMenu
         menu.Items.Add(Item(L10n.Tr("menu.file.welcome"), () => app.ShowWelcome()));
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(Item(L10n.Tr("menu.file.save"), window.SaveActive, "Ctrl+S"));
-        menu.Items.Add(Item(L10n.Tr("menu.file.closeTab"), window.CloseActiveTab, "Ctrl+F4"));
+        menu.Items.Add(Item(L10n.Tr("menu.file.closeTab"), window.CloseActiveTab, "Ctrl+W"));
         menu.Items.Add(Item(L10n.Tr("menu.file.closeProject"), window.Close, "Ctrl+Shift+W"));
         menu.Items.Add(new MenuFlyoutSeparator());
         // IDEA Windows 键位：Ctrl+Alt+S 打开设置。
