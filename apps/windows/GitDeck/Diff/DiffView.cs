@@ -67,8 +67,8 @@ public sealed class DiffView : Grid
         _right = right;
         _inclusion = inclusion;
         _language = CoreApi.LanguageForPath(System.IO.Path.GetFileName(path));
-        _leftEditor = new CodeEditor(left.Text ?? "", _language, isEditable: false) { ShowVerticalScrollBar = false };
-        _rightEditor = new CodeEditor(right.Text ?? "", _language, isEditable: false);
+        _leftEditor = new CodeEditor(left.Text ?? "", _language, isEditable: false) { ShowVerticalScrollBar = false, MinimapStyle = MinimapStyle.Overview };
+        _rightEditor = new CodeEditor(right.Text ?? "", _language, isEditable: false) { MinimapStyle = MinimapStyle.Overview };
         Themed.Background(this, "EditorBackgroundBrush");
         BuildLayout();
 
@@ -503,7 +503,7 @@ public sealed class DiffView : Grid
         }
         _unified = UnifiedModel.Build(_left.Text ?? "", _right.Text ?? "", _blocks);
         _unifiedContainer.Children.Clear();
-        var editor = new CodeEditor(_unified.Text, _language, isEditable: false);
+        var editor = new CodeEditor(_unified.Text, _language, isEditable: false) { MinimapStyle = MinimapStyle.Overview };
         var model = _unified;
         var width = Math.Max(model.MaxOld, model.MaxNew).ToString(System.Globalization.CultureInfo.InvariantCulture).Length;
         editor.SetLineNumbers(width * 2 + 1, row =>

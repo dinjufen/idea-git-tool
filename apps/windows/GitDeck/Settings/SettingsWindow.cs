@@ -630,7 +630,7 @@ public sealed class SettingsWindow : Window
                     return;
                 }
                 var models = task.Result;
-                if (models.Count == 0)
+                if (models.Length == 0)
                 {
                     ShowStatus(L10n.Tr("ai.settings.queryModels.empty"), ok: false);
                     return;
@@ -653,7 +653,7 @@ public sealed class SettingsWindow : Window
                     maxTokens.Value = next;
                     AISettings.SetMaxTokens(p, (int)next);
                 }
-                ShowStatus(L10n.Tr("ai.settings.queryModels.ok", models.Count), ok: true);
+                ShowStatus(L10n.Tr("ai.settings.queryModels.ok", models.Length), ok: true);
             }), TaskScheduler.Default);
         };
         test.Click += (_, _) =>

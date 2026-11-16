@@ -90,6 +90,9 @@ final class MergeWindowController: NSWindowController, NSWindowDelegate {
         leftEditor = CodeEditorView(text: ours, language: language, isEditable: false)
         centerEditor = CodeEditorView(text: base, language: language, isEditable: true)
         rightEditor = CodeEditorView(text: theirs, language: language, isEditable: false)
+        leftEditor.minimapStyle = .overview
+        centerEditor.minimapStyle = .overview
+        rightEditor.minimapStyle = .overview
         leftBackground = MergeBackgroundView(textView: leftEditor.textView)
         centerBackground = MergeBackgroundView(textView: centerEditor.textView)
         rightBackground = MergeBackgroundView(textView: rightEditor.textView)
@@ -412,6 +415,9 @@ final class MergeWindowController: NSWindowController, NSWindowDelegate {
         leftBackground.highlights = left
         centerBackground.highlights = center
         rightBackground.highlights = right
+        leftEditor.minimapDiffHighlights = left.map { MinimapDiffHighlight(start: $0.start, count: $0.count, kind: $0.kind) }
+        centerEditor.minimapDiffHighlights = center.map { MinimapDiffHighlight(start: $0.start, count: $0.count, kind: $0.kind) }
+        rightEditor.minimapDiffHighlights = right.map { MinimapDiffHighlight(start: $0.start, count: $0.count, kind: $0.kind) }
         leftConnector.chunks = chunks
         rightConnector.chunks = chunks
 
