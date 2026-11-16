@@ -376,7 +376,9 @@ public sealed class ProjectWindow : Window
         AddAccelerator(VirtualKey.R, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu, _workspace.RefreshAll);
         AddAccelerator(VirtualKey.W, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, Close);
         AddAccelerator(VirtualKey.S, VirtualKeyModifiers.Control, SaveActive);
+        // IDEA Windows 键位是 Ctrl+F4；同时提供 Ctrl+W（与常见编辑器一致）关闭当前标签。
         AddAccelerator(VirtualKey.F4, VirtualKeyModifiers.Control, CloseActiveTab);
+        AddAccelerator(VirtualKey.W, VirtualKeyModifiers.Control, CloseActiveTab);
         AddAccelerator(VirtualKey.F, VirtualKeyModifiers.Control, () => _editor.ActiveEditor?.ShowFindBar());
         AddAccelerator(VirtualKey.R, VirtualKeyModifiers.Control, () => _editor.ActiveEditor?.ShowFindBar(replace: true));
         AddAccelerator(VirtualKey.F3, VirtualKeyModifiers.None, () => _editor.ActiveEditor?.FindNext());

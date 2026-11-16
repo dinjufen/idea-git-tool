@@ -176,6 +176,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsWindowController.shared.show()
     }
 
+    /// ⌘W 在项目窗会先命中 `ProjectWindowController.closeEditorTab`，关闭当前编辑器标签。
+    /// 设置、欢迎、合并等其他可关闭窗口成为主窗口时，响应链落到这里：关闭该窗口，而不是后台项目里的标签。
+    /// 若关键窗口仍是项目窗（不应发生），此处故意空操作，避免误关整个项目。
+    @objc func closeEditorTab(_ sender: Any?) {
+        guard let window = NSApp.keyWindow,
+              window.styleMask.contains(.closable),
+              !(window.windowController is ProjectWindowController) else { return }
+        window.performClose(sender)
+    }
+
     // MARK: - 编辑器字体
 
     @objc func showEditorFontPanel(_ sender: Any?) {

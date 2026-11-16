@@ -33,6 +33,9 @@ public sealed class SettingsWindow : Window
     private readonly List<Func<FrameworkElement>> _builders = [];
     private Action? _commit;
 
+    /// 本次进程内成功探测到的 CLI，再次打开设置时直接显示。
+    private static List<DetectedAiCli>? _cachedDetectedClis;
+
     private SettingsWindow()
     {
         Title = L10n.Tr("settings.title");
@@ -470,9 +473,13 @@ public sealed class SettingsWindow : Window
             if (!cli) LoadProvider();
         }
 
-        void RefreshClis()
+        var detectGeneration = 0;
+        var resolveGeneration = 0;
+
+        void ApplyDetectedClis(List<DetectedAiCli> clis)
         {
-            detectedClis = [.. CoreApi.DetectAiClis()];
+            loading = true;
+            detectedClis = clis;
             if (detectedClis.Count == 0)
             {
                 cliBox.ItemsSource = new[] { L10n.Tr("ai.settings.cli.none") };
@@ -491,24 +498,60 @@ public sealed class SettingsWindow : Window
                 }
                 cliBox.SelectedIndex = index;
             }
+            loading = false;
             UpdateCliStatus();
+        }
+
+        void RefreshClis(bool force = true)
+        {
+            if (!force && _cachedDetectedClis is { } cached)
+            {
+                ApplyDetectedClis(cached);
+                return;
+            }
+            var generation = ++detectGeneration;
+            cliRefresh.IsEnabled = false;
+            if (detectedClis.Count == 0)
+            {
+                loading = true;
+                cliBox.ItemsSource = new[] { L10n.Tr("ai.settings.cli.detecting") };
+                cliBox.SelectedIndex = 0;
+                cliBox.IsEnabled = false;
+                cliStatus.Text = "";
+                loading = false;
+            }
+            Task.Run(CoreApi.DetectAiClis).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
+            {
+                if (generation != detectGeneration) return;
+                cliRefresh.IsEnabled = true;
+                if (task.Exception is not null) return;
+                var clis = task.Result.ToList();
+                _cachedDetectedClis = clis;
+                ApplyDetectedClis(clis);
+            }), TaskScheduler.Default);
         }
 
         void UpdateCliStatus()
         {
-            try
+            var generation = ++resolveGeneration;
+            var executable = cliPath.Text ?? "";
+            var id = AISettings.CliId;
+            Task.Run(() => CoreApi.ResolveAiCli(id, executable)).ContinueWith(task => DispatcherQueue.TryEnqueue(() =>
             {
-                var cli = CoreApi.ResolveAiCli(AISettings.CliId, cliPath.Text ?? "");
+                if (generation != resolveGeneration) return;
+                if (task.Exception?.InnerException is { } error)
+                {
+                    cliStatus.Text = L10n.Message(error);
+                    ToolTipService.SetToolTip(cliStatus, cliStatus.Text);
+                    Themed.Foreground(cliStatus, "StatusConflictBrush");
+                    return;
+                }
+                if (task.Exception is not null) return;
+                var cli = task.Result;
                 cliStatus.Text = L10n.Tr("ai.settings.cli.found", cli.DisplayName, cli.Path);
                 ToolTipService.SetToolTip(cliStatus, cli.Path);
                 Themed.Foreground(cliStatus, "StatusAddedBrush");
-            }
-            catch (Exception error)
-            {
-                cliStatus.Text = L10n.Message(error);
-                ToolTipService.SetToolTip(cliStatus, cliStatus.Text);
-                Themed.Foreground(cliStatus, "StatusConflictBrush");
-            }
+            }), TaskScheduler.Default);
         }
 
         // 输入框尚未结束编辑时（例如直接点击 “测试连接”）也写入设置。
@@ -580,7 +623,7 @@ public sealed class SettingsWindow : Window
             if (loading) return;
             AISettings.ReviewUsesCli = backend.SelectedIndex == 1;
             ApplyBackendVisibility();
-            if (AISettings.ReviewUsesCli) RefreshClis();
+            if (AISettings.ReviewUsesCli) RefreshClis(force: false);
         };
         cliBox.SelectionChanged += (_, _) =>
         {
@@ -724,16 +767,36 @@ public sealed class SettingsWindow : Window
         form.Add("ai.settings.patterns", patternsColumn);
         form.Hint(L10n.Tr("ai.settings.rules.hint"));
         LoadProvider();
-        RefreshClis();
         ApplyBackendVisibility();
+        RefreshClis(force: false);
         return form;
     }
 
     private static void SetRowVisible(Grid grid, int row, bool visible)
     {
+        if (row < 0 || row >= grid.RowDefinitions.Count) return;
+        var def = grid.RowDefinitions[row];
+        // MaxHeight is Infinity for a visible Auto row, 0 when collapsed.
+        var currentlyVisible = def.MaxHeight > 0;
         foreach (var child in grid.Children.OfType<FrameworkElement>().Where(c => Grid.GetRow(c) == row))
         {
             child.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        }
+        def.MinHeight = 0;
+        def.Height = visible ? GridLength.Auto : new GridLength(0);
+        def.MaxHeight = visible ? double.PositiveInfinity : 0;
+        // WinUI still inserts RowSpacing around zero-height rows, which would
+        // leave a hole when toggling the HTTP / CLI sections. Cancel one interval.
+        if (visible != currentlyVisible)
+        {
+            var child = grid.Children.OfType<FrameworkElement>().FirstOrDefault(c => Grid.GetRow(c) == row && Grid.GetColumn(c) == 1)
+                ?? grid.Children.OfType<FrameworkElement>().FirstOrDefault(c => Grid.GetRow(c) == row);
+            if (child is not null)
+            {
+                var margin = child.Margin;
+                var delta = visible ? grid.RowSpacing : -grid.RowSpacing;
+                child.Margin = new Thickness(margin.Left, margin.Top, margin.Right, margin.Bottom + delta);
+            }
         }
     }
 }
