@@ -31,6 +31,13 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
     private var httpRows: [NSGridRow] = []
     private var cliRows: [NSGridRow] = []
     private var detectedClis: [DetectedAiCli] = []
+    private var detectTask: Task<Void, Never>?
+    private var resolveTask: Task<Void, Never>?
+    private var detectGeneration: UInt64 = 0
+    private var resolveGeneration: UInt64 = 0
+
+    /// 本次进程内成功探测到的 CLI，再次打开设置时直接显示，避免再等一轮探测。
+    private static var cachedDetectedClis: [DetectedAiCli]?
 
     private var provider: AISettings.Provider {
         AISettings.Provider.allCases[max(0, providerPopup.indexOfSelectedItem)]
@@ -59,6 +66,8 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
         super.viewWillDisappear()
         commitFields()
         savePatterns()
+        detectTask?.cancel()
+        resolveTask?.cancel()
     }
 
     // MARK: - 布局
@@ -338,7 +347,7 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
         commitFields()
         AISettings.reviewUsesCli = backendPopup.indexOfSelectedItem == 1
         applyBackendVisibility()
-        if AISettings.reviewUsesCli { refreshClis() }
+        if AISettings.reviewUsesCli { startCliDetection(force: false) }
     }
 
     @objc private func cliChanged() {
@@ -350,7 +359,44 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
     }
 
     @objc private func refreshClis() {
-        detectedClis = detectAiClis()
+        startCliDetection(force: true)
+    }
+
+    /// 探测必须离开主线程。`force` 为 false 时先用进程缓存，打开设置或切到 CLI 都不会卡住。
+    private func startCliDetection(force: Bool) {
+        if !force, let cached = Self.cachedDetectedClis {
+            applyDetectedClis(cached)
+            return
+        }
+        detectGeneration += 1
+        let generation = detectGeneration
+        cliRefreshButton.isEnabled = false
+        if detectedClis.isEmpty {
+            showDetectingPlaceholder()
+        }
+        detectTask?.cancel()
+        detectTask = Task.detached { [weak self] in
+            let clis = detectAiClis()
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self, generation == self.detectGeneration else { return }
+                Self.cachedDetectedClis = clis
+                self.cliRefreshButton.isEnabled = true
+                self.applyDetectedClis(clis)
+            }
+        }
+    }
+
+    private func showDetectingPlaceholder() {
+        cliPopup.removeAllItems()
+        cliPopup.addItem(withTitle: tr("ai.settings.cli.detecting"))
+        cliPopup.isEnabled = false
+        cliStatus.stringValue = ""
+        cliStatus.toolTip = nil
+    }
+
+    private func applyDetectedClis(_ clis: [DetectedAiCli]) {
+        detectedClis = clis
         cliPopup.removeAllItems()
         if detectedClis.isEmpty {
             cliPopup.addItem(withTitle: tr("ai.settings.cli.none"))
@@ -371,6 +417,7 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
             }
         }
         updateCliStatus()
+        refitPane()
     }
 
     @objc private func writePermissionChanged() {
@@ -380,7 +427,7 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
     private func loadCliSettings() {
         cliPathField.stringValue = AISettings.cliExecutable
         writeCheckbox.state = AISettings.cliWritePermission ? .on : .off
-        refreshClis()
+        startCliDetection(force: false)
     }
 
     private func applyBackendVisibility() {
@@ -409,18 +456,29 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
     }
 
     private func updateCliStatus() {
+        resolveGeneration += 1
+        let generation = resolveGeneration
         let executable = cliPathField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        do {
-            let cli = try resolveAiCli(id: AISettings.cliId, executable: executable)
-            cliStatus.stringValue = tr("ai.settings.cli.found", cli.displayName, cli.path)
-            cliStatus.textColor = LineStatusColors.added
-            cliStatus.toolTip = cli.path
-        } catch {
-            cliStatus.stringValue = errorMessage(error)
-            cliStatus.textColor = Theme.FileStatus.conflict
-            cliStatus.toolTip = cliStatus.stringValue
+        let id = AISettings.cliId
+        resolveTask?.cancel()
+        resolveTask = Task.detached { [weak self] in
+            let result = Result { try resolveAiCli(id: id, executable: executable) }
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self, generation == self.resolveGeneration else { return }
+                switch result {
+                case let .success(cli):
+                    self.cliStatus.stringValue = tr("ai.settings.cli.found", cli.displayName, cli.path)
+                    self.cliStatus.textColor = LineStatusColors.added
+                    self.cliStatus.toolTip = cli.path
+                case let .failure(error):
+                    self.cliStatus.stringValue = errorMessage(error)
+                    self.cliStatus.textColor = Theme.FileStatus.conflict
+                    self.cliStatus.toolTip = self.cliStatus.stringValue
+                }
+                self.refitPane()
+            }
         }
-        refitPane()
     }
 
     @objc private func languageChanged() {

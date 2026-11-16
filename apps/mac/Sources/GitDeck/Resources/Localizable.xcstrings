@@ -1089,6 +1089,23 @@
         }
       }
     },
+    "ai.settings.cli.detecting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detecting CLIs…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在检测本机 CLI…"
+          }
+        }
+      }
+    },
     "ai.settings.cli.found": {
       "extractionState": "manual",
       "localizations": {
