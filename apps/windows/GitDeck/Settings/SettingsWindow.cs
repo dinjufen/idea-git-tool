@@ -731,9 +731,29 @@ public sealed class SettingsWindow : Window
 
     private static void SetRowVisible(Grid grid, int row, bool visible)
     {
+        if (row < 0 || row >= grid.RowDefinitions.Count) return;
+        var def = grid.RowDefinitions[row];
+        // MaxHeight is Infinity for a visible Auto row, 0 when collapsed.
+        var currentlyVisible = def.MaxHeight > 0;
         foreach (var child in grid.Children.OfType<FrameworkElement>().Where(c => Grid.GetRow(c) == row))
         {
             child.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        }
+        def.MinHeight = 0;
+        def.Height = visible ? GridLength.Auto : new GridLength(0);
+        def.MaxHeight = visible ? double.PositiveInfinity : 0;
+        // WinUI still inserts RowSpacing around zero-height rows, which would
+        // leave a hole when toggling the HTTP / CLI sections. Cancel one interval.
+        if (visible != currentlyVisible)
+        {
+            var child = grid.Children.OfType<FrameworkElement>().FirstOrDefault(c => Grid.GetRow(c) == row && Grid.GetColumn(c) == 1)
+                ?? grid.Children.OfType<FrameworkElement>().FirstOrDefault(c => Grid.GetRow(c) == row);
+            if (child is not null)
+            {
+                var margin = child.Margin;
+                var delta = visible ? grid.RowSpacing : -grid.RowSpacing;
+                child.Margin = new Thickness(margin.Left, margin.Top, margin.Right, margin.Bottom + delta);
+            }
         }
     }
 }

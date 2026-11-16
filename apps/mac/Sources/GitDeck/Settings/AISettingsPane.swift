@@ -47,7 +47,7 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
     override func loadView() {
         view = NSView()
         buildLayout()
-        SettingsForm.fitPreferredSize(self)
+        applyBackendVisibility()
     }
 
     override func viewWillAppear() {
@@ -215,11 +215,16 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
 
         grid.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(grid)
+        // Bottom is optional: if the window is taller than the visible rows,
+        // leftover space stays below the form instead of stretching mid-grid gaps.
+        let bottom = grid.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -20)
+        bottom.priority = .defaultLow
         NSLayoutConstraint.activate([
             grid.topAnchor.constraint(equalTo: content.topAnchor, constant: 20),
             grid.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             grid.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
-            grid.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -20),
+            grid.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -20),
+            bottom,
         ])
     }
 
@@ -252,6 +257,7 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
         effortRow?.isHidden = provider != .anthropic
         toolsRow?.isHidden = provider != .openAICompatible
         testStatus.stringValue = ""
+        if !AISettings.reviewUsesCli { refitPane() }
     }
 
     private func applyKeyPresence(_ hasKey: Bool) {
@@ -385,6 +391,21 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
             effortRow?.isHidden = provider != .anthropic
             toolsRow?.isHidden = provider != .openAICompatible
         }
+        // Hidden rows collapse; size the pane from the grid so a currently
+        // tall window does not lock preferredContentSize to the old frame.
+        refitPane()
+    }
+
+    /// 按当前可见行的 grid 高度调整，避免 `view.fittingSize` 被窗口现有高度卡住。
+    private func refitPane() {
+        UIFonts.apply(to: view)
+        view.layoutSubtreeIfNeeded()
+        grid.layoutSubtreeIfNeeded()
+        let size = grid.fittingSize
+        preferredContentSize = NSSize(width: size.width + 40, height: size.height + 40)
+        if let window = view.window, window.isVisible {
+            window.setContentSize(preferredContentSize)
+        }
     }
 
     private func updateCliStatus() {
@@ -399,6 +420,7 @@ final class AISettingsPane: NSViewController, NSComboBoxDelegate, NSTextViewDele
             cliStatus.textColor = Theme.FileStatus.conflict
             cliStatus.toolTip = cliStatus.stringValue
         }
+        refitPane()
     }
 
     @objc private func languageChanged() {
