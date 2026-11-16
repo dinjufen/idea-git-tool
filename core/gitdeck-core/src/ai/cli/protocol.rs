@@ -14,7 +14,9 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Stdio};
+
+use super::command::command;
 
 use serde_json::{Value, json};
 
@@ -50,7 +52,7 @@ struct ProtocolConversation {
 impl ProtocolConversation {
     fn spawn(executable: &str, system: String, tools: Vec<ToolSpec>, cwd: &Path) -> Result<Self> {
         let write_permission = tools.iter().any(|t| t.name == "write_file");
-        let mut child = Command::new(executable)
+        let mut child = command(executable)
             .current_dir(cwd)
             .env("GITDECK_REVIEW_PROTOCOL", "1")
             .stdin(Stdio::piped())

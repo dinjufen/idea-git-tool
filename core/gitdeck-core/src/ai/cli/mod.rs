@@ -2,14 +2,19 @@
 //!
 //! GitDeck 负责执行工具（含敏感文件过滤）。`claude` 通过本进程内的 MCP 服务
 //! 暴露与 HTTP Agent 相同的工具；测试与通用适配则使用行分隔 JSON 协议。
+//! 其他已支持的 Agent CLI（Codex、Grok、Pi、Gemini、Copilot）走非交互
+//! print/exec 路径：把评审提示交给本机已登录的 CLI，再解析最终文本。
 //! 写入类工具单独门控，默认关闭。
 
+mod catalog;
 mod claude;
+mod command;
 mod mcp;
+mod print;
 mod protocol;
 
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -52,13 +57,24 @@ pub fn default_ai_cli_write_permission() -> bool {
 }
 
 /// 探测本机已安装、且 GitDeck 能用于评审的 CLI。
+///
+/// 各 CLI 并行探测，避免设置页把十几个候选串行跑完要等好几秒。
 #[uniffi::export]
 pub fn detect_ai_clis() -> Vec<DetectedAiCli> {
-    let mut found = Vec::new();
-    if let Some(cli) = detect_one(CLI_CLAUDE, "Claude Code") {
-        found.push(cli);
-    }
-    found
+    let specs: Vec<&catalog::CliSpec> = catalog::supported()
+        .iter()
+        .filter(|spec| spec.auto_detect)
+        .collect();
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = specs
+            .iter()
+            .map(|spec| scope.spawn(|| detect_one(spec.id, spec.display_name)))
+            .collect();
+        handles
+            .into_iter()
+            .filter_map(|handle| handle.join().ok().flatten())
+            .collect()
+    })
 }
 
 /// 解析用户选择的 CLI：优先使用指定路径，否则用探测结果。
@@ -135,11 +151,21 @@ fn run_cli_review(
         revision: prep.revision.clone(),
         write_permission: cli.write_permission,
     };
-    let system = review::system_prompt(options, true, cli.write_permission, prep.rules.as_deref());
+    let runner = catalog::find(&resolved.id).map(|spec| spec.runner);
+    let with_tools = matches!(
+        runner,
+        Some(catalog::RunnerKind::ClaudeMcp | catalog::RunnerKind::Protocol)
+    );
+    let system = review::system_prompt(
+        options,
+        with_tools,
+        cli.write_permission && with_tools,
+        prep.rules.as_deref(),
+    );
     let (max_turns, budget) = review::review_limits(options);
     let tools = tools::tool_specs(cli.write_permission);
-    match resolved.id.as_str() {
-        CLI_CLAUDE => claude::run(
+    match runner {
+        Some(catalog::RunnerKind::ClaudeMcp) => claude::run(
             &resolved,
             repo,
             &system,
@@ -152,7 +178,7 @@ fn run_cli_review(
             listener,
             prep.revision,
         ),
-        CLI_PROTOCOL => {
+        Some(catalog::RunnerKind::Protocol) => {
             let mut conversation =
                 protocol::conversation(&resolved.path, system, tools, repo, task)?;
             conversation.push_user_text(&prep.prompt);
@@ -167,8 +193,19 @@ fn run_cli_review(
                 prep.revision,
             )
         }
-        other => Err(CoreError::AiCliNotFound {
-            name: other.to_owned(),
+        Some(catalog::RunnerKind::Print) => print::run(
+            &resolved,
+            repo,
+            &system,
+            &prep.prompt,
+            context,
+            max_turns,
+            task,
+            listener,
+            prep.revision,
+        ),
+        None => Err(CoreError::AiCliNotFound {
+            name: resolved.id.clone(),
         }),
     }
 }
@@ -191,16 +228,24 @@ fn resolve_ai_cli_inner(id: &str, executable: &str) -> Result<DetectedAiCli> {
         } else {
             id.to_owned()
         };
-        return Ok(probe(&id, display_name(&id), &path));
+        let display = catalog::display_name(&id).to_owned();
+        return Ok(probe(&id, &display, &path));
     }
     if id.is_empty() || id == CLI_CLAUDE {
-        return detect_one(CLI_CLAUDE, "Claude Code").ok_or_else(|| CoreError::AiCliNotFound {
-            name: CLI_CLAUDE.into(),
+        return detect_one(CLI_CLAUDE, catalog::display_name(CLI_CLAUDE)).ok_or_else(|| {
+            CoreError::AiCliNotFound {
+                name: CLI_CLAUDE.into(),
+            }
         });
     }
-    if id == CLI_PROTOCOL {
-        return Err(CoreError::AiCliNotFound {
-            name: format!("{id} (set executable to a protocol CLI)"),
+    if let Some(spec) = catalog::find(id) {
+        if matches!(spec.runner, catalog::RunnerKind::Protocol) {
+            return Err(CoreError::AiCliNotFound {
+                name: format!("{} (set executable to a protocol CLI)", spec.id),
+            });
+        }
+        return detect_one(spec.id, spec.display_name).ok_or_else(|| CoreError::AiCliNotFound {
+            name: spec.id.into(),
         });
     }
     Err(CoreError::AiCliNotFound {
@@ -209,17 +254,76 @@ fn resolve_ai_cli_inner(id: &str, executable: &str) -> Result<DetectedAiCli> {
 }
 
 fn detect_one(id: &str, display: &str) -> Option<DetectedAiCli> {
-    candidates(id)
-        .into_iter()
-        .find_map(|path| is_runnable(&path).then(|| probe(id, display, &path)))
+    let spec = catalog::find(id);
+    candidates(id).into_iter().find_map(|path| {
+        if !is_runnable(&path) {
+            return None;
+        }
+        if !is_callable(spec, &path) {
+            return None;
+        }
+        Some(probe(id, display, &path))
+    })
 }
 
-fn display_name(id: &str) -> &str {
-    match id {
-        CLI_CLAUDE => "Claude Code",
-        CLI_PROTOCOL => "GitDeck CLI protocol",
-        other => other,
+/// 候选必须真正能跑起来：有指纹的要能打出帮助，没有指纹的至少要能成功打印版本或帮助。
+/// 包装脚本在 PATH 缺 node、或本机二进制缺失时会被跳过，继续找下一个路径。
+fn is_callable(spec: Option<&catalog::CliSpec>, path: &Path) -> bool {
+    if let Some(spec) = spec {
+        if !spec.fingerprint.is_empty() {
+            return fingerprint_matches(spec, path);
+        }
     }
+    probe_version(path).is_some() || help_text(path).is_some()
+}
+
+fn fingerprint_matches(spec: &catalog::CliSpec, path: &Path) -> bool {
+    if spec.fingerprint.is_empty() {
+        return true;
+    }
+    let Some(text) = help_text(path) else {
+        return false;
+    };
+    let lower = text.to_ascii_lowercase();
+    spec.fingerprint
+        .iter()
+        .any(|needle| lower.contains(&needle.to_ascii_lowercase()))
+}
+
+/// Settings 探测用的时限：卡住的包装脚本应尽快放弃，改试下一个候选。
+const HELP_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+
+fn help_text(path: &Path) -> Option<String> {
+    for arg in ["--help", "-h"] {
+        match run_with_status(path, &[arg], HELP_PROBE_TIMEOUT) {
+            Some((code, text)) => {
+                if looks_like_spawn_failure(&text) {
+                    continue;
+                }
+                if code == 0 || text_looks_like_help(&text) {
+                    return Some(text);
+                }
+            }
+            // 超时或无法启动时不再试下一个参数，避免探测被拉长。
+            None => return None,
+        }
+    }
+    None
+}
+
+fn text_looks_like_help(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("usage") || lower.contains("options") || lower.contains("commands")
+}
+
+fn looks_like_spawn_failure(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("no such file or directory")
+        || lower.contains("enoent")
+        || lower.contains("is not recognized as")
+        || lower.contains("the system cannot find")
+        || lower.contains("command not found")
 }
 
 fn candidates(id: &str) -> Vec<PathBuf> {
@@ -259,6 +363,13 @@ fn well_known_paths(id: &str) -> Vec<PathBuf> {
                 .join(id)
                 .join(format!("{id}.exe")),
         );
+        if let Some(spec) = catalog::find(id) {
+            for dir in (spec.extra_bin_dirs)(&home) {
+                paths.push(dir.join(id));
+                paths.push(dir.join(format!("{id}.exe")));
+                paths.push(dir.join(format!("{id}.cmd")));
+            }
+        }
     }
     // 访达 / 程序坞启动时 PATH 往往没有 nvm。NVM_BIN 是当前选中的 Node bin。
     if let Some(bin) = std::env::var_os("NVM_BIN") {
@@ -280,11 +391,9 @@ fn well_known_paths(id: &str) -> Vec<PathBuf> {
         nvm_roots.push(home.join("AppData/Roaming/nvm"));
     }
     paths.extend(nvm_install_paths(&nvm_roots, id));
-    if id == CLI_CLAUDE {
-        paths.push(PathBuf::from("/opt/homebrew/bin/claude"));
-        paths.push(PathBuf::from("/usr/local/bin/claude"));
-        paths.push(PathBuf::from("/usr/bin/claude"));
-    }
+    paths.push(PathBuf::from("/opt/homebrew/bin").join(id));
+    paths.push(PathBuf::from("/usr/local/bin").join(id));
+    paths.push(PathBuf::from("/usr/bin").join(id));
     paths
 }
 
@@ -389,25 +498,40 @@ fn probe(id: &str, display: &str, path: &Path) -> DetectedAiCli {
         id: id.to_owned(),
         display_name: display.to_owned(),
         path: path.to_string_lossy().into_owned(),
-        version: probe_version(path),
+        version: if should_probe_version(id) {
+            probe_version(path)
+        } else {
+            None
+        },
     }
 }
 
+fn should_probe_version(id: &str) -> bool {
+    // Hermes 的 `--version` / `-v` 会触发运行时依赖安装（甚至 git fetch），不能在探测时调用。
+    id != "hermes"
+}
+
 fn probe_version(path: &Path) -> Option<String> {
-    for arg in ["-v", "--version"] {
-        if let Some(text) = run_with_timeout(path, &[arg], Duration::from_secs(3)) {
-            let line = text.lines().find(|l| !l.trim().is_empty())?.trim();
-            if line.is_empty() {
-                continue;
-            }
-            return Some(line.to_owned());
+    // 先试 `--version`：部分 CLI（如 Codex 官方二进制）把 `-v` 当成非法参数。
+    for arg in ["--version", "-v"] {
+        let Some((code, text)) = run_with_status(path, &[arg], VERSION_PROBE_TIMEOUT) else {
+            // 超时则不再试下一个参数，避免 Settings 探测被卡住。
+            return None;
+        };
+        if code != 0 || looks_like_spawn_failure(&text) {
+            continue;
         }
+        let line = text.lines().find(|l| !l.trim().is_empty())?.trim();
+        if line.is_empty() || looks_like_spawn_failure(line) {
+            continue;
+        }
+        return Some(line.to_owned());
     }
     None
 }
 
-fn run_with_timeout(path: &Path, args: &[&str], timeout: Duration) -> Option<String> {
-    let mut child = Command::new(path)
+fn run_with_status(path: &Path, args: &[&str], timeout: Duration) -> Option<(i32, String)> {
+    let mut child = command::command(path)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -422,7 +546,7 @@ fn run_with_timeout(path: &Path, args: &[&str], timeout: Duration) -> Option<Str
             if text.trim().is_empty() {
                 text = String::from_utf8_lossy(&out.stderr).into_owned();
             }
-            Some(text)
+            Some((out.status.code().unwrap_or(-1), text))
         }
         _ => None,
     }
@@ -537,4 +661,191 @@ mod tests {
         assert!(paths.contains(&v24.join("claude.cmd")));
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn pi_fingerprint_rejects_unrelated_binaries() {
+        let dir = std::env::temp_dir().join(format!(
+            "gitdeck-pi-fp-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let other = dir.join("pi");
+        std::fs::write(
+            &other,
+            "#!/bin/sh\nif [ \"$1\" = \"--help\" ]; then echo \"the pi package installer\"; exit 0; fi\nexit 1\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&other, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let spec = catalog::find("pi").unwrap();
+        assert!(!fingerprint_matches(spec, &other));
+
+        let agent = dir.join("pi-agent");
+        std::fs::write(
+            &agent,
+            "#!/bin/sh\nif [ \"$1\" = \"--help\" ]; then echo \"pi - AI coding assistant with read, bash, edit, write tools\"; exit 0; fi\necho 1.1.0\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(fingerprint_matches(spec, &agent));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+        old: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let old = std::env::var_os(key);
+            unsafe { std::env::set_var(key, value.as_ref()) };
+            Self { key, old }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let old = std::env::var_os(key);
+            unsafe { std::env::remove_var(key) };
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.old {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    fn unique_testdir(prefix: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "{prefix}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[cfg(unix)]
+    fn write_exec(path: &Path, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, body).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_failure_is_not_treated_as_a_version() {
+        let dir = unique_testdir("gitdeck-cli-broken");
+        let broken = dir.join("codex");
+        write_exec(
+            &broken,
+            "#!/bin/sh\necho 'Error: spawn /missing/codex ENOENT' >&2\nexit 1\n",
+        );
+        assert!(probe_version(&broken).is_none());
+        assert!(!is_callable(catalog::find("codex"), &broken));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn detect_skips_broken_path_and_falls_through_to_working_cli() {
+        let root = unique_testdir("gitdeck-cli-fallback");
+        let broken = root.join("broken/codex");
+        write_exec(
+            &broken,
+            "#!/bin/sh\necho 'env: node: No such file or directory' >&2\nexit 127\n",
+        );
+        let working = root.join("working/codex");
+        write_exec(
+            &working,
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'codex-cli 0.133.0'; exit 0; fi\necho unexpected >&2\nexit 1\n",
+        );
+        // 直接断言可调用性：损坏包装会被拒绝，可用二进制会被接受。
+        assert!(!is_callable(catalog::find("codex"), &broken));
+        assert!(is_callable(catalog::find("codex"), &working));
+        assert_eq!(
+            probe_version(&working).as_deref(),
+            Some("codex-cli 0.133.0")
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn detect_skips_wrong_pi_and_finds_managed_install() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let root = unique_testdir("gitdeck-cli-pi-home");
+        let wrong = root.join("wrong/pi");
+        write_exec(
+            &wrong,
+            "#!/bin/sh\nif [ \"$1\" = \"--help\" ] || [ \"$1\" = \"-h\" ]; then echo 'the pi package installer'; exit 0; fi\nexit 1\n",
+        );
+        let real = root.join(".local/bin/pi");
+        // 真实 Pi 是 env node 包装；本测试把 node 只放在 HOME/.nvm 下，模拟 GUI 最小 PATH。
+        write_exec(&real, "#!/bin/sh\nexec node \"$@\"\n");
+        let node = root.join(".nvm/versions/node/v24.14.0/bin/node");
+        write_exec(
+            &node,
+            "#!/bin/sh\nif [ \"$1\" = \"--help\" ] || [ \"$1\" = \"-h\" ]; then echo 'pi - AI coding assistant with read, bash, edit, write tools'; echo '  --system-prompt'; exit 0; fi\nif [ \"$1\" = \"--version\" ] || [ \"$1\" = \"-v\" ]; then echo 1.1.0; exit 0; fi\nexit 1\n",
+        );
+
+        // GUI 启动常见的最小 PATH：错误的 `pi` 在最前，系统目录没有 node。
+        let _home = EnvGuard::set("HOME", &root);
+        let _nvm_bin = EnvGuard::remove("NVM_BIN");
+        let _nvm_dir = EnvGuard::remove("NVM_DIR");
+        let _path = EnvGuard::set(
+            "PATH",
+            format!("{}:/usr/bin:/bin", root.join("wrong").display()),
+        );
+
+        let found = detect_one("pi", "Pi").expect("real Pi should be detected via well-known path");
+        assert!(
+            found.path.ends_with(".local/bin/pi") || found.path.contains(".local/bin/pi"),
+            "path was {}",
+            found.path
+        );
+        assert!(fingerprint_matches(
+            catalog::find("pi").unwrap(),
+            Path::new(&found.path)
+        ));
+        assert!(!fingerprint_matches(catalog::find("pi").unwrap(), &wrong));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hanging_help_is_abandoned_quickly() {
+        let dir = unique_testdir("gitdeck-cli-hang");
+        let hung = dir.join("hang");
+        write_exec(&hung, "#!/bin/sh\nsleep 30\n");
+        let start = Instant::now();
+        assert!(help_text(&hung).is_none());
+        assert!(
+            start.elapsed() < Duration::from_secs(6),
+            "hung help probe took {:?}",
+            start.elapsed()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 }

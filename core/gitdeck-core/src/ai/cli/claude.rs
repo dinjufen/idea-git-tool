@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -15,6 +15,7 @@ use super::super::review::{
     ReviewEvent, ReviewFinding, ReviewListener, ReviewResult, extract_json, parse_submission_input,
 };
 use super::super::tools::ToolContext;
+use super::command::{TempDirCleanup, command, unique_tempdir};
 use super::{DetectedAiCli, mcp};
 use crate::error::{CoreError, Result};
 use crate::repo::Repository;
@@ -71,19 +72,13 @@ pub fn run(
     revision: Option<String>,
 ) -> Result<ReviewResult> {
     let tmp = unique_tempdir()?;
+    let _cleanup = TempDirCleanup(tmp.clone());
     let system_path = tmp.join("system.txt");
     let mcp_path = tmp.join("mcp.json");
     let prompt_path = tmp.join("prompt.txt");
     fs::write(&system_path, system)?;
     fs::write(&prompt_path, prompt)?;
     let _prompt_path = prompt_path;
-    struct Cleanup(std::path::PathBuf);
-    impl Drop for Cleanup {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-    let _cleanup = Cleanup(tmp.clone());
 
     let (tcp, port, token) = mcp::bind()?;
     let mcp_json = mcp::mcp_config(port, &token);
@@ -119,7 +114,7 @@ pub fn run(
             );
         });
 
-        let mut child = Command::new(&resolved.path)
+        let mut child = command(&resolved.path)
             .args(&args)
             .current_dir(&repo.root)
             .stdin(Stdio::piped())
@@ -270,19 +265,6 @@ pub fn run(
             incomplete: true,
         })
     })
-}
-
-fn unique_tempdir() -> Result<std::path::PathBuf> {
-    let dir = std::env::temp_dir().join(format!(
-        "gitdeck-cli-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    ));
-    fs::create_dir_all(&dir)?;
-    Ok(dir)
 }
 
 fn wait_brief(child: &mut std::process::Child, timeout: Duration) -> bool {

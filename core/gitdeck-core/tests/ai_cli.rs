@@ -274,3 +274,123 @@ fn protocol_cli_review_writes_only_when_permission_enabled_and_still_blocks_secr
     );
     assert_eq!(result.summary, "Reviewed with tools.");
 }
+
+fn codex_mock(argfile: &std::path::Path) -> String {
+    format!(
+        r#"#!/bin/sh
+if [ "$1" = "-v" ] || [ "$1" = "--version" ]; then
+  echo "codex-cli 0.60.0"
+  exit 0
+fi
+printf '%s' "$@" > '{args}'
+cat >/dev/null
+echo '{{"summary":"Reviewed via Codex.","findings":[{{"file":"src/app.rs","line":1,"end_line":1,"severity":"warning","title":"unfinished work","explanation":"There is a TODO in the change."}}]}}'
+"#,
+        args = argfile.display()
+    )
+}
+
+#[cfg(unix)]
+#[test]
+fn resolve_known_print_cli_uses_catalog_display_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_executable(
+        dir.path(),
+        "codex",
+        &codex_mock(&dir.path().join("args.txt")),
+    );
+    let cli = resolve_ai_cli("codex".into(), path.to_string_lossy().into_owned()).unwrap();
+    assert_eq!(cli.id, "codex");
+    assert_eq!(cli.display_name, "Codex");
+    assert!(
+        cli.version
+            .as_deref()
+            .unwrap_or_default()
+            .contains("0.60.0"),
+        "version was {:?}",
+        cli.version
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn print_cli_review_parses_json_from_codex_exec() {
+    let repo_dir = tempfile::tempdir().unwrap();
+    setup_review_repo(repo_dir.path());
+    let bin = tempfile::tempdir().unwrap();
+    let argfile = bin.path().join("args.txt");
+    let cli_path = write_executable(bin.path(), "codex", &codex_mock(&argfile));
+    let events = run_cli_review(
+        repo_dir.path(),
+        AiCliConfig {
+            id: "codex".into(),
+            executable: cli_path.to_string_lossy().into_owned(),
+            write_permission: default_ai_cli_write_permission(),
+        },
+    );
+    let result = finished(&events);
+    assert!(!result.incomplete);
+    assert_eq!(result.summary, "Reviewed via Codex.");
+    assert_eq!(result.findings.len(), 1);
+    assert_eq!(result.findings[0].file, "src/app.rs");
+    let args = fs::read_to_string(&argfile).unwrap_or_default();
+    assert!(args.contains("exec"), "args were {args:?}");
+    assert!(args.contains("--ephemeral"), "args were {args:?}");
+    assert!(
+        !args.contains("workspace-write"),
+        "read-only review should not enable workspace-write, args were {args:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn print_cli_review_uses_workspace_write_when_enabled() {
+    let repo_dir = tempfile::tempdir().unwrap();
+    setup_review_repo(repo_dir.path());
+    let bin = tempfile::tempdir().unwrap();
+    let argfile = bin.path().join("args.txt");
+    let cli_path = write_executable(bin.path(), "codex", &codex_mock(&argfile));
+    let events = run_cli_review(
+        repo_dir.path(),
+        AiCliConfig {
+            id: "codex".into(),
+            executable: cli_path.to_string_lossy().into_owned(),
+            write_permission: true,
+        },
+    );
+    let _ = finished(&events);
+    let args = fs::read_to_string(&argfile).unwrap_or_default();
+    assert!(
+        args.contains("workspace-write"),
+        "write permission should pass --sandbox workspace-write, args were {args:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn print_cli_review_surfaces_nonzero_exit_as_failure() {
+    let repo_dir = tempfile::tempdir().unwrap();
+    setup_review_repo(repo_dir.path());
+    let bin = tempfile::tempdir().unwrap();
+    let cli_path = write_executable(
+        bin.path(),
+        "codex",
+        r#"#!/bin/sh
+echo "not logged in" >&2
+exit 1
+"#,
+    );
+    let events = run_cli_review(
+        repo_dir.path(),
+        AiCliConfig {
+            id: "codex".into(),
+            executable: cli_path.to_string_lossy().into_owned(),
+            write_permission: false,
+        },
+    );
+    let failed = events.iter().any(|event| match event {
+        ReviewEvent::Failed { error } => format!("{error}").contains("not logged in"),
+        _ => false,
+    });
+    assert!(failed, "expected login error, events: {events:?}");
+}
