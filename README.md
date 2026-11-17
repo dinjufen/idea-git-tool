@@ -16,8 +16,6 @@
 
 **macOS（Apple 芯片，macOS 15+）**：从 [Releases](https://github.com/dinjufen/idea-git-tool/releases/latest) 下载 `GitDeck-<版本>-macos-arm64.zip`，解压后把 GitDeck 拖到“应用程序”。应用暂未签名和公证，首次打开请右键选择“打开”。
 
-**macOS**（Apple Silicon，macOS 15+）：暂未提供安装包，需从源码构建，见下文。
-
 ## 功能
 
 | 类别 | 内容 |
@@ -28,8 +26,8 @@
 | 分支与同步 | Branches 弹窗（检出、新建、删除、重命名、合并、变基、比较）、Fetch、Pull、Update Project、Push |
 | 冲突解决 | Conflicts 对话框 + 三栏合并（应用不冲突的更改、逐块接受、撤销） |
 | 高级操作 | 交互式 Rebase、Cherry-pick、Revert、Reset、Undo Commit、Stash、Shelve、Tags、Remotes、Worktrees、Submodules、Patch、Git Console |
-| 编辑器 | tree-sitter 语法高亮、查找替换、变更标记；界面字体与编辑器字体分别设置 |
-| AI | 评审本地更改 / 已有提交 / 分支差异，AI 生成提交信息；支持 Anthropic 与 OpenAI 兼容接口（含本地 Ollama / LM Studio），只读 Agent，默认排除敏感文件 |
+| 编辑器 | tree-sitter 语法高亮、查找替换、变更标记、VS Code 风格缩略图（普通编辑器）与对比概览条（Diff / 合并）；界面字体与编辑器字体分别设置 |
+| AI | 评审本地更改 / 已有提交 / 分支差异，AI 生成提交信息；支持 Anthropic 与 OpenAI 兼容接口（含本地 Ollama / LM Studio），也可将本机已安装且可调用的 Agent CLI（Claude Code、Codex、Grok、Pi、Gemini CLI、GitHub Copilot、Oh My Pi、Antigravity、Hermes、Cursor Agent、Kiro、Qwen Code）作为评审后端（需先登录）；设置中可查询模型列表并自动填充默认 max tokens；只读 Agent，默认排除敏感文件 |
 | 其他 | 简体中文 / 英文界面（术语对齐 IDEA 官方中文语言包）、浅色 / 深色主题 |
 
 ## 截图

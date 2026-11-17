@@ -16,8 +16,6 @@ A cross-platform native Git client modeled on the Git tooling in JetBrains IDEA.
 
 **macOS (Apple silicon, macOS 15+)**: download `GitDeck-<version>-macos-arm64.zip` from [Releases](https://github.com/dinjufen/idea-git-tool/releases/latest), unzip it and move GitDeck to Applications. The app is not signed or notarized yet; the first time, right-click it and choose "Open".
 
-**macOS** (Apple Silicon, macOS 15+): no installer yet; build from source as described below.
-
 ## Features
 
 | Area | What's included |
@@ -28,8 +26,8 @@ A cross-platform native Git client modeled on the Git tooling in JetBrains IDEA.
 | Branches and sync | Branches popup (checkout, new, delete, rename, merge, rebase, compare), fetch, pull, Update Project, push |
 | Conflicts | Conflicts dialog and three-way merge (apply non-conflicting changes, accept per hunk, undo) |
 | Advanced | Interactive rebase, cherry-pick, revert, reset, undo commit, stash, shelve, tags, remotes, worktrees, submodules, patches, Git console |
-| Editor | tree-sitter syntax highlighting, find and replace, change markers; UI font and editor font are set separately |
-| AI | Review local changes, existing commits or branch differences, and generate commit messages; Anthropic and OpenAI-compatible APIs (including local Ollama / LM Studio), read-only agent, sensitive files excluded by default |
+| Editor | tree-sitter syntax highlighting, find and replace, change markers, VS Code-style minimap (ordinary editors) and a color overview ruler (diff / merge); UI font and editor font are set separately |
+| AI | Review local changes, existing commits or branch differences, and generate commit messages; Anthropic and OpenAI-compatible APIs (including local Ollama / LM Studio), or a locally installed, invocable Agent CLI (Claude Code, Codex, Grok, Pi, Gemini CLI, GitHub Copilot, Oh My Pi, Antigravity, Hermes, Cursor Agent, Kiro, Qwen Code) after you have signed in to that CLI; Settings can list models and autofill the default max tokens; read-only agent, sensitive files excluded by default |
 | Other | English and Simplified Chinese UI (Chinese terms follow IDEA's official language pack), light and dark themes |
 
 ## Screenshots
